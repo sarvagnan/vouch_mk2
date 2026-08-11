@@ -1,0 +1,117 @@
+"""The closed command union. Every mutation enters through exactly one of these.
+
+Each unit-lifecycle command carries the IR command label it is decided under
+(``ir_command``); ``decide`` looks the (status, label) pair up in the mk2 IR unit
+machine, so legality lives in the tables, not in code.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import ClassVar
+
+from vouch_mk2.core.model import DeviationType, UnitRef
+from vouch_mk2.ir import mk2
+
+
+@dataclass(frozen=True, slots=True)
+class SpecifyUnit:
+    """Create a new unit in status ``specified``. Not a transition: there is no
+    prior state, so its label has no IR edge."""
+
+    ir_command: ClassVar[str] = mk2.CMD_SPECIFY
+    name: str
+    version: str
+    depends_on: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class FreezeAcceptance:
+    ir_command: ClassVar[str] = mk2.CMD_FREEZE
+    name: str
+    pack_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class MarkReady:
+    ir_command: ClassVar[str] = mk2.CMD_MARK_READY
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class StartWork:
+    ir_command: ClassVar[str] = mk2.CMD_START
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class MarkDone:
+    ir_command: ClassVar[str] = mk2.CMD_MARK_DONE
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class Publish:
+    ir_command: ClassVar[str] = mk2.CMD_PUBLISH
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class Supersede:
+    ir_command: ClassVar[str] = mk2.CMD_SUPERSEDE
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class Respecify:
+    ir_command: ClassVar[str] = mk2.CMD_RESPECIFY
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class BeginReverify:
+    ir_command: ClassVar[str] = mk2.CMD_BEGIN_REVERIFY
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class OpenDeviation:
+    ir_command: ClassVar[str] = mk2.CMD_OPEN_DEVIATION
+    deviation_id: str
+    deviation_type: DeviationType
+    unit: UnitRef
+
+
+@dataclass(frozen=True, slots=True)
+class AmendDeviation:
+    ir_command: ClassVar[str] = mk2.CMD_ADJUDICATE_AMEND
+    deviation_id: str
+    amendment_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class RejectDeviation:
+    ir_command: ClassVar[str] = mk2.CMD_ADJUDICATE_REJECT
+    deviation_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class CloseDeviation:
+    ir_command: ClassVar[str] = mk2.CMD_CLOSE_DEVIATION
+    deviation_id: str
+
+
+type UnitTransitionCommand = (
+    FreezeAcceptance
+    | MarkReady
+    | StartWork
+    | MarkDone
+    | Publish
+    | Supersede
+    | Respecify
+    | BeginReverify
+)
+
+type DeviationCommand = AmendDeviation | RejectDeviation | CloseDeviation
+
+type Command = SpecifyUnit | UnitTransitionCommand | OpenDeviation | DeviationCommand

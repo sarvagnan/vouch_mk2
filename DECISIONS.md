@@ -46,3 +46,57 @@ new entry, never an edit.
   code-organization decision. Upholds the 0.6 single-file-vendoring precedent
   (0.6 `DECISIONS.md`, "CLI packaging and project-local execution") while reversing its
   code-organization consequence.
+
+## D-3 — Deviation blocking is derived; unblocking and amendment impact are explicit
+
+**Status:** decided 2026-08-11 (Phase 1).
+
+Three places where 0.6's prose (`machine.md` §9/§11) and its implementation
+(`bin/vouch` `command_deviation_adjudicate` / `command_deviation_close`) disagree or
+drift, resolved for mk2 before `decide()` existed:
+
+- **`blocked_on` is a derived projection, never stored state.** A unit's blocker set
+  is *defined* as the deviations bound to its `NAME@VERSION` with status `open` or
+  `rejected`. 0.6 stored the array on the unit and recomputed/cleared it in three
+  places; the close path literally repairs drift between the array and the deviation
+  records. mk2 makes the drift unrepresentable. Rejected: storing the array (the 0.6
+  model) — a second authority for one fact.
+- **No auto-unblock.** 0.6's `deviation close` on a rejected deviation silently moves
+  the unit to `re-verifying` or `specified` as a side effect. mk2 keeps close as
+  close; leaving `blocked` is its own gated command (`respecify` or `begin-reverify`,
+  legal only when no blocking deviations remain, and `begin-reverify` additionally
+  requires a recorded pack — a gate 0.6's ungated set-status edge did not have). Why:
+  a transition and its gate are one code path (plan §4 Phase 1); state changes hidden
+  inside unrelated commands are how fail-opens breed.
+- **Amendment impact invalidates the reflexive transitive consumer closure, except
+  `superseded` units.** 0.6's prose says "every published unit downstream"; its code
+  invalidates *every* downstream unit regardless of status, including `superseded`
+  ones, and clears their blocker arrays. mk2 follows the code's breadth (fail-closed:
+  work-in-progress downstream of an amended contract is stale too) but excludes
+  `superseded` units (invalidation would resurrect a terminally-dead unit into a
+  re-verifiable state). Already-`invalidated` members re-record idempotently so every
+  amendment's impact set is complete, and — via the derived blocker set — an
+  invalidated unit's own open deviations keep blocking its re-verification instead of
+  being orphaned.
+
+Two edge additions over the 0.6 edge set, both consequences of the above (asserted
+exactly in `tests/test_mk2_ir.py`):
+
+- **`blocked → blocked` (open-deviation self-loop).** Deviation accumulation on an
+  already-blocked unit is table-visible, so any gate the open-deviation edge ever
+  gains applies to accumulating units too, instead of being bypassed by a code-level
+  carve-out.
+- **`invalidated → specified` (respecify escape).** The widened impact closure can
+  invalidate a never-frozen unit; without this edge such a unit's only exits would be
+  supersession or a fabricated deviation, since `begin-reverify` correctly requires a
+  recorded pack. Every non-terminal state keeps a legal recovery path (the escape-
+  property discipline, 0.6 invariant I11's spirit).
+
+Also recorded: mk2 has **no operator-initiated block**. 0.6 permitted `set-status →
+blocked` with an empty blocker array; in mk2 `blocked` means exactly "has blocking
+deviations", so an operational hold must be expressed as a typed deviation (usually
+`plan-gap` or `capability-request`), keeping the status and the record in lockstep.
+
+The Phase 0 transcription (`ir/vouch_06.py`) keeps the prose-faithful reading, since
+0.6's own precedence rule gives prose authority absent a recorded discrepancy; this
+entry is mk2's recorded discrepancy for its own semantics.

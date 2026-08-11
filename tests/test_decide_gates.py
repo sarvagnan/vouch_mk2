@@ -1,0 +1,351 @@
+"""Gate and deviation-chain regressions.
+
+Each test names the 0.6 defect class it keeps closed: D046 (ungated publication),
+I4 (publication leaves an open deviation), the NAME@VERSION identity chain, and the
+D-3 amendment-impact and no-auto-unblock semantics.
+"""
+
+from __future__ import annotations
+
+from vouch_mk2.core import (
+    Accepted,
+    AcceptanceFrozen,
+    AmendDeviation,
+    BeginReverify,
+    CloseDeviation,
+    Command,
+    Deviation,
+    DeviationAmended,
+    DeviationStatus,
+    DeviationType,
+    FreezeAcceptance,
+    MarkDone,
+    MarkReady,
+    OpenDeviation,
+    Publish,
+    Refused,
+    RejectDeviation,
+    Respecify,
+    Snapshot,
+    SpecifyUnit,
+    StartWork,
+    Unit,
+    UnitBlocked,
+    UnitInvalidated,
+    UnitPublished,
+    UnitRef,
+    UnitStatus,
+    apply,
+    blocking_deviations,
+    decide,
+)
+from vouch_mk2.ir.schema import Verdict
+
+
+def refused_codes(snapshot: Snapshot, command: Command) -> tuple[str, ...]:
+    decision = decide(snapshot, command)
+    assert isinstance(decision, Refused)
+    return tuple(v.code for v in decision.violations)
+
+
+def accepted(snapshot: Snapshot, command: Command) -> Snapshot:
+    decision = decide(snapshot, command)
+    assert isinstance(decision, Accepted), decision
+    return apply(snapshot, decision.events)
+
+
+def unit(
+    name: str,
+    status: UnitStatus,
+    *,
+    version: str = "v1",
+    depends_on: tuple[str, ...] = (),
+    pack: str = "p1",
+) -> Unit:
+    return Unit(
+        name=name,
+        version=version,
+        status=status,
+        depends_on=depends_on,
+        acceptance_pack_version=pack,
+    )
+
+
+def test_full_happy_path_walkthrough() -> None:
+    s = Snapshot()
+    s = accepted(s, SpecifyUnit(name="u", version="v1"))
+    s = accepted(s, FreezeAcceptance(name="u", pack_version="p1"))
+    s = accepted(s, MarkReady(name="u"))
+    s = accepted(s, StartWork(name="u"))
+    s = accepted(s, MarkDone(name="u"))
+    s = accepted(s, Publish(name="u"))
+    u = s.unit("u")
+    assert u is not None
+    assert u.status is UnitStatus.PUBLISHED
+    assert u.acceptance_pack_version == "p1"
+    assert s.revision == 6
+
+
+def test_publication_gate_record_is_carried_and_all_pass() -> None:
+    s = Snapshot(
+        units=(unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE),)
+    )
+    decision = decide(s, Publish(name="u"))
+    assert isinstance(decision, Accepted)
+    (event,) = decision.events
+    assert isinstance(event, UnitPublished)
+    assert event.gate.transition == "done-pending-acceptance->published"
+    assert {c.obligation_id for c in event.gate.checks} == {
+        "gate.dod.pack-frozen",
+        "gate.dod.dependencies-satisfied",
+        "gate.dod.no-blocking-deviations",
+    }
+    assert all(c.verdict is Verdict.PASS for c in event.gate.checks)
+
+
+def test_d046_publication_with_unsatisfied_dependency_is_refused() -> None:
+    s = Snapshot(
+        units=(
+            unit("up", UnitStatus.IN_PROGRESS),
+            unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE, depends_on=("up",)),
+        )
+    )
+    assert refused_codes(s, Publish(name="u")) == ("gate.dependency-unsatisfied",)
+    s2 = Snapshot(
+        units=(
+            unit("up", UnitStatus.PUBLISHED),
+            unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE, depends_on=("up",)),
+        )
+    )
+    assert isinstance(decide(s2, Publish(name="u")), Accepted)
+
+
+def test_publication_with_vanished_dependency_names_the_right_defect() -> None:
+    # A dependency that does not exist at all is an existence defect, not a
+    # status defect — the code must say so or an operator repairs the wrong thing.
+    s = Snapshot(
+        units=(unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE, depends_on=("ghost",)),)
+    )
+    assert refused_codes(s, Publish(name="u")) == ("gate.dependency-unknown",)
+
+
+def test_i4_publication_with_blocking_deviation_is_refused() -> None:
+    # Even against a fabricated snapshot whose status drifted (the unit claims
+    # done-pending-acceptance while a rejected deviation is bound to it), the
+    # gate re-derives the blocker set and refuses.
+    for status in (DeviationStatus.OPEN, DeviationStatus.REJECTED):
+        s = Snapshot(
+            units=(unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE),),
+            deviations=(
+                Deviation(
+                    deviation_id="d1",
+                    deviation_type=DeviationType.PACK_DEFECT,
+                    unit=UnitRef(name="u", version="v1"),
+                    status=status,
+                ),
+            ),
+        )
+        assert refused_codes(s, Publish(name="u")) == ("gate.blocking-deviations",)
+
+
+def test_freeze_requires_pack_version() -> None:
+    s = Snapshot(units=(unit("u", UnitStatus.SPECIFIED, pack=""),))
+    assert refused_codes(s, FreezeAcceptance(name="u", pack_version="")) == (
+        "gate.pack-version-missing",
+    )
+
+
+def test_freeze_requires_dependencies_to_exist() -> None:
+    s = Snapshot(
+        units=(unit("u", UnitStatus.SPECIFIED, depends_on=("ghost",), pack=""),)
+    )
+    assert refused_codes(s, FreezeAcceptance(name="u", pack_version="p1")) == (
+        "gate.dependency-unknown",
+    )
+
+
+def test_specify_refuses_duplicates_and_unknown_dependencies() -> None:
+    s = Snapshot(units=(unit("u", UnitStatus.SPECIFIED, pack=""),))
+    assert refused_codes(s, SpecifyUnit(name="u", version="v2")) == ("unit.exists",)
+    assert refused_codes(
+        s, SpecifyUnit(name="w", version="v1", depends_on=("ghost",))
+    ) == ("gate.dependency-unknown",)
+    assert refused_codes(s, SpecifyUnit(name="", version="v1")) == (
+        "unit.identity-required",
+    )
+
+
+def test_stale_name_version_binding_is_refused() -> None:
+    s = Snapshot(units=(unit("u", UnitStatus.PUBLISHED, version="v2"),))
+    assert refused_codes(
+        s,
+        OpenDeviation(
+            deviation_id="d1",
+            deviation_type=DeviationType.CONTRACT_CONFLICT,
+            unit=UnitRef(name="u", version="v1"),
+        ),
+    ) == ("deviation.binding-stale",)
+
+
+def test_open_deviation_blocks_and_accumulates() -> None:
+    s = Snapshot(units=(unit("u", UnitStatus.IN_PROGRESS),))
+    decision = decide(
+        s,
+        OpenDeviation(
+            deviation_id="d1",
+            deviation_type=DeviationType.PACK_DEFECT,
+            unit=UnitRef(name="u", version="v1"),
+        ),
+    )
+    assert isinstance(decision, Accepted)
+    assert any(
+        isinstance(e, UnitBlocked) and e.name == "u" for e in decision.events
+    )
+    s = apply(s, decision.events)
+
+    # Second deviation accumulates without a second transition.
+    decision2 = decide(
+        s,
+        OpenDeviation(
+            deviation_id="d2",
+            deviation_type=DeviationType.PLAN_GAP,
+            unit=UnitRef(name="u", version="v1"),
+        ),
+    )
+    assert isinstance(decision2, Accepted)
+    assert not any(isinstance(e, UnitBlocked) for e in decision2.events)
+    s = apply(s, decision2.events)
+    u = s.unit("u")
+    assert u is not None and u.status is UnitStatus.BLOCKED
+    assert tuple(d.deviation_id for d in blocking_deviations(s, u)) == ("d1", "d2")
+
+    # Unblocking is gated on ALL blockers closing (multi-blocker semantics).
+    assert refused_codes(s, BeginReverify(name="u")) == ("gate.blocking-deviations",)
+    s = accepted(s, RejectDeviation(deviation_id="d1"))
+    s = accepted(s, CloseDeviation(deviation_id="d1"))
+    assert refused_codes(s, BeginReverify(name="u")) == ("gate.blocking-deviations",)
+    s = accepted(s, RejectDeviation(deviation_id="d2"))
+    s = accepted(s, CloseDeviation(deviation_id="d2"))
+    u = s.unit("u")
+    assert u is not None and u.status is UnitStatus.BLOCKED  # D-3: no auto-unblock
+    s = accepted(s, BeginReverify(name="u"))
+    u = s.unit("u")
+    assert u is not None and u.status is UnitStatus.RE_VERIFYING
+
+
+def test_respecify_clears_pack_and_requires_no_blockers() -> None:
+    s = Snapshot(
+        units=(unit("u", UnitStatus.BLOCKED),),
+        deviations=(
+            Deviation(
+                deviation_id="d1",
+                deviation_type=DeviationType.PACK_DEFECT,
+                unit=UnitRef(name="u", version="v1"),
+                status=DeviationStatus.OPEN,
+            ),
+        ),
+    )
+    assert refused_codes(s, Respecify(name="u")) == ("gate.blocking-deviations",)
+    s = accepted(s, AmendDeviation(deviation_id="d1", amendment_version="v2"))
+    # The amend invalidated the unit; respecify is the D-3 escape edge and is
+    # legal now that the amended deviation no longer blocks.
+    s = accepted(s, Respecify(name="u"))
+    u = s.unit("u")
+    assert u is not None
+    assert u.status is UnitStatus.SPECIFIED
+    assert u.acceptance_pack_version == ""
+
+    s2 = Snapshot(units=(unit("u", UnitStatus.BLOCKED),))
+    s2 = accepted(s2, Respecify(name="u"))
+    u = s2.unit("u")
+    assert u is not None
+    assert u.status is UnitStatus.SPECIFIED
+    assert u.acceptance_pack_version == ""
+
+
+def test_begin_reverify_requires_recorded_pack() -> None:
+    s = Snapshot(units=(unit("u", UnitStatus.BLOCKED, pack=""),))
+    assert refused_codes(s, BeginReverify(name="u")) == ("gate.pack-version-missing",)
+
+
+def test_amendment_impact_closure_d3() -> None:
+    # u <- v <- w (superseded) and v <- x (specified): the closure invalidates
+    # u, v, x and leaves the superseded w untouched.
+    s = Snapshot(
+        units=(
+            unit("u", UnitStatus.BLOCKED),
+            unit("v", UnitStatus.PUBLISHED, depends_on=("u",)),
+            unit("w", UnitStatus.SUPERSEDED, depends_on=("v",)),
+            unit("x", UnitStatus.SPECIFIED, depends_on=("v",), pack=""),
+        ),
+        deviations=(
+            Deviation(
+                deviation_id="d1",
+                deviation_type=DeviationType.CONTRACT_CONFLICT,
+                unit=UnitRef(name="u", version="v1"),
+                status=DeviationStatus.OPEN,
+            ),
+        ),
+    )
+    decision = decide(s, AmendDeviation(deviation_id="d1", amendment_version="v2"))
+    assert isinstance(decision, Accepted)
+    amended = [e for e in decision.events if isinstance(e, DeviationAmended)]
+    assert amended and amended[0].impact_set == ("u", "v", "x")
+    invalidated = {
+        e.name for e in decision.events if isinstance(e, UnitInvalidated)
+    }
+    assert invalidated == {"u", "v", "x"}
+    after = apply(s, decision.events)
+    statuses = {u.name: u.status for u in after.units}
+    assert statuses["u"] is UnitStatus.INVALIDATED
+    assert statuses["v"] is UnitStatus.INVALIDATED
+    assert statuses["x"] is UnitStatus.INVALIDATED
+    assert statuses["w"] is UnitStatus.SUPERSEDED
+    d = after.deviation("d1")
+    assert d is not None
+    assert d.status is DeviationStatus.AMENDED
+    assert d.amendment_version == "v2"
+    assert d.impact_set == ("u", "v", "x")
+
+
+def test_amend_requires_amendment_version() -> None:
+    s = Snapshot(
+        units=(unit("u", UnitStatus.BLOCKED),),
+        deviations=(
+            Deviation(
+                deviation_id="d1",
+                deviation_type=DeviationType.PACK_DEFECT,
+                unit=UnitRef(name="u", version="v1"),
+                status=DeviationStatus.OPEN,
+            ),
+        ),
+    )
+    assert refused_codes(s, AmendDeviation(deviation_id="d1", amendment_version="")) == (
+        "deviation.amendment-version-required",
+    )
+
+
+def test_unknown_references_are_named_violations() -> None:
+    s = Snapshot()
+    assert refused_codes(s, Publish(name="ghost")) == ("unit.unknown",)
+    assert refused_codes(s, CloseDeviation(deviation_id="ghost")) == (
+        "deviation.unknown",
+    )
+    assert refused_codes(
+        s,
+        OpenDeviation(
+            deviation_id="d1",
+            deviation_type=DeviationType.PLAN_GAP,
+            unit=UnitRef(name="ghost", version="v1"),
+        ),
+    ) == ("unit.unknown",)
+
+
+def test_frozen_event_carries_dor_gate_record() -> None:
+    s = Snapshot(units=(unit("u", UnitStatus.SPECIFIED, pack=""),))
+    decision = decide(s, FreezeAcceptance(name="u", pack_version="p1"))
+    assert isinstance(decision, Accepted)
+    (event,) = decision.events
+    assert isinstance(event, AcceptanceFrozen)
+    assert event.gate.transition == "specified->acceptance-frozen"
+    assert all(c.verdict is Verdict.PASS for c in event.gate.checks)

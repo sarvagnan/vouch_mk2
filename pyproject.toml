@@ -23,9 +23,9 @@ root_packages = ["vouch_mk2"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Policy IR is pure — no I/O-capable imports"
+name = "Policy IR and decision core are pure — no I/O-capable imports"
 type = "forbidden"
-source_modules = ["vouch_mk2.ir"]
+source_modules = ["vouch_mk2.ir", "vouch_mk2.core"]
 forbidden_modules = [
     "os",
     "io",
