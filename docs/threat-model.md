@@ -34,12 +34,15 @@ not load).
 ### Accepted residual: ancestor-symlink TOCTOU (0.6 D070)
 
 A concurrent hostile process with write access to the project tree could swap an
-ancestor directory for a symlink between the ancestor check and the atomic replace.
-CPython's stdlib exposes no portable `renameat`-style `dir_fd`-relative replace on
-every platform (`os.replace not in os.supports_dir_fd` on some), so under D-1 (typed
-Python) the race is **narrowed, not closed**: descriptor-relative operations are used
-where the platform provides them, and ancestors are re-verified immediately before
-the replace elsewhere.
+ancestor directory for a symlink between path resolution and a filesystem
+operation. mk2 performs every operation after store open — including the state
+replace — descriptor-relative to the held root capability, and **fails closed
+rather than falling back to path-based operations** on a runtime that lacks the
+primitives. Both supported platforms (macOS, Linux; native Windows is a plan
+non-goal) provide `renameat`; CPython on macOS under-reports it in
+`os.supports_dir_fd`, so availability is probed by attempting the operation, not
+by trusting the metadata. The remaining window is the single path resolution at
+`Store.open` itself.
 
 The residual attacker — a process concurrently writing inside the project tree during
 a Vouch operation — can already tamper with inputs and outputs directly, so the

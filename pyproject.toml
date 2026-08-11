@@ -27,6 +27,7 @@ name = "Policy IR and decision core are pure — no I/O-capable imports"
 type = "forbidden"
 source_modules = ["vouch_mk2.ir", "vouch_mk2.core"]
 forbidden_modules = [
+    "hashlib",
     "os",
     "io",
     "sys",
@@ -39,6 +40,12 @@ forbidden_modules = [
     "urllib",
     "http",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Store is the only I/O owner"
+type = "forbidden"
+source_modules = ["vouch_mk2.ir", "vouch_mk2.core"]
+forbidden_modules = ["vouch_mk2.store"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
