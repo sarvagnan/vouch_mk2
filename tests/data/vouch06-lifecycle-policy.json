@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "public_assurance_scope": "Vouch mechanically verifies recorded structural, integrity, lifecycle, and evidence gates within its declared bounded model; it does not prove runtime behavior or security sufficiency.",
+  "methodology_deltas": [
+    "system-map/1",
+    "vouch/0.5.0",
+    "vouch/0.6.0",
+    "vouch/0.6.1",
+    "vouch/0.6.2"
+  ],
+  "unit_statuses": [
+    "specified",
+    "acceptance-frozen",
+    "ready",
+    "in-progress",
+    "blocked",
+    "done-pending-acceptance",
+    "published",
+    "release-bound",
+    "invalidated",
+    "re-verifying",
+    "superseded"
+  ],
+  "deviation_types": [
+    "pack-defect",
+    "contract-conflict",
+    "plan-gap",
+    "capability-request"
+  ],
+  "supersession_policies": ["retain-releases", "invalidate-releases"],
+  "closure_trigger_kinds": ["amendment", "operator", "supersession"],
+  "satisfied_dependency_statuses": ["published", "release-bound"],
+  "done_unit_statuses": ["published", "release-bound"],
+  "published_unit_statuses": ["published", "release-bound"],
+  "settled_unit_statuses": ["published", "release-bound", "superseded"],
+  "marker_unit_statuses": ["invalidated", "re-verifying", "superseded"],
+  "unit_stage_projection": {
+    "specified": "draft",
+    "acceptance-frozen": "frozen",
+    "ready": "frozen",
+    "in-progress": "frozen",
+    "blocked": "draft-if-acceptance-pack-empty-otherwise-frozen",
+    "done-pending-acceptance": "frozen",
+    "published": "frozen",
+    "release-bound": "frozen",
+    "invalidated": "frozen",
+    "re-verifying": "frozen",
+    "superseded": "frozen"
+  },
+  "frozen_unit_statuses": [
+    "acceptance-frozen",
+    "ready",
+    "in-progress",
+    "done-pending-acceptance",
+    "published",
+    "release-bound",
+    "invalidated",
+    "re-verifying",
+    "superseded"
+  ],
+  "release_completion_claim_states": {
+    "operational": ["succeeded"],
+    "qualified": ["succeeded"]
+  },
+  "release_protective_states": {
+    "operational": ["retired", "rolled-back", "failed-unrecovered", "invalidated"],
+    "qualified": ["retired", "invalidated"]
+  },
+  "release_negative_outcome_states": {
+    "operational": [],
+    "qualified": ["failed-unrecovered"]
+  },
+  "release_active_states": {
+    "operational": ["prepared", "deploying", "verifying"],
+    "qualified": ["prepared", "verifying"]
+  },
+  "release_model_terminal_states": {
+    "operational": ["succeeded", "failed-unrecovered", "retired", "invalidated"],
+    "qualified": ["succeeded", "failed-unrecovered", "retired", "invalidated"]
+  },
+  "supersession_no_op_release_states": [
+    "retired",
+    "rolled-back",
+    "failed-unrecovered",
+    "invalidated"
+  ],
+  "unit_set_status_transitions": {
+    "specified": ["blocked"],
+    "acceptance-frozen": ["blocked", "ready"],
+    "ready": ["blocked", "in-progress"],
+    "in-progress": ["blocked", "done-pending-acceptance"],
+    "blocked": ["re-verifying", "specified", "superseded"],
+    "done-pending-acceptance": ["blocked", "published"],
+    "published": ["blocked", "release-bound", "superseded"],
+    "release-bound": ["blocked", "superseded"],
+    "invalidated": ["blocked", "re-verifying", "superseded"],
+    "re-verifying": ["blocked", "published", "superseded"],
+    "superseded": []
+  },
+  "release_transitions": {
+    "operational": {
+      "prepared": ["deploying", "retired"],
+      "deploying": ["retired", "rolled-back", "verifying"],
+      "verifying": ["retired", "rolled-back", "succeeded"],
+      "rolled-back": ["failed-unrecovered"],
+      "succeeded": ["retired"],
+      "failed-unrecovered": [],
+      "retired": [],
+      "invalidated": []
+    },
+    "qualified": {
+      "prepared": ["retired", "verifying"],
+      "verifying": ["failed-unrecovered", "retired", "succeeded"],
+      "succeeded": ["retired"],
+      "failed-unrecovered": ["retired"],
+      "retired": [],
+      "invalidated": []
+    }
+  }
+}

@@ -1,0 +1,52 @@
+[project]
+name = "vouch-mk2"
+version = "0.1.0"
+description = "Vouch mk2 — typed policy engine with one authoritative snapshot, content-addressed artifacts, pure projections, and thin adapters"
+readme = "README.md"
+authors = [
+    { name = "sarvagnan", email = "github@sl.sarva.email" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+# D-1 ground rules (DECISIONS.md): these gates run in CI from the first commit.
+
+[tool.pyrefly]
+project-includes = ["src", "tests"]
+
+[tool.importlinter]
+root_packages = ["vouch_mk2"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Policy IR is pure — no I/O-capable imports"
+type = "forbidden"
+source_modules = ["vouch_mk2.ir"]
+forbidden_modules = [
+    "os",
+    "io",
+    "sys",
+    "json",
+    "pathlib",
+    "shutil",
+    "tempfile",
+    "subprocess",
+    "socket",
+    "urllib",
+    "http",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.13",
+    "pyrefly>=1.2.0",
+    "pytest>=9.1.1",
+]

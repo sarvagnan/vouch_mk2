@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vouch 2 — Rebuild Architecture</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:      #f9f9f7;
+    --surface:   #fcfcfb;
+    --ink:       #0b0b0b;
+    --ink-2:     #52514e;
+    --muted:     #898781;
+    --hair:      #e1e0d9;
+    --ring:      rgba(11,11,11,0.10);
+
+    --c-prose:     #4a3aa7;   /* human authority        */
+    --c-ir:        #2a78d6;   /* policy IR + typed core */
+    --c-state:     #eb6834;   /* authoritative state    */
+    --c-proj:      #1baf7a;   /* projections            */
+    --c-transport: #898781;   /* transports             */
+
+    --s-good:     #0ca30c;
+    --s-warning:  #fab219;
+    --s-critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --ink:       #ffffff;
+      --ink-2:     #c3c2b7;
+      --muted:     #898781;
+      --hair:      #2c2c2a;
+      --ring:      rgba(255,255,255,0.10);
+      --c-prose:   #9085e9;
+      --c-ir:      #3987e5;
+      --c-state:   #d95926;
+      --c-proj:    #199e70;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:      #0d0d0d;
+    --surface:   #1a1a19;
+    --ink:       #ffffff;
+    --ink-2:     #c3c2b7;
+    --muted:     #898781;
+    --hair:      #2c2c2a;
+    --ring:      rgba(255,255,255,0.10);
+    --c-prose:   #9085e9;
+    --c-ir:      #3987e5;
+    --c-state:   #d95926;
+    --c-proj:    #199e70;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.92em;
+  }
+  main { max-width: 1080px; margin: 0 auto; padding: 0 24px 80px; }
+
+  /* ---------- header ---------- */
+  header.page {
+    max-width: 1080px; margin: 0 auto; padding: 40px 24px 8px;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  }
+  header.page h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  header.page p.sub { margin: 0; color: var(--ink-2); max-width: 62ch; }
+  .theme-btn {
+    flex: none; margin-top: 4px;
+    background: var(--surface); color: var(--ink-2);
+    border: 1px solid var(--ring); border-radius: 8px;
+    padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .theme-btn:hover { color: var(--ink); }
+
+  nav.toc {
+    max-width: 1080px; margin: 0 auto; padding: 8px 24px 0;
+    display: flex; flex-wrap: wrap; gap: 6px 18px;
+    font-size: 13px;
+  }
+  nav.toc a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--hair); }
+  nav.toc a:hover { color: var(--ink); border-bottom-color: var(--muted); }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 56px; }
+  h2 {
+    font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em;
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  h2 .no { color: var(--muted); font-size: 14px; font-weight: 600; }
+  p.lede { color: var(--ink-2); margin: 6px 0 22px; max-width: 74ch; }
+
+  /* ---------- legend ---------- */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center;
+    background: var(--surface); border: 1px solid var(--ring); border-radius: 10px;
+    padding: 12px 16px; margin: 20px 0 26px; font-size: 13px; color: var(--ink-2);
+  }
+  .legend .key { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+
+  /* ---------- diagram nodes ---------- */
+  .node {
+    background: var(--surface);
+    border: 1px solid var(--ring);
+    border-left-width: 4px;
+    border-radius: 10px;
+    padding: 14px 18px 15px;
+  }
+  .node h3 {
+    margin: 0 0 2px; font-size: 14px; letter-spacing: 0.02em;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  }
+  .node h3 .tag {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .node p.note { margin: 2px 0 8px; font-size: 13px; color: var(--ink-2); }
+  .node ul { margin: 6px 0 2px; padding-left: 18px; font-size: 13.5px; color: var(--ink-2); }
+  .node li { margin: 3px 0; }
+  .node li strong, .node p strong { color: var(--ink); font-weight: 600; }
+
+  .a-prose     { border-left-color: var(--c-prose); }
+  .a-ir        { border-left-color: var(--c-ir); }
+  .a-state     { border-left-color: var(--c-state); }
+  .a-proj      { border-left-color: var(--c-proj); }
+  .a-transport { border-left-color: var(--c-transport); }
+  .a-dashed    { border-style: dashed; border-left-style: solid; }
+
+  .arrow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0 8px 26px; color: var(--muted); font-size: 13px;
+  }
+  .arrow .glyph { font-size: 15px; line-height: 1; }
+  .arrow em { font-style: normal; color: var(--ink-2); }
+
+  .fan { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .fan .node { border-left-width: 3px; }
+  .fan .node h3 { font-size: 13px; }
+  .fan .node ul, .fan .node p.note { font-size: 12.5px; }
+
+  .duo { display: grid; grid-template-columns: 1.25fr 1fr; gap: 12px; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--ring); border-radius: 999px;
+    padding: 1px 9px 2px; font-size: 11.5px; color: var(--ink-2);
+    background: var(--page); white-space: nowrap; vertical-align: 1px;
+  }
+  .chip.digest { font-family: ui-monospace, Menlo, monospace; }
+  .chip.digest::before { content: "◆"; color: var(--c-state); font-size: 9px; }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+  /* ---------- numbered flow ---------- */
+  .steps { display: flex; flex-direction: column; }
+  .step {
+    display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px;
+    align-items: stretch;
+  }
+  .step + .step .card { margin-top: 0; }
+  .step .card {
+    background: var(--surface); border: 1px solid var(--ring); border-left: 4px solid var(--c-ir);
+    border-radius: 10px; padding: 12px 16px 13px;
+    display: flex; gap: 14px; align-items: flex-start;
+  }
+  .step.mut .card { border-left-color: var(--c-state); }
+  .step .n {
+    flex: none; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--page); border: 1px solid var(--ring);
+    display: grid; place-items: center;
+    font-size: 12.5px; font-weight: 700; color: var(--ink-2); margin-top: 1px;
+  }
+  .step .body { min-width: 0; }
+  .step .body b { display: block; font-size: 14px; }
+  .step .body span { display: block; font-size: 13px; color: var(--ink-2); margin-top: 1px; }
+  .step .side { align-self: center; }
+  .connector { padding: 4px 0 4px 12px; height: 26px; display: flex; align-items: center; color: var(--muted); }
+
+  .callout {
+    border: 1px dashed var(--ring); border-radius: 10px;
+    padding: 9px 13px; font-size: 12.5px; color: var(--ink-2);
+    background: var(--surface);
+  }
+  .callout b { color: var(--ink); font-size: 12.5px; }
+  .callout.ok    { border-color: color-mix(in srgb, var(--s-good) 45%, var(--ring)); }
+  .callout.crash { border-color: color-mix(in srgb, var(--s-warning) 55%, var(--ring)); }
+
+  /* ---------- verdict chips ---------- */
+  .verdicts { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 2px; }
+  .verdict {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--ring); border-radius: 8px; background: var(--page);
+    padding: 4px 11px; font-size: 12.5px; font-weight: 600; color: var(--ink);
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .verdict .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .verdict small { font-family: system-ui, sans-serif; font-weight: 400; color: var(--ink-2); }
+
+  /* ---------- tables ---------- */
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13.5px;
+    background: var(--surface); border: 1px solid var(--ring); border-radius: 10px;
+    overflow: hidden;
+  }
+  th, td { text-align: left; padding: 10px 14px; vertical-align: top; }
+  th {
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); border-bottom: 1px solid var(--hair); font-weight: 600;
+  }
+  td { border-bottom: 1px solid var(--hair); color: var(--ink-2); }
+  tr:last-child td { border-bottom: none; }
+  td b { color: var(--ink); font-weight: 600; }
+  td .cnt { color: var(--muted); font-size: 12px; }
+
+  /* ---------- threat levels ---------- */
+  .threats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .threats .node h3 { font-size: 13.5px; }
+  .threats .node p { font-size: 13px; color: var(--ink-2); margin: 4px 0 0; }
+
+  footer {
+    max-width: 1080px; margin: 0 auto; padding: 40px 24px 48px;
+    font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--hair);
+  }
+
+  @media (max-width: 760px) {
+    .fan, .duo, .threats { grid-template-columns: 1fr; }
+    .step { grid-template-columns: 1fr; }
+    .step .side { align-self: start; }
+    header.page { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header class="page">
+  <div>
+    <h1>Vouch 2 — Rebuild Architecture</h1>
+    <p class="sub">A typed policy engine with one authoritative snapshot, immutable
+    content-addressed artifacts, pure projections, and thin adapters. Synthesized from
+    dual independent reviews of the Vouch 0.6 defect history — 70 recorded defects,
+    31 behavioral hardening commits.</p>
+  </div>
+  <button class="theme-btn" id="themeBtn" type="button">Theme: auto</button>
+</header>
+
+<nav class="toc">
+  <a href="#map">0 · Defect classes → mechanisms</a>
+  <a href="#entities">1 · Entities &amp; authority</a>
+  <a href="#mutation">2 · Mutation flow</a>
+  <a href="#verification">3 · Verification flow</a>
+  <a href="#trust">4 · Threat levels</a>
+</nav>
+
+<main>
+
+<!-- ================================================================ -->
+<section id="map">
+  <h2><span class="no">0</span>Why this shape — defect class → structural mechanism</h2>
+  <p class="lede">Each mechanism below exists because a class of recorded defects demanded
+  it. The goal is that each class becomes <strong>unrepresentable</strong>, not
+  re-checked: an unbound claim fails to parse, an ungated transition has no code path,
+  an unevaluated obligation fails the whole run.</p>
+  <table>
+    <thead><tr>
+      <th style="width:31%">Defect class (Vouch 0.6 history)</th>
+      <th style="width:44%">Mechanism in Vouch 2</th>
+      <th>Where</th>
+    </tr></thead>
+    <tbody>
+      <tr><td><b>Vacuous / self-certifying checks</b> <span class="cnt">10 defects — largest class</span></td>
+          <td>Obligation registry: every registered check must resolve to an evaluator that ran, or the run fails. An authority never supplies its own discriminator — coverage claims need independent witnesses.</td>
+          <td>§3</td></tr>
+      <tr><td><b>Missing bindings between artifacts</b> <span class="cnt">tied #1 commit root cause</span></td>
+          <td>Content-addressed references are typed schema fields validated at decode. An unbound claim is unparseable, not a review finding.</td>
+          <td>§1</td></tr>
+      <tr><td><b>Fail-open validation</b> <span class="cnt">6 defects · 6 commits</span></td>
+          <td>Gate check and state transition are one code path inside pure <code>decide()</code>; only <code>PASS</code> composes to <code>PASS</code>.</td>
+          <td>§2 step 4, §3</td></tr>
+      <tr><td><b>Duplicated authority / policy drift</b> <span class="cnt">7 defects · 3 commits</span></td>
+          <td>One declarative Policy IR; runtime tables, schemas, formal model input, and docs are generated views that cannot disagree.</td>
+          <td>§1</td></tr>
+      <tr><td><b>Coupled writes / atomicity</b> <span class="cnt">5 defects · 3 commits</span></td>
+          <td>One mutable file, compare-and-swap on a monotonic revision; immutable objects written first. No multi-file transaction exists to recover.</td>
+          <td>§2 steps 5–6</td></tr>
+      <tr><td><b>Path handling / TOCTOU</b> <span class="cnt">4 + 5 defects</span></td>
+          <td>One capability-rooted storage layer; validated relative-path types; descriptor-relative operations. Hostile-concurrent-writer TOCTOU is narrowed and explicitly scoped in the threat model (D070).</td>
+          <td>§2 step 1, §4</td></tr>
+      <tr><td><b>Stale generated artifacts</b> <span class="cnt">7 defects</span></td>
+          <td>Projections are pure functions of the snapshot and never transaction participants; staleness is a freshness check, never a broken commit.</td>
+          <td>§1, §2 step 8</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ================================================================ -->
+<section id="entities">
+  <h2><span class="no">1</span>Entity &amp; authority diagram</h2>
+  <p class="lede">Five layers, each with exactly one home for every fact. Every
+  <span class="chip digest">sha256</span> chip is a content-address reference validated
+  by the typed decoder — the anti-“missing binding” measure.</p>
+
+  <div class="legend">
+    <span class="key"><span class="swatch" style="background:var(--c-prose)"></span>Human authority (prose)</span>
+    <span class="key"><span class="swatch" style="background:var(--c-ir)"></span>Policy IR &amp; typed core</span>
+    <span class="key"><span class="swatch" style="background:var(--c-state)"></span>Authoritative state &amp; objects</span>
+    <span class="key"><span class="swatch" style="background:var(--c-proj)"></span>Projections (derived)</span>
+    <span class="key"><span class="swatch" style="background:var(--c-transport)"></span>Transports (thin)</span>
+    <span class="key"><span class="chip digest">sha256</span>&nbsp;digest binding</span>
+  </div>
+
+  <div class="node a-prose">
+    <h3>Human authority <span class="tag">prose · reviewed · non-mechanical</span></h3>
+    <ul>
+      <li><strong>Method rationale</strong> — the “why” the IR cannot express.</li>
+      <li><strong>Threat model</strong> — the three explicit levels (§4).</li>
+      <li><strong>Claim boundary</strong> — what is mechanically provable vs. permanently <code>NOT_CHECKED</code>.</li>
+    </ul>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span><em>governs</em> — humans review every IR change against it</div>
+
+  <div class="node a-ir">
+    <h3>Policy IR <span class="tag">one declarative definition · versioned · digested</span></h3>
+    <ul>
+      <li>Lifecycle states &amp; the <strong>transition table</strong> — defined once, copied nowhere.</li>
+      <li><strong>Claim taxonomy</strong> — completion / negative evaluation / protective closure.</li>
+      <li>Applicability matrix · assurance-tier requirements.</li>
+      <li><strong>Obligation registry</strong> — the closed list of check IDs that must run (§3).</li>
+    </ul>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span><em>generates</em> — every mechanical view is derived; none is hand-maintained</div>
+
+  <div class="fan">
+    <div class="node a-ir">
+      <h3>Typed runtime tables</h3>
+      <p class="note">Consumed by the domain core. The engine cannot disagree with the IR — it <em>is</em> the IR, compiled.</p>
+    </div>
+    <div class="node a-ir">
+      <h3>JSON Schema exports</h3>
+      <p class="note"><strong>Interop only, never enforcement.</strong> Strict typed decoders in the core are the enforcement layer; no miniature validator exists to drift.</p>
+    </div>
+    <div class="node a-ir">
+      <h3>Formal model input</h3>
+      <p class="note">The emitted <strong>transition relation</strong> — the model checks the same relation the runtime executes, so model↔CLI conformance is an identity, not a correspondence.</p>
+    </div>
+  </div>
+
+  <div class="duo" style="margin-top:12px">
+    <div class="node a-prose a-dashed">
+      <h3>Invariants &amp; mutation witnesses <span class="tag">independently authored</span></h3>
+      <p class="note">Deliberately <strong>not</strong> generated — generation would reproduce the IR’s own mistakes. Each counted invariant carries a <strong>private raw mutation witness</strong>; witnesses are never borrowed (D040/D042/D043 discipline).</p>
+    </div>
+    <div class="node a-ir">
+      <h3>Formal checker → certificate</h3>
+      <p class="note">Binds <span class="chip digest">IR</span> <span class="chip digest">model</span> <span class="chip digest">witnesses</span> plus per-invariant verdicts. Reproducible, content-addressed; <code>unknown</code> is never a pass.</p>
+    </div>
+  </div>
+
+  <div class="arrow"><span class="glyph">▼</span>tables compiled into</div>
+
+  <div class="node a-ir">
+    <h3>Typed domain core <span class="tag">one library · pure · no I/O</span></h3>
+    <ul>
+      <li>Closed types: <code>Unit</code> · <code>Release</code> · <code>Deviation</code> · <code>Evidence</code> · <code>Command</code> · <code>Event</code>.</li>
+      <li><strong><code>decide(Snapshot, Command) → Events | Violations</code></strong> — the only place lifecycle rules exist.</li>
+      <li>Stable check IDs; structured verdicts (§3). No command handler implements policy.</li>
+      <li>Strict decoders at every ingress: unknown field = error, coercion = error.</li>
+    </ul>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span>reads and writes exactly one aggregate</div>
+
+  <div class="node a-state">
+    <h3>Authoritative state <span class="tag">.vouch/ · single mutable aggregate + immutable objects</span></h3>
+    <ul>
+      <li><strong><code>state.json</code></strong> — monotonic revision (CAS), policy <span class="chip digest">sha256</span>,
+          units[] → pack <span class="chip digest">sha256</span>,
+          releases[] → bundle <span class="chip digest">sha256</span> criteria <span class="chip digest">sha256</span>,
+          deviations[] bound to <code>NAME@VERSION</code>,
+          evidence heads <span class="chip digest">sha256</span> <em>(refs into the chain, like git)</em>.</li>
+      <li><strong><code>objects/sha256/…</code></strong> — immutable, content-addressed: acceptance packs, contracts, evidence events, release bundles, certificates, closure witnesses.</li>
+      <li><strong><code>vouch.lock</code></strong> — the single vendored artifact (a typed-Python zipapp, <em>one</em> digest). Replaces the entire ownership-manifest / collision subsystem; hermetic CI preserved.</li>
+      <li><strong><code>local.json</code></strong> — explicitly non-authoritative; never read by a gate.</li>
+    </ul>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span><em>projected by pure functions</em> — never inside the transaction</div>
+
+  <div class="node a-proj">
+    <h3>Projections <span class="tag">derived · regenerable · byte-comparable</span></h3>
+    <ul>
+      <li><strong>System map</strong> — canonical JSON first; HTML presentation added only after the semantic projection is stable.</li>
+      <li><strong>Next actions</strong> — derived from the dependency graph; binding from day one, never advisory.</li>
+      <li><strong>Status facts</strong> and <strong>agent context</strong> (kernel → <code>AGENTS.md</code> / <code>CLAUDE.md</code> suggestions).</li>
+      <li>A stale projection is a <strong>freshness failure</strong> in CI — never a half-committed state transition.</li>
+    </ul>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span>exposed through</div>
+
+  <div class="node a-transport">
+    <h3>Transports <span class="tag">thin · zero policy</span></h3>
+    <p class="note"><strong>CLI</strong> · <strong>CI command</strong> · <strong>MCP</strong> (read/verify-only, permanently) ·
+    <strong>edit hooks</strong> (warn-only, honestly). Each parses input, calls the core, renders the structured
+    result — none infers outcomes from text, none re-implements a rule.</p>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="mutation">
+  <h2><span class="no">2</span>Mutation flow — the only write path</h2>
+  <p class="lede">Init, migration import, freeze, status changes, and release operations are
+  all <strong>modes of this one path</strong> — there is no bypass to drift. The crash story is
+  trivial by construction: before the swap, garbage; after it, done.</p>
+
+  <div class="steps">
+    <div class="step mut">
+      <div class="card"><div class="n">1</div><div class="body">
+        <b>Open the project through a capability root</b>
+        <span>All paths become validated relative types under one handle — no string
+        re-interpretation, no scattered <code>resolve()</code> calls, descriptor-relative operations.</span>
+      </div></div>
+      <div class="side"><div class="callout"><b>Anti path-handling class.</b> One confinement
+      implementation instead of the ~11 clusters in Vouch 0.6.</div></div>
+    </div>
+    <div class="connector">│</div>
+
+    <div class="step mut">
+      <div class="card"><div class="n">2</div><div class="body">
+        <b>Acquire the project lock</b>
+        <span>One lock implementation, one ordering — not a general ledger lock plus a private
+        evidence-anchoring <code>flock</code>.</span>
+      </div></div>
+      <div class="side"></div>
+    </div>
+    <div class="connector">│</div>
+
+    <div class="step mut">
+      <div class="card"><div class="n">3</div><div class="body">
+        <b>Read <code>state.json</code> once → strict decode → <code>Snapshot</code></b>
+        <span>Unknown field = error. The snapshot is never re-read mid-operation, so a swapped
+        second read can never ride on the first read’s validation.</span>
+      </div></div>
+      <div class="side"><div class="callout"><b>Anti-TOCTOU (logical).</b> Makes the
+      single-snapshot anchor repair an API property, not a local fix.</div></div>
+    </div>
+    <div class="connector">│</div>
+
+    <div class="step mut">
+      <div class="card"><div class="n">4</div><div class="body">
+        <b><code>decide(Snapshot, Command)</code> — pure, no I/O</b>
+        <span>Gate evaluation and the transition are <em>one code path</em>: “published without
+        unit-done” is unrepresentable. Violations render as structured verdicts and exit non-zero.</span>
+      </div></div>
+      <div class="side"><div class="callout"><b>Anti fail-open.</b> The class behind D046,
+      ungated CI, and the <code>set-status published</code> bypass.</div></div>
+    </div>
+    <div class="connector">│</div>
+
+    <div class="step mut">
+      <div class="card"><div class="n">5</div><div class="body">
+        <b>Write new immutable objects first</b>
+        <span>Packs, evidence events, bundles, certificates land in
+        <code>objects/sha256/…</code> before any authority changes.</span>
+      </div></div>
+      <div class="side"><div class="callout crash"><b>Crash here →</b> unreferenced objects only.
+      Harmless; collectable later.</div></div>
+    </div>
+    <div class="connector">│</div>
+
+    <div class="step mut">
+      <div class="card"><div class="n">6</div><div class="body">
+        <b>Atomically replace <code>state.json</code> — CAS on expected revision</b>
+        <span>One file swap carries the entire transition. There is no ledger + map two-file
+        transaction, so the journal and its recovery protocol have no reason to exist.</span>
+      </div></div>
+      <div class="side"><div class="callout crash"><b>Crash after →</b> authoritative state is
+      complete. Nothing to recover.</div></div>
+    </div>
+    <div class="connector">│</div>
+
+    <div class="step mut">
+      <div class="card"><div class="n">7</div><div class="body">
+        <b>Release the lock</b>
+        <span>State is durable; readers see either the old or the new revision, never a blend.</span>
+      </div></div>
+      <div class="side"></div>
+    </div>
+    <div class="connector">│</div>
+
+    <div class="step mut">
+      <div class="card"><div class="n">8</div><div class="body">
+        <b>Separately: <code>vouch generate</code> refreshes projections</b>
+        <span>Map, next actions, status facts regenerate from the new snapshot. CI regenerates
+        into memory and byte-compares — staleness is a visible freshness FAIL, never corruption.</span>
+      </div></div>
+      <div class="side"><div class="callout ok"><b>Anti stale-artifact class.</b> D052 (stale map
+      after publication) cannot occur — the map was never a transaction participant.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="verification">
+  <h2><span class="no">3</span>Verification flow — how a check run composes</h2>
+  <p class="lede">Aimed squarely at the largest defect class: checks that pass without proving
+  anything. A check that silently didn’t run fails the <em>run</em>; a claimed coverage needs
+  a witness the claimant didn’t author.</p>
+
+  <div class="node a-ir">
+    <h3><code>vouch check --ci</code> → load one <code>Snapshot</code></h3>
+    <p class="note">Single read, strict decode. Anchors and evidence heads validate against this
+    same snapshot — no second read to swap underneath.</p>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span></div>
+
+  <div class="node a-ir">
+    <h3>Obligation registry <span class="tag">from the Policy IR</span></h3>
+    <p class="note">The closed list of every check ID that must run for this project’s tier.
+    <strong>Every registered obligation must resolve to an evaluator that actually executed —
+    otherwise the entire run fails.</strong> An obligation that was never registered cannot pass
+    by omission: registry completeness is itself a checked projection of the IR.</p>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span><em>dispatches</em></div>
+
+  <div class="node a-ir">
+    <h3>Evaluators over Snapshot + objects</h3>
+    <p class="note">Each returns a structured verdict bound to its evidence:</p>
+    <div class="verdicts">
+      <span class="verdict"><span class="dot" style="background:var(--s-good)"></span>PASS <small>— evidence <span class="chip digest">sha256</span></small></span>
+      <span class="verdict"><span class="dot" style="background:var(--s-critical)"></span>FAIL <small>— names the violated rule</small></span>
+      <span class="verdict"><span class="dot" style="background:var(--s-warning)"></span>NOT_CHECKED <small>— honest, propagates visibly</small></span>
+      <span class="verdict"><span class="dot" style="background:var(--muted)"></span>NOT_APPLICABLE <small>— must cite the IR applicability rule</small></span>
+    </div>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span></div>
+
+  <div class="node a-ir">
+    <h3>Composition rule</h3>
+    <ul>
+      <li><strong>Only <code>PASS</code> composes to <code>PASS</code>.</strong> <code>SKIP</code> does not exist as an outcome.</li>
+      <li><code>NOT_CHECKED</code> propagates to the top-level result — organizational claims stay
+          honest: neither failures nor manufactured passes.</li>
+      <li><code>NOT_APPLICABLE</code> is only legal with a citation into the IR’s applicability
+          matrix — applicability can never be self-declared by the artifact under test.</li>
+      <li><strong>An authority never supplies its own discriminator</strong> — any coverage or
+          distinctness claim requires an independent witness.</li>
+    </ul>
+  </div>
+  <div class="arrow"><span class="glyph">▼</span></div>
+
+  <div class="duo">
+    <div class="node a-transport">
+      <h3>One structured result</h3>
+      <p class="note">Machine-readable verdict tree → a single presentation layer maps it to
+      text and exit code. CLI, MCP, hooks, and CI consume the same structure —
+      <strong>no transport ever parses output text.</strong></p>
+    </div>
+    <div class="node a-proj a-dashed">
+      <h3>Closure harness <span class="tag">dev-repo CI only · not shipped</span></h3>
+      <p class="note">For every fixed defect: materialize the <em>pre-fix</em> tree — the witness
+      must <strong>FAIL there with the exact defect ID</strong> and <strong>PASS at HEAD</strong>,
+      plus a positive twin. This discrimination is the standing definition of
+      “this check checks something” — the antidote to the vacuity class, kept small and outside
+      the product runtime.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<section id="trust">
+  <h2><span class="no">4</span>Threat levels — the honest boundary</h2>
+  <p class="lede">Written first, before any code: every check is born declaring its scope,
+  instead of extracting the boundary through thirty defects.</p>
+  <div class="threats">
+    <div class="node a-proj">
+      <h3>Level 1 — Accidental inconsistency</h3>
+      <p><strong>Vouch prevents it.</strong> Snapshot consistency, CAS commits, typed decoding,
+      digest bindings, and the obligation registry make ordinary mistakes unrepresentable.</p>
+    </div>
+    <div class="node a-ir">
+      <h3>Level 2 — Adversarial repository content</h3>
+      <p><strong>Vouch parses and validates safely.</strong> Capability-rooted paths, symlink
+      refusal, strict decoders, content-addressed retrieval. Hostile-concurrent-writer TOCTOU
+      (D070) is narrowed to the platform limit and documented, not silently absorbed.</p>
+    </div>
+    <div class="node a-state">
+      <h3>Level 3 — Hostile rewrite of tool, lock &amp; branch rules</h3>
+      <p><strong>Outside Vouch — by declaration.</strong> An actor who can rewrite
+      <code>vouch.lock</code>, the workflow, and branch protection defeats any repository-local
+      mechanism. Addressed by review, signatures, and forge governance; never claimed otherwise.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  Vouch 2 (proposed) · synthesis of two independent rebuild reviews over the Vouch 0.6.2 history —
+  70 recorded defects, 31 behavioral hardening commits, decision log 2026-08-03 → 2026-08-09 ·
+  page generated 2026-08-10. The method’s conceptual core (three unit kinds, contracts-first,
+  typed deviations, protective vs. completion claims, <code>NOT CHECKED</code> honesty) carries
+  over unchanged; only the machinery is replaced.
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('themeBtn');
+    var modes = ['auto', 'light', 'dark'];
+    var i = 0;
+    var saved = null;
+    try { saved = localStorage.getItem('vouch-arch-theme'); } catch (e) {}
+    if (saved && modes.indexOf(saved) > 0) { i = modes.indexOf(saved); apply(); }
+    btn.addEventListener('click', function () {
+      i = (i + 1) % modes.length;
+      apply();
+      try { localStorage.setItem('vouch-arch-theme', modes[i]); } catch (e) {}
+    });
+    function apply() {
+      var m = modes[i];
+      if (m === 'auto') { document.documentElement.removeAttribute('data-theme'); }
+      else { document.documentElement.setAttribute('data-theme', m); }
+      btn.textContent = 'Theme: ' + m;
+    }
+  })();
+</script>
+
+</body>
+</html>
