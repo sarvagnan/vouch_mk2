@@ -18,3 +18,12 @@ jobs:
         run: uv run lint-imports
       - name: Tests
         run: uv run pytest
+      - name: Initialize scratch check store
+        run: uv run python -c "from vouch_mk2.store import Store; store = Store.init('$RUNNER_TEMP/vouch-mk2-ci-check'); store.close()"
+      - name: CI check on scratch store
+        run: uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
+      - name: JSON CI check on scratch store
+        # shell: bash brings pipefail, so a FAIL exit from vouch-mk2 is not
+        # masked by json.tool's success.
+        shell: bash
+        run: uv run vouch-mk2 check --ci --json --root "$RUNNER_TEMP/vouch-mk2-ci-check" | python3 -m json.tool > /dev/null

@@ -7,7 +7,7 @@ from vouch_mk2.core import DeviationStatus, DeviationType, UnitStatus
 from vouch_mk2.core.decide import GATE_EVALUATORS
 from vouch_mk2.ir import validate
 from vouch_mk2.ir.mk2 import DEVIATION_MACHINE, MK2, UNIT_MACHINE
-from vouch_mk2.ir.schema import StateMachine
+from vouch_mk2.ir.schema import ObligationScope, StateMachine
 from vouch_mk2.ir.vouch_06 import VOUCH_06
 from vouch_mk2.ir.vouch_06 import DEVIATION_MACHINE as V06_DEVIATION
 from vouch_mk2.ir.vouch_06 import UNIT_MACHINE as V06_UNIT
@@ -60,7 +60,11 @@ def test_every_unit_command_has_one_meaning() -> None:
 
 
 def test_gate_registry_is_complete_both_ways() -> None:
-    declared = {o.obligation_id for o in MK2.obligations}
+    declared_transition_gates = {
+        o.obligation_id
+        for o in MK2.obligations
+        if o.scope is ObligationScope.TRANSITION_GATE
+    }
     bound = {
         gate
         for machine in MK2.machines
@@ -68,9 +72,10 @@ def test_gate_registry_is_complete_both_ways() -> None:
         for gate in transition.gates
     }
     # Every gate bound to a transition is a declared obligation (schema validation
-    # also enforces this) and has an evaluator; every declared obligation and every
-    # registered evaluator is actually used. No orphans in any direction.
-    assert bound == declared
+    # also enforces this) and has an evaluator; every transition-gate obligation
+    # and every registered evaluator is actually used. No gate orphans in either
+    # direction; standing and organizational obligations are intentionally unbound.
+    assert bound == declared_transition_gates
     assert bound == set(GATE_EVALUATORS.keys())
 
 
@@ -99,3 +104,43 @@ def test_core_enums_conform_to_ir() -> None:
     assert {t.value for t in DeviationType} == set(
         MK2.vocabulary("deviation-types").values
     )
+
+
+def test_scope_misuse_is_a_named_violation() -> None:
+    # A standing-check or organizational obligation bound as a transition gate
+    # must be refused by validate() — this is the rule that keeps the check
+    # scopes mechanically separate.
+    from vouch_mk2.ir.schema import (
+        IrIdentity,
+        Obligation,
+        PolicyIr,
+        Transition,
+    )
+
+    broken = PolicyIr(
+        identity=IrIdentity(name="broken", version="test", source="test"),
+        machines=(
+            StateMachine(
+                name="m",
+                states=("a", "b"),
+                initial="a",
+                command_transitions=(
+                    Transition(
+                        source="a",
+                        command="go",
+                        target="b",
+                        gates=("check.standing-as-gate",),
+                    ),
+                ),
+            ),
+        ),
+        obligations=(
+            Obligation(
+                obligation_id="check.standing-as-gate",
+                scope=ObligationScope.STANDING_CHECK,
+                description="misused",
+            ),
+        ),
+    )
+    codes = {violation.code for violation in validate(broken)}
+    assert "obligation.scope-misuse" in codes

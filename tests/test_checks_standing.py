@@ -1,0 +1,474 @@
+from __future__ import annotations
+
+from vouch_mk2.checks import (
+    MECHANICAL_CHECKS,
+    ORGANIZATIONAL_CHECKS,
+    CheckReport,
+    CheckResult,
+    run_checks,
+)
+from vouch_mk2.checks.standing import (
+    check_amended_deviations_complete,
+    check_blocked_status_coherent,
+    check_dependencies_exist,
+    check_dependency_graph_acyclic,
+    check_deviation_bindings_resolve,
+    check_published_units_gated,
+)
+from vouch_mk2.core.model import (
+    Deviation,
+    DeviationStatus,
+    DeviationType,
+    Snapshot,
+    Unit,
+    UnitRef,
+    UnitStatus,
+)
+from vouch_mk2.ir import mk2
+from vouch_mk2.ir.schema import ObligationScope, Verdict
+
+
+def unit(
+    name: str,
+    status: UnitStatus = UnitStatus.SPECIFIED,
+    *,
+    version: str = "v1",
+    depends_on: tuple[str, ...] = (),
+    pack: str = "",
+) -> Unit:
+    return Unit(
+        name=name,
+        version=version,
+        status=status,
+        depends_on=depends_on,
+        acceptance_pack_version=pack,
+    )
+
+
+def deviation(
+    deviation_id: str,
+    unit_name: str,
+    *,
+    unit_version: str = "v1",
+    status: DeviationStatus = DeviationStatus.OPEN,
+    amendment_version: str = "",
+    impact_set: tuple[str, ...] = (),
+) -> Deviation:
+    return Deviation(
+        deviation_id=deviation_id,
+        deviation_type=DeviationType.PACK_DEFECT,
+        unit=UnitRef(name=unit_name, version=unit_version),
+        status=status,
+        amendment_version=amendment_version,
+        impact_set=impact_set,
+    )
+
+
+def result(report: CheckReport, check_id: str) -> CheckResult:
+    for found in report.mechanical:
+        if found.check_id == check_id:
+            return found
+    raise AssertionError(f"missing result {check_id!r}")
+
+
+def extra_evaluator(_snapshot: Snapshot) -> CheckResult:
+    return CheckResult(check_id="check.extra", verdict=Verdict.PASS, detail="")
+
+
+def test_real_registries_match_the_mk2_ir_and_meta_check_passes() -> None:
+    declared_mechanical = {
+        obligation.obligation_id
+        for obligation in mk2.MK2.obligations
+        if obligation.scope is ObligationScope.STANDING_CHECK
+    }
+    declared_organizational = {
+        obligation.obligation_id
+        for obligation in mk2.MK2.obligations
+        if obligation.scope is ObligationScope.ORGANIZATIONAL
+    }
+    assert set(MECHANICAL_CHECKS) == declared_mechanical
+    assert set(ORGANIZATIONAL_CHECKS) == declared_organizational
+    meta = result(run_checks(Snapshot()), mk2.CHECK_REGISTRY_COMPLETE)
+    assert meta == CheckResult(
+        check_id=mk2.CHECK_REGISTRY_COMPLETE,
+        verdict=Verdict.PASS,
+        detail="",
+    )
+
+
+def test_registry_meta_check_fails_for_missing_mechanical_id() -> None:
+    mechanical = dict(MECHANICAL_CHECKS)
+    del mechanical[mk2.CHECK_DEPENDENCIES_EXIST]
+    meta = result(run_checks(Snapshot(), mechanical=mechanical), mk2.CHECK_REGISTRY_COMPLETE)
+    assert meta.verdict is Verdict.FAIL
+    assert mk2.CHECK_DEPENDENCIES_EXIST in meta.detail
+
+
+def test_registry_meta_check_fails_for_extra_mechanical_id() -> None:
+    mechanical = dict(MECHANICAL_CHECKS)
+    mechanical["check.extra"] = extra_evaluator
+    meta = result(run_checks(Snapshot(), mechanical=mechanical), mk2.CHECK_REGISTRY_COMPLETE)
+    assert meta.verdict is Verdict.FAIL
+    assert "check.extra" in meta.detail
+
+
+def test_registry_meta_check_fails_for_missing_organizational_id() -> None:
+    organizational = dict(ORGANIZATIONAL_CHECKS)
+    del organizational[mk2.ORG_INDEPENDENCE]
+    meta = result(
+        run_checks(Snapshot(), organizational=organizational),
+        mk2.CHECK_REGISTRY_COMPLETE,
+    )
+    assert meta.verdict is Verdict.FAIL
+    assert mk2.ORG_INDEPENDENCE in meta.detail
+
+
+def test_registry_meta_check_fails_for_extra_organizational_id() -> None:
+    organizational = dict(ORGANIZATIONAL_CHECKS)
+    organizational["org.extra"] = extra_evaluator
+    meta = result(
+        run_checks(Snapshot(), organizational=organizational),
+        mk2.CHECK_REGISTRY_COMPLETE,
+    )
+    assert meta.verdict is Verdict.FAIL
+    assert "org.extra" in meta.detail
+
+
+def test_dependencies_exist_passes_for_resolved_dependencies() -> None:
+    snapshot = Snapshot(units=(unit("a"), unit("b", depends_on=("a",))))
+    assert check_dependencies_exist(snapshot).verdict is Verdict.PASS
+
+
+def test_dependencies_exist_fails_for_dangling_dependency() -> None:
+    found = check_dependencies_exist(
+        Snapshot(units=(unit("b", depends_on=("ghost",)),))
+    )
+    assert found.verdict is Verdict.FAIL
+    assert "b" in found.detail and "ghost" in found.detail
+
+
+def test_dependency_graph_acyclic_passes_for_a_dag() -> None:
+    snapshot = Snapshot(units=(unit("a"), unit("b", depends_on=("a",))))
+    assert check_dependency_graph_acyclic(snapshot).verdict is Verdict.PASS
+
+
+def test_dependency_graph_acyclic_names_a_cycle() -> None:
+    snapshot = Snapshot(
+        units=(unit("a", depends_on=("b",)), unit("b", depends_on=("a",)))
+    )
+    found = check_dependency_graph_acyclic(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "a" in found.detail and "b" in found.detail
+    assert "cycle" in found.detail
+
+
+def test_deviation_bindings_resolve_passes_for_current_binding() -> None:
+    snapshot = Snapshot(units=(unit("u"),), deviations=(deviation("d", "u"),))
+    assert check_deviation_bindings_resolve(snapshot).verdict is Verdict.PASS
+
+
+def test_deviation_bindings_resolve_fails_for_stale_binding() -> None:
+    snapshot = Snapshot(
+        units=(unit("u", version="v2"),),
+        deviations=(deviation("d-stale", "u", unit_version="v1"),),
+    )
+    found = check_deviation_bindings_resolve(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "stale" in found.detail and "d-stale" in found.detail
+
+
+def test_deviation_bindings_resolve_fails_for_dangling_binding() -> None:
+    found = check_deviation_bindings_resolve(
+        Snapshot(deviations=(deviation("d-dangling", "ghost"),))
+    )
+    assert found.verdict is Verdict.FAIL
+    assert "dangling" in found.detail and "d-dangling" in found.detail
+
+
+def test_blocked_status_coherent_passes_for_matching_blocker() -> None:
+    snapshot = Snapshot(
+        units=(unit("u", UnitStatus.BLOCKED),),
+        deviations=(deviation("d", "u"),),
+    )
+    assert check_blocked_status_coherent(snapshot).verdict is Verdict.PASS
+
+
+def test_blocked_without_blocker_is_legal_awaiting_explicit_unblock() -> None:
+    # D-3 no-auto-unblock: closing the last deviation leaves the unit blocked
+    # until an explicit respecify/begin-reverify, so this state is coherent.
+    snapshot = Snapshot(units=(unit("u", UnitStatus.BLOCKED),))
+    assert check_blocked_status_coherent(snapshot).verdict is Verdict.PASS
+
+
+def test_blocked_status_coherent_fails_for_blocker_on_nonblocked_unit() -> None:
+    snapshot = Snapshot(
+        units=(unit("u", UnitStatus.IN_PROGRESS),),
+        deviations=(deviation("d", "u"),),
+    )
+    found = check_blocked_status_coherent(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "d" in found.detail and "in-progress" in found.detail
+
+
+def test_blocked_status_coherent_allows_superseded_unit_with_blocker() -> None:
+    snapshot = Snapshot(
+        units=(unit("u", UnitStatus.SUPERSEDED),),
+        deviations=(deviation("d", "u"),),
+    )
+    assert check_blocked_status_coherent(snapshot).verdict is Verdict.PASS
+
+
+def test_published_units_gated_passes_when_all_three_conditions_hold() -> None:
+    snapshot = Snapshot(
+        units=(
+            unit("up", UnitStatus.PUBLISHED, pack="p-up"),
+            unit(
+                "u",
+                UnitStatus.PUBLISHED,
+                depends_on=("up",),
+                pack="p-u",
+            ),
+        )
+    )
+    assert check_published_units_gated(snapshot).verdict is Verdict.PASS
+
+
+def test_published_units_gated_fails_for_empty_pack_only() -> None:
+    found = check_published_units_gated(
+        Snapshot(units=(unit("u", UnitStatus.PUBLISHED, pack=""),))
+    )
+    assert found.verdict is Verdict.FAIL
+    assert "acceptance_pack_version" in found.detail
+    assert "dependencies" not in found.detail and "blocking" not in found.detail
+
+
+def test_published_units_gated_fails_for_unsettled_dependency_only() -> None:
+    snapshot = Snapshot(
+        units=(
+            unit("up", UnitStatus.IN_PROGRESS),
+            unit("u", UnitStatus.PUBLISHED, depends_on=("up",), pack="p-u"),
+        )
+    )
+    found = check_published_units_gated(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "unit.settled" in found.detail and "up" in found.detail
+    assert "acceptance_pack_version" not in found.detail
+    assert "blocking" not in found.detail
+
+
+def test_published_units_gated_accepts_superseded_dependency() -> None:
+    # Superseding a published upstream is history, not a standing failure
+    # (0.6 retain-releases; the unit.settled state set). A consumer published
+    # through the strict gate stays healthy at rest.
+    snapshot = Snapshot(
+        units=(
+            unit("up", UnitStatus.SUPERSEDED),
+            unit("u", UnitStatus.PUBLISHED, depends_on=("up",), pack="p-u"),
+        )
+    )
+    assert check_published_units_gated(snapshot).verdict is Verdict.PASS
+
+
+def test_published_units_gated_fails_for_blocking_deviation_only() -> None:
+    snapshot = Snapshot(
+        units=(unit("u", UnitStatus.PUBLISHED, pack="p-u"),),
+        deviations=(deviation("d", "u"),),
+    )
+    found = check_published_units_gated(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "blocking deviations" in found.detail and "d" in found.detail
+    assert "acceptance_pack_version" not in found.detail
+    assert "dependencies" not in found.detail
+
+
+def test_amended_deviations_complete_passes_for_complete_amendment() -> None:
+    snapshot = Snapshot(
+        units=(unit("u"),),
+        deviations=(
+            deviation(
+                "d",
+                "u",
+                status=DeviationStatus.AMENDED,
+                amendment_version="v2",
+                impact_set=("u",),
+            ),
+        ),
+    )
+    assert check_amended_deviations_complete(snapshot).verdict is Verdict.PASS
+
+
+def test_amended_deviations_complete_fails_for_empty_version() -> None:
+    snapshot = Snapshot(
+        units=(unit("u"),),
+        deviations=(
+            deviation(
+                "d",
+                "u",
+                status=DeviationStatus.AMENDED,
+                impact_set=("u",),
+            ),
+        ),
+    )
+    found = check_amended_deviations_complete(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "amendment_version" in found.detail
+
+
+def test_amended_deviations_complete_fails_for_dangling_impact() -> None:
+    snapshot = Snapshot(
+        units=(unit("u"),),
+        deviations=(
+            deviation(
+                "d",
+                "u",
+                status=DeviationStatus.AMENDED,
+                amendment_version="v2",
+                impact_set=("ghost",),
+            ),
+        ),
+    )
+    found = check_amended_deviations_complete(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "impact_set" in found.detail and "ghost" in found.detail
+
+
+def test_organizational_checks_are_always_not_checked_with_detail() -> None:
+    snapshots = (
+        Snapshot(),
+        Snapshot(
+            revision=9,
+            units=(unit("u", UnitStatus.BLOCKED),),
+            deviations=(deviation("d", "u"),),
+        ),
+    )
+    for snapshot in snapshots:
+        report = run_checks(snapshot)
+        assert len(report.organizational) == 5
+        assert all(
+            found.verdict is Verdict.NOT_CHECKED and found.detail
+            for found in report.organizational
+        )
+
+
+def test_organizational_rows_do_not_affect_composition() -> None:
+    report = CheckReport(
+        revision=0,
+        mechanical=(
+            CheckResult(check_id="check.pass", verdict=Verdict.PASS, detail=""),
+        ),
+        organizational=tuple(
+            evaluator(Snapshot()) for evaluator in ORGANIZATIONAL_CHECKS.values()
+        ),
+    )
+    assert report.composed() is Verdict.PASS
+
+
+def test_drifted_snapshot_report_composes_to_fail() -> None:
+    # A blocking deviation bound to an in-progress unit is unreachable through
+    # decide() (opening a deviation forces blocked) — pure state drift.
+    report = run_checks(
+        Snapshot(
+            units=(unit("u", UnitStatus.IN_PROGRESS, pack="p"),),
+            deviations=(deviation("d", "u"),),
+        )
+    )
+    assert report.composed() is Verdict.FAIL
+
+
+def test_blocked_coherence_accepts_invalidated_unit_with_own_blockers() -> None:
+    # D-3: an invalidated unit keeps its own blocking deviations; they gate its
+    # re-verification. Reachable via legal commands (open deviation on app,
+    # then amend an upstream deviation whose closure invalidates app).
+    snapshot = Snapshot(
+        units=(unit("app", UnitStatus.INVALIDATED, pack="p"),),
+        deviations=(deviation("d-app", "app"),),
+    )
+    assert check_blocked_status_coherent(snapshot).verdict is Verdict.PASS
+
+
+def test_dependency_graph_check_refuses_duplicate_unit_names() -> None:
+    snapshot = Snapshot(
+        units=(
+            unit("a", depends_on=("b",)),
+            unit("a"),
+            unit("b", depends_on=("a",)),
+        )
+    )
+    found = check_dependency_graph_acyclic(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "duplicate unit names" in found.detail
+
+
+def test_dependency_cycle_detection_survives_deep_chains() -> None:
+    # Iterative DFS: a chain far beyond the interpreter recursion limit must
+    # neither crash nor false-FAIL.
+    units = [unit("u0")]
+    units.extend(
+        unit(f"u{i}", depends_on=(f"u{i - 1}",)) for i in range(1, 3000)
+    )
+    snapshot = Snapshot(units=tuple(units))
+    assert check_dependency_graph_acyclic(snapshot).verdict is Verdict.PASS
+
+
+def test_closed_deviation_with_amendment_record_is_still_validated() -> None:
+    snapshot = Snapshot(
+        units=(unit("u", UnitStatus.INVALIDATED, pack="p"),),
+        deviations=(
+            deviation(
+                "d",
+                "u",
+                status=DeviationStatus.CLOSED,
+                amendment_version="v2",
+                impact_set=("u", "ghost"),
+            ),
+        ),
+    )
+    found = check_amended_deviations_complete(snapshot)
+    assert found.verdict is Verdict.FAIL
+    assert "ghost" in found.detail
+
+
+def test_mislabeled_mechanical_evaluator_fails_under_registry_key() -> None:
+    def liar(snapshot: Snapshot) -> CheckResult:
+        del snapshot
+        return CheckResult(
+            check_id=mk2.CHECK_DEPENDENCIES_EXIST,
+            verdict=Verdict.PASS,
+            detail="",
+        )
+
+    mechanical = dict(MECHANICAL_CHECKS)
+    mechanical[mk2.CHECK_PUBLISHED_UNITS_GATED] = liar
+    report = run_checks(Snapshot(), mechanical=mechanical)
+    ids = [result.check_id for result in report.mechanical]
+    assert ids == sorted(ids) and len(ids) == len(set(ids))
+    guarded = next(
+        result
+        for result in report.mechanical
+        if result.check_id == mk2.CHECK_PUBLISHED_UNITS_GATED
+    )
+    assert guarded.verdict is Verdict.FAIL
+    assert "mislabeled" in guarded.detail
+    assert report.composed() is Verdict.FAIL
+
+
+def test_organizational_evaluator_returning_pass_fails_the_run() -> None:
+    def fake_org(snapshot: Snapshot) -> CheckResult:
+        del snapshot
+        return CheckResult(
+            check_id=mk2.ORG_INDEPENDENCE,
+            verdict=Verdict.PASS,
+            detail="verified independent",
+        )
+
+    organizational = dict(ORGANIZATIONAL_CHECKS)
+    organizational[mk2.ORG_INDEPENDENCE] = fake_org
+    report = run_checks(Snapshot(), organizational=organizational)
+    guarded = next(
+        result
+        for result in report.organizational
+        if result.check_id == mk2.ORG_INDEPENDENCE
+    )
+    assert guarded.verdict is Verdict.FAIL
+    assert "organizational" in guarded.detail
+    assert report.composed() is Verdict.FAIL

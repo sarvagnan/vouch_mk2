@@ -29,6 +29,15 @@ class Verdict(Enum):
     NOT_APPLICABLE = "not-applicable"
 
 
+class ObligationScope(Enum):
+    """The closed set of places where an obligation may be evaluated."""
+
+    TRANSITION_GATE = "transition-gate"
+    CLAIM = "claim"
+    STANDING_CHECK = "standing-check"
+    ORGANIZATIONAL = "organizational"
+
+
 class ClaimShape(Enum):
     """What entering a claim-bearing state asserts (plan §4 Phase 4)."""
 
@@ -139,6 +148,7 @@ class Obligation:
     """
 
     obligation_id: str
+    scope: ObligationScope
     description: str
     applicability: tuple[Applicability, ...] = ()
 
@@ -296,6 +306,7 @@ def validate(ir: PolicyIr) -> tuple[Violation, ...]:
     if len(set(obligation_ids)) != len(obligation_ids):
         out.add("obligation.duplicate-id", "duplicate obligation ids")
     known_obligations = set(obligation_ids)
+    obligations_by_id = {o.obligation_id: o for o in ir.obligations}
 
     seen_claims: set[tuple[str, str]] = set()
     for rule in ir.claim_rules:
@@ -319,6 +330,18 @@ def validate(ir: PolicyIr) -> tuple[Violation, ...]:
                     out.add(
                         "transition.unknown-gate",
                         f"machine {machine.name!r}: {t.source!r}->{t.target!r}: {gate!r}",
+                    )
+                    continue
+                obligation = obligations_by_id[gate]
+                if obligation.scope in {
+                    ObligationScope.STANDING_CHECK,
+                    ObligationScope.ORGANIZATIONAL,
+                }:
+                    out.add(
+                        "obligation.scope-misuse",
+                        f"obligation {gate!r} with scope {obligation.scope.value!r} "
+                        f"was found in machine {machine.name!r} transition "
+                        f"{t.source!r}->{t.target!r}",
                     )
 
     set_names = [s.name for s in ir.state_sets]

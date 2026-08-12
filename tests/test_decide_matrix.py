@@ -260,3 +260,35 @@ def test_every_legal_transition_is_reachable() -> None:
     assert {source for source, _ in seen_adjudication_edges} <= allowed
     # And invalidated units recover: invalidated-source command edges appeared.
     assert any(edge[0] == "invalidated" for edge in seen_unit_edges)
+
+
+def test_all_reachable_snapshots_pass_standing_checks() -> None:
+    # Property: no snapshot produced purely by legal decide()/apply() sequences
+    # may FAIL the standing checks — the at-rest invariants and the mutation-time
+    # gates must agree. (This is the test that catches a standing check whose
+    # predicate is stricter than the lifecycle it audits.)
+    from vouch_mk2.checks import run_checks
+    from vouch_mk2.ir.schema import Verdict
+
+    visited = {snapshot_key(Snapshot())}
+    frontier = [Snapshot()]
+    while frontier:
+        snapshot = frontier.pop()
+        report = run_checks(snapshot)
+        assert report.composed() is not Verdict.FAIL, (
+            snapshot,
+            [
+                (r.check_id, r.detail)
+                for r in report.mechanical
+                if r.verdict is Verdict.FAIL
+            ],
+        )
+        for command in COMMAND_UNIVERSE:
+            decision = decide(snapshot, command)
+            if not isinstance(decision, Accepted):
+                continue
+            after = apply(snapshot, decision.events)
+            key = snapshot_key(after)
+            if key not in visited:
+                visited.add(key)
+                frontier.append(after)

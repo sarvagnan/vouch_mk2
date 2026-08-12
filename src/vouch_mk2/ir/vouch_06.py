@@ -29,6 +29,7 @@ from vouch_mk2.ir.schema import (
     ClosedVocabulary,
     IrIdentity,
     Obligation,
+    ObligationScope,
     PolicyIr,
     RequirementLevel,
     StateMachine,
@@ -199,6 +200,7 @@ _DEVIATION = StateMachine(
 _OBLIGATIONS = (
     Obligation(
         obligation_id=OBLIGATION_COMPLETION_RECHECK,
+        scope=ObligationScope.CLAIM,
         description=(
             "Re-check included unit-done, integrity, criteria digest, and roster "
             "bindings on every transition into a completion claim."
@@ -206,6 +208,7 @@ _OBLIGATIONS = (
     ),
     Obligation(
         obligation_id=OBLIGATION_NEGATIVE_OUTCOME,
+        scope=ObligationScope.CLAIM,
         description=(
             "Retain the predeclared criteria and record outcome_deviations; "
             "no roster-health obligation."
@@ -213,6 +216,7 @@ _OBLIGATIONS = (
     ),
     Obligation(
         obligation_id=OBLIGATION_CLOSURE_RECORD,
+        scope=ObligationScope.CLAIM,
         description=(
             "Record the trigger, required trigger_kind, frozen-roster status "
             "snapshot, no_completion_claim: true, and observations; record "

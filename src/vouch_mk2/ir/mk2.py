@@ -21,6 +21,7 @@ from vouch_mk2.ir.schema import (
     ClosedVocabulary,
     IrIdentity,
     Obligation,
+    ObligationScope,
     PolicyIr,
     StateMachine,
     StateSet,
@@ -59,6 +60,24 @@ GATE_DOD_DEPENDENCIES_SATISFIED = "gate.dod.dependencies-satisfied"
 GATE_DOD_NO_BLOCKING_DEVIATIONS = "gate.dod.no-blocking-deviations"
 GATE_UNBLOCK_NO_BLOCKING_DEVIATIONS = "gate.unblock.no-blocking-deviations"
 GATE_REVERIFY_PACK_RECORDED = "gate.reverify.pack-recorded"
+
+# Phase 3 standing mechanical checks. These constants live with the IR because
+# obligation ids are IR-owned; evaluators import them from here so declarations
+# and registry keys cannot drift through duplicated string literals.
+CHECK_REGISTRY_COMPLETE = "check.registry-complete"
+CHECK_DEPENDENCIES_EXIST = "check.dependencies-exist"
+CHECK_DEPENDENCY_GRAPH_ACYCLIC = "check.dependency-graph-acyclic"
+CHECK_DEVIATION_BINDINGS_RESOLVE = "check.deviation-bindings-resolve"
+CHECK_BLOCKED_STATUS_COHERENT = "check.blocked-status-coherent"
+CHECK_PUBLISHED_UNITS_GATED = "check.published-units-gated"
+CHECK_AMENDED_DEVIATIONS_COMPLETE = "check.amended-deviations-complete"
+
+# Permanently NOT_CHECKED organizational claims (docs/claim-boundary.md).
+ORG_ACCEPTANCE_OWNERSHIP = "org.acceptance-ownership"
+ORG_INTENT_VALIDATION = "org.intent-validation"
+ORG_INDEPENDENCE = "org.independence"
+ORG_CAUSAL_RED_HISTORY = "org.causal-red-history"
+ORG_PROTECTIVE_CLOSURE_TRUTHFULNESS = "org.protective-closure-truthfulness"
 
 _DOR_GATES = (
     GATE_DOR_PACK_RECORDED,
@@ -198,22 +217,27 @@ _DEVIATION = StateMachine(
 _OBLIGATIONS = (
     Obligation(
         obligation_id=GATE_DOR_PACK_RECORDED,
+        scope=ObligationScope.TRANSITION_GATE,
         description="Freeze records a non-empty acceptance pack version.",
     ),
     Obligation(
         obligation_id=GATE_DOR_DEPENDENCIES_EXIST,
+        scope=ObligationScope.TRANSITION_GATE,
         description="Every declared dependency names a unit present in the snapshot.",
     ),
     Obligation(
         obligation_id=GATE_DOR_NO_BLOCKING_DEVIATIONS,
+        scope=ObligationScope.TRANSITION_GATE,
         description="No deviation bound to this NAME@VERSION is open or rejected.",
     ),
     Obligation(
         obligation_id=GATE_DOD_PACK_FROZEN,
+        scope=ObligationScope.TRANSITION_GATE,
         description="A frozen acceptance pack version is recorded on the unit.",
     ),
     Obligation(
         obligation_id=GATE_DOD_DEPENDENCIES_SATISFIED,
+        scope=ObligationScope.TRANSITION_GATE,
         description=(
             "Every declared dependency is in a satisfied status "
             "(the unit.satisfied-dependency state set)."
@@ -221,6 +245,7 @@ _OBLIGATIONS = (
     ),
     Obligation(
         obligation_id=GATE_DOD_NO_BLOCKING_DEVIATIONS,
+        scope=ObligationScope.TRANSITION_GATE,
         description=(
             "No deviation bound to this NAME@VERSION is open or rejected "
             "(publication never leaves an open deviation behind)."
@@ -228,6 +253,7 @@ _OBLIGATIONS = (
     ),
     Obligation(
         obligation_id=GATE_UNBLOCK_NO_BLOCKING_DEVIATIONS,
+        scope=ObligationScope.TRANSITION_GATE,
         description=(
             "Leaving blocked requires every blocking deviation to be closed; "
             "unblocking is explicit, never a side effect (D-3)."
@@ -235,10 +261,76 @@ _OBLIGATIONS = (
     ),
     Obligation(
         obligation_id=GATE_REVERIFY_PACK_RECORDED,
+        scope=ObligationScope.TRANSITION_GATE,
         description=(
             "Re-verification requires a recorded acceptance pack version; a unit "
             "with none returns via respecify."
         ),
+    ),
+    Obligation(
+        obligation_id=CHECK_REGISTRY_COMPLETE,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every Phase 3 IR check obligation has exactly one registered evaluator.",
+    ),
+    Obligation(
+        obligation_id=CHECK_DEPENDENCIES_EXIST,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every unit dependency resolves to a unit in the snapshot.",
+    ),
+    Obligation(
+        obligation_id=CHECK_DEPENDENCY_GRAPH_ACYCLIC,
+        scope=ObligationScope.STANDING_CHECK,
+        description="The unit dependency graph contains no cycle.",
+    ),
+    Obligation(
+        obligation_id=CHECK_DEVIATION_BINDINGS_RESOLVE,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every deviation binds the current version of an existing unit.",
+    ),
+    Obligation(
+        obligation_id=CHECK_BLOCKED_STATUS_COHERENT,
+        scope=ObligationScope.STANDING_CHECK,
+        description=(
+            "Blocking deviations only ever bind units in blocked, superseded, or "
+            "invalidated status. (The converse is legal: D-3's no-auto-unblock "
+            "means a unit stays blocked after its last blocker closes, until an "
+            "explicit respecify or begin-reverify.)"
+        ),
+    ),
+    Obligation(
+        obligation_id=CHECK_PUBLISHED_UNITS_GATED,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every published or release-bound unit still satisfies publication gates.",
+    ),
+    Obligation(
+        obligation_id=CHECK_AMENDED_DEVIATIONS_COMPLETE,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every amended deviation records its amendment and a resolving impact set.",
+    ),
+    Obligation(
+        obligation_id=ORG_ACCEPTANCE_OWNERSHIP,
+        scope=ObligationScope.ORGANIZATIONAL,
+        description="Acceptance ownership is real.",
+    ),
+    Obligation(
+        obligation_id=ORG_INTENT_VALIDATION,
+        scope=ObligationScope.ORGANIZATIONAL,
+        description="Intent validation.",
+    ),
+    Obligation(
+        obligation_id=ORG_INDEPENDENCE,
+        scope=ObligationScope.ORGANIZATIONAL,
+        description="Independence between real persons.",
+    ),
+    Obligation(
+        obligation_id=ORG_CAUSAL_RED_HISTORY,
+        scope=ObligationScope.ORGANIZATIONAL,
+        description="Causal red history.",
+    ),
+    Obligation(
+        obligation_id=ORG_PROTECTIVE_CLOSURE_TRUTHFULNESS,
+        scope=ObligationScope.ORGANIZATIONAL,
+        description="Protective-closure truthfulness.",
     ),
 )
 
@@ -247,6 +339,15 @@ _STATE_SETS = (
         name="unit.satisfied-dependency",
         machine=UNIT_MACHINE,
         states=("published", "release-bound"),
+    ),
+    # 0.6's settled_unit_statuses, carried over: the at-rest form of dependency
+    # health. Publication requires *satisfied* upstreams; a unit that is already
+    # published stays healthy when an upstream is later superseded (0.6's
+    # retain-releases philosophy: supersession is history, not failure).
+    StateSet(
+        name="unit.settled",
+        machine=UNIT_MACHINE,
+        states=("published", "release-bound", "superseded"),
     ),
 )
 
