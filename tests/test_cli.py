@@ -7,16 +7,22 @@ from pytest import CaptureFixture
 
 from vouch_mk2.cli import main
 from vouch_mk2.core.model import (
+    AnchorMode,
     Deviation,
     DeviationStatus,
     DeviationType,
+    EvidenceEvent,
+    EvidenceKind,
+    EvidenceOutcome,
     Snapshot,
     Unit,
     UnitRef,
     UnitStatus,
 )
+from vouch_mk2.core import Accepted, AdvanceAnchor, SetAnchorMode, apply, decide
 from vouch_mk2.ir import mk2
 from vouch_mk2.store import Store
+from vouch_mk2.verify import record_evidence
 
 
 def init_store(root: Path) -> None:
@@ -49,6 +55,47 @@ def commit_drifted_snapshot(root: Path) -> None:
                 ),
             )
         )
+
+
+def commit_evidence_snapshot(root: Path, mode: AnchorMode, *, anchor: bool) -> None:
+    with Store.open(str(root)) as store:
+        store.commit(
+            Snapshot(
+                revision=1,
+                units=(Unit("u", "v1", UnitStatus.SPECIFIED),),
+            )
+        )
+        red_event = EvidenceEvent(
+            UnitRef("u", "v1"),
+            1,
+            "GENESIS",
+            EvidenceKind.RED,
+            "pytest",
+            EvidenceOutcome.TESTS_FAILED,
+            "t1",
+        )
+        red = record_evidence(store, red_event)
+        record_evidence(
+            store,
+            EvidenceEvent(
+                UnitRef("u", "v1"),
+                2,
+                red,
+                EvidenceKind.GREEN,
+                "pytest",
+                EvidenceOutcome.TESTS_PASSED,
+                "t2",
+            ),
+        )
+        snapshot = store.read_snapshot()
+        mode_decision = decide(snapshot, SetAnchorMode(mode))
+        assert isinstance(mode_decision, Accepted)
+        store.commit(apply(snapshot, mode_decision.events))
+        if anchor:
+            snapshot = store.read_snapshot()
+            anchor_decision = decide(snapshot, AdvanceAnchor("u"))
+            assert isinstance(anchor_decision, Accepted)
+            store.commit(apply(snapshot, anchor_decision.events))
 
 
 def test_cli_check_on_fresh_store_passes(
@@ -112,3 +159,51 @@ def test_cli_bad_root_returns_typed_transport_error(
     assert main(["check", "--root", str(bad_root)]) == 2
     captured = capsys.readouterr()
     assert captured.err
+
+
+def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    root = tmp_path / "store"
+    init_store(root)
+    commit_evidence_snapshot(root, AnchorMode.CI, anchor=True)
+    assert main(["check", "--ci", "--root", str(root)]) == 0
+    text = capsys.readouterr().out
+    for check_id in (
+        mk2.CHECK_EVIDENCE_CHAINS,
+        mk2.CHECK_EVIDENCE_ANCHORS,
+        mk2.CHECK_BUNDLE_INVENTORIES,
+    ):
+        assert check_id in text
+    assert main(["check", "--ci", "--json", "--root", str(root)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    rows = payload["mechanical"]
+    ids = {row["check_id"] for row in rows}
+    assert {
+        mk2.CHECK_EVIDENCE_CHAINS,
+        mk2.CHECK_EVIDENCE_ANCHORS,
+        mk2.CHECK_BUNDLE_INVENTORIES,
+    } <= ids
+
+
+def test_cli_stagnant_ci_anchor_is_not_checked_and_exits_one(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    root = tmp_path / "store"
+    init_store(root)
+    commit_evidence_snapshot(root, AnchorMode.CI, anchor=False)
+    assert main(["check", "--ci", "--root", str(root)]) == 1
+    output = capsys.readouterr().out
+    assert "NOT-CHECKED" in output
+    assert mk2.CHECK_EVIDENCE_ANCHORS in output
+
+
+def test_cli_none_anchor_is_not_applicable_but_overall_passes(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    root = tmp_path / "store"
+    init_store(root)
+    commit_evidence_snapshot(root, AnchorMode.NONE, anchor=False)
+    assert main(["check", "--ci", "--root", str(root)]) == 0
+    output = capsys.readouterr().out
+    assert "NOT-APPLICABLE" in output
+    assert mk2.CHECK_EVIDENCE_ANCHORS in output
+    assert output.rstrip().endswith("composed: PASS")

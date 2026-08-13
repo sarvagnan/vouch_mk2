@@ -1,4 +1,9 @@
-"""Canonical Snapshot serialization and its single strict JSON ingress."""
+"""Canonical Snapshot serialization and its single strict JSON ingress.
+
+The state format is pre-1.0 and DISPOSABLE: fields are added without migration
+and older state.json files become undecodable by design. The one supported
+migration path is Phase 9's ``vouch-migrate`` (from Vouch 0.6.x); mk2-to-mk2
+format stability begins at the first usable release, not before."""
 
 from __future__ import annotations
 
@@ -7,11 +12,18 @@ from collections.abc import Callable
 from typing import cast
 
 from vouch_mk2.core.model import (
+    AnchorMode,
+    BundleInventory,
     ClosureRecord,
     ClosureTriggerKind,
     Deviation,
     DeviationStatus,
     DeviationType,
+    EvidenceEvent,
+    EvidenceHead,
+    EvidenceKind,
+    EvidenceOutcome,
+    InventoryEntry,
     LaunchCriteria,
     Release,
     ReleaseArchetype,
@@ -21,12 +33,24 @@ from vouch_mk2.core.model import (
     UnitRef,
     UnitStatus,
 )
-from vouch_mk2.store.errors import DecodeError
+from vouch_mk2.store.errors import DecodeError, StoreError
+from vouch_mk2.store.paths import RelPath
+
+
+def _canonical_json(document: object) -> bytes:
+    text = json.dumps(
+        document,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return text.encode("utf-8") + b"\n"
 
 
 def encode_snapshot(snapshot: Snapshot) -> bytes:
     """Encode every Snapshot field as stable canonical JSON plus one newline."""
     document = {
+        "anchor_mode": snapshot.anchor_mode.value,
         "deviations": [
             {
                 "amendment_version": deviation.amendment_version,
@@ -43,6 +67,15 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
             for deviation in snapshot.deviations
         ],
         "revision": snapshot.revision,
+        "evidence_heads": [
+            {
+                "anchored": head.anchored,
+                "head": head.head,
+                "head_sequence": head.head_sequence,
+                "unit_name": head.unit_name,
+            }
+            for head in snapshot.evidence_heads
+        ],
         "releases": [
             {
                 "archetype": release.archetype.value,
@@ -86,6 +119,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
                 ],
                 "release_id": release.release_id,
                 "state": release.state.value,
+                "bundle_inventory_digest": release.bundle_inventory_digest,
             }
             for release in snapshot.releases
         ],
@@ -100,13 +134,44 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
             for unit in snapshot.units
         ],
     }
-    text = json.dumps(
-        document,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
+    return _canonical_json(document)
+
+
+def encode_evidence_event(event: EvidenceEvent) -> bytes:
+    return _canonical_json(
+        {
+            "command_line": event.command_line,
+            "kind": event.kind.value,
+            "outcome": event.outcome.value,
+            "parent": event.parent,
+            "recorded_at": event.recorded_at,
+            "sequence": event.sequence,
+            "unit": {"name": event.unit.name, "version": event.unit.version},
+        }
     )
-    return text.encode("utf-8") + b"\n"
+
+
+def encode_bundle_inventory(inventory: BundleInventory) -> bytes:
+    # Enforce the decoder's invariants at encode time too: a supported API
+    # must never durably commit an artifact that can never be read back.
+    previous = ""
+    for entry in inventory.entries:
+        RelPath.parse(entry.path)
+        if entry.path <= previous and previous:
+            raise StoreError(
+                f"inventory entries must be strictly sorted by path; "
+                f"{entry.path!r} follows {previous!r}"
+            )
+        previous = entry.path
+    return _canonical_json(
+        {
+            "entries": [
+                {"digest": entry.digest, "path": entry.path}
+                for entry in inventory.entries
+            ],
+            "exclusions": list(inventory.exclusions),
+        }
+    )
 
 
 def _child(path: str, field: str) -> str:
@@ -215,9 +280,43 @@ _CLOSURE_FIELDS = frozenset(
     }
 )
 _RELEASE_FIELDS = frozenset(
-    {"release_id", "archetype", "state", "includes", "criteria", "closure"}
+    {
+        "release_id",
+        "archetype",
+        "state",
+        "includes",
+        "criteria",
+        "closure",
+        "bundle_inventory_digest",
+    }
 )
-_SNAPSHOT_FIELDS = frozenset({"revision", "units", "deviations", "releases"})
+_EVIDENCE_HEAD_FIELDS = frozenset(
+    {"unit_name", "head", "head_sequence", "anchored"}
+)
+_EVIDENCE_EVENT_FIELDS = frozenset(
+    {"unit", "sequence", "parent", "kind", "command_line", "outcome", "recorded_at"}
+)
+_INVENTORY_ENTRY_FIELDS = frozenset({"path", "digest"})
+_BUNDLE_INVENTORY_FIELDS = frozenset({"entries", "exclusions"})
+_SNAPSHOT_FIELDS = frozenset(
+    {"revision", "units", "deviations", "releases", "evidence_heads", "anchor_mode"}
+)
+
+
+def _digest(value: object, path: str, *, allow_empty: bool = False) -> str:
+    digest = _string(value, path)
+    if allow_empty and digest == "":
+        return digest
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise DecodeError(f"{path}: expected 64 lowercase hexadecimal characters")
+    return digest
+
+
+def _parent(value: object, path: str) -> str:
+    parent = _string(value, path)
+    if parent == "GENESIS":
+        return parent
+    return _digest(parent, path)
 
 
 def _decode_unit(value: object, path: str) -> Unit:
@@ -360,6 +459,27 @@ def _decode_release(value: object, path: str) -> Release:
         includes=includes,
         criteria=_decode_criteria(obj["criteria"], _child(path, "criteria")),
         closure=_decode_closure(obj["closure"], _child(path, "closure")),
+        bundle_inventory_digest=_digest(
+            obj["bundle_inventory_digest"],
+            _child(path, "bundle_inventory_digest"),
+            allow_empty=True,
+        ),
+    )
+
+
+def _decode_evidence_head(value: object, path: str) -> EvidenceHead:
+    obj = _fields(value, path, _EVIDENCE_HEAD_FIELDS)
+    sequence = _integer(obj["head_sequence"], _child(path, "head_sequence"))
+    if sequence < 1:
+        raise DecodeError(f"{_child(path, 'head_sequence')}: must be at least 1")
+    unit_name = _string(obj["unit_name"], _child(path, "unit_name"))
+    if not unit_name:
+        raise DecodeError(f"{_child(path, 'unit_name')}: must be non-empty")
+    return EvidenceHead(
+        unit_name=unit_name,
+        head=_digest(obj["head"], _child(path, "head")),
+        head_sequence=sequence,
+        anchored=_parent(obj["anchored"], _child(path, "anchored")),
     )
 
 
@@ -374,23 +494,81 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return result
 
 
-def decode_snapshot(data: bytes) -> Snapshot:
-    """Strictly decode bytes into Snapshot; no raw JSON escapes this function."""
-    # Decode UTF-8 explicitly first: json.loads on bytes BOM-sniffs and would
-    # accept UTF-16/32 documents, giving one snapshot many byte encodings at
-    # the single ingress (a UTF-8 BOM is also refused, by the JSON parser).
+def _decode_json(data: bytes, artifact: str) -> object:
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as error:
-        raise DecodeError(f"$: state must be UTF-8: {error}") from error
+        raise DecodeError(f"$: {artifact} must be UTF-8: {error}") from error
     try:
-        raw = cast(
+        return cast(
             object, json.loads(text, object_pairs_hook=_reject_duplicate_keys)
         )
     except json.JSONDecodeError as error:
         raise DecodeError(f"$: invalid JSON: {error}") from error
 
-    obj = _fields(raw, "", _SNAPSHOT_FIELDS)
+
+def decode_evidence_event(data: bytes) -> EvidenceEvent:
+    obj = _fields(_decode_json(data, "evidence event"), "", _EVIDENCE_EVENT_FIELDS)
+    sequence = _integer(obj["sequence"], "sequence")
+    if sequence < 1:
+        raise DecodeError("sequence: must be at least 1")
+    event = EvidenceEvent(
+        unit=_decode_unit_ref(obj["unit"], "unit"),
+        sequence=sequence,
+        parent=_parent(obj["parent"], "parent"),
+        kind=_enum_value(obj["kind"], "kind", EvidenceKind),
+        command_line=_string(obj["command_line"], "command_line"),
+        outcome=_enum_value(obj["outcome"], "outcome", EvidenceOutcome),
+        recorded_at=_string(obj["recorded_at"], "recorded_at"),
+    )
+    # Content-addressed artifacts must have exactly ONE byte representation per
+    # logical value, or digest identity is not event identity.
+    if encode_evidence_event(event) != data:
+        raise DecodeError("$: non-canonical evidence event encoding")
+    return event
+
+
+def decode_bundle_inventory(data: bytes) -> BundleInventory:
+    obj = _fields(
+        _decode_json(data, "bundle inventory"), "", _BUNDLE_INVENTORY_FIELDS
+    )
+    entries: list[InventoryEntry] = []
+    seen_paths: set[str] = set()
+    previous = ""
+    for index, raw in enumerate(_array(obj["entries"], "entries")):
+        path = f"entries[{index}]"
+        fields = _fields(raw, path, _INVENTORY_ENTRY_FIELDS)
+        text = _string(fields["path"], f"{path}.path")
+        try:
+            RelPath.parse(text)
+        except StoreError as error:
+            raise DecodeError(f"{path}.path: {error}") from error
+        if text in seen_paths:
+            raise DecodeError(f"{path}.path: duplicate path {text!r}")
+        if index > 0 and text < previous:
+            raise DecodeError(f"{path}.path: entries must be sorted by path")
+        seen_paths.add(text)
+        previous = text
+        entries.append(
+            InventoryEntry(
+                path=text,
+                digest=_digest(fields["digest"], f"{path}.digest"),
+            )
+        )
+    inventory = BundleInventory(
+        entries=tuple(entries), exclusions=_strings(obj["exclusions"], "exclusions")
+    )
+    if encode_bundle_inventory(inventory) != data:
+        raise DecodeError("$: non-canonical bundle inventory encoding")
+    return inventory
+
+
+def decode_snapshot(data: bytes) -> Snapshot:
+    """Strictly decode bytes into Snapshot; no raw JSON escapes this function."""
+    # Decode UTF-8 explicitly first: json.loads on bytes BOM-sniffs and would
+    # accept UTF-16/32 documents, giving one snapshot many byte encodings at
+    # the single ingress (a UTF-8 BOM is also refused, by the JSON parser).
+    obj = _fields(_decode_json(data, "state"), "", _SNAPSHOT_FIELDS)
     revision = _integer(obj["revision"], "revision")
     if revision < 0:
         raise DecodeError("revision: must be non-negative")
@@ -433,9 +611,26 @@ def decode_snapshot(data: bytes) -> Snapshot:
             )
         seen_releases.add(release.release_id)
 
+    evidence_heads = tuple(
+        _decode_evidence_head(item, f"evidence_heads[{index}]")
+        for index, item in enumerate(
+            _array(obj["evidence_heads"], "evidence_heads")
+        )
+    )
+    seen_heads: set[str] = set()
+    for index, head in enumerate(evidence_heads):
+        if head.unit_name in seen_heads:
+            raise DecodeError(
+                f"evidence_heads[{index}].unit_name: duplicate unit name "
+                f"{head.unit_name!r}"
+            )
+        seen_heads.add(head.unit_name)
+
     return Snapshot(
         revision=revision,
         units=units,
         deviations=deviations,
         releases=releases,
+        evidence_heads=evidence_heads,
+        anchor_mode=_enum_value(obj["anchor_mode"], "anchor_mode", AnchorMode),
     )

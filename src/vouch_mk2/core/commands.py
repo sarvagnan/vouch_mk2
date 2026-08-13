@@ -10,7 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
 
-from vouch_mk2.core.model import DeviationType, LaunchCriteria, UnitRef
+from vouch_mk2.core.model import (
+    AnchorMode,
+    DeviationType,
+    EvidenceEvent,
+    LaunchCriteria,
+    UnitRef,
+)
 from vouch_mk2.ir import mk2
 
 
@@ -116,6 +122,32 @@ class SetReleaseCriteria:
 
 
 @dataclass(frozen=True, slots=True)
+class BindBundle:
+    ir_command: ClassVar[str] = mk2.CMD_BIND_BUNDLE
+    release_id: str
+    inventory_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class RecordEvidence:
+    ir_command: ClassVar[str] = mk2.CMD_RECORD_EVIDENCE
+    event: EvidenceEvent
+    event_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdvanceAnchor:
+    ir_command: ClassVar[str] = mk2.CMD_ADVANCE_ANCHOR
+    unit_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class SetAnchorMode:
+    ir_command: ClassVar[str] = mk2.CMD_SET_ANCHOR_MODE
+    mode: AnchorMode
+
+
+@dataclass(frozen=True, slots=True)
 class StartDeploy:
     ir_command: ClassVar[str] = mk2.CMD_START_DEPLOY
     release_id: str
@@ -186,5 +218,9 @@ type Command = (
     | DeviationCommand
     | PrepareRelease
     | SetReleaseCriteria
+    | BindBundle
+    | RecordEvidence
+    | AdvanceAnchor
+    | SetAnchorMode
     | ReleaseTransitionCommand
 )

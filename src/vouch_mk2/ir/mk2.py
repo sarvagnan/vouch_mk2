@@ -1,6 +1,7 @@
 """The mk2 Policy IR: the tables ``decide()`` executes.
 
-Phase 4 scope: the unit, deviation, and operational-release lifecycles. The unit machine's
+Phase 5 scope: the unit, deviation, and operational-release lifecycles, plus the
+closed evidence vocabulary, artifact-check obligations, and bundle binding. The unit machine's
 states and (source, target) edge set are identical to the 0.6 machine transcribed in
 ``vouch_06.py`` — conformance is asserted in ``tests/test_mk2_ir.py`` — but every
 edge carries a named command instead of 0.6's overloaded ``set-status``, and DoR/DoD
@@ -19,9 +20,11 @@ from __future__ import annotations
 
 from vouch_mk2.ir.schema import (
     AdjudicationEntry,
+    Applicability,
     ClaimRule,
     ClaimShape,
     ClosedVocabulary,
+    ConditionKind,
     IrIdentity,
     Obligation,
     ObligationScope,
@@ -59,6 +62,12 @@ CMD_COMPLETE_RELEASE = "complete"
 CMD_ROLL_BACK = "roll-back"
 CMD_MARK_FAILED_UNRECOVERED = "mark-failed-unrecovered"
 CMD_RETIRE_RELEASE = "retire"
+CMD_BIND_BUNDLE = "bind-bundle"
+
+# Evidence commands.
+CMD_RECORD_EVIDENCE = "record-evidence"
+CMD_ADVANCE_ANCHOR = "advance-anchor"
+CMD_SET_ANCHOR_MODE = "set-anchor-mode"
 
 # Deviation lifecycle commands.
 CMD_ADJUDICATE_AMEND = "adjudicate-amend"
@@ -111,6 +120,11 @@ CHECK_RELEASE_CRITERIA_BEFORE_PROGRESSION = (
 )
 CHECK_RELEASE_CLOSURE_RECORDS = "check.release-closure-records"
 CHECK_RELEASE_BOUND_UNITS_ROSTERED = "check.release-bound-units-rostered"
+
+# Phase 5 I/O-side artifact checks.
+CHECK_EVIDENCE_CHAINS = "check.evidence-chains"
+CHECK_EVIDENCE_ANCHORS = "check.evidence-anchors"
+CHECK_BUNDLE_INVENTORIES = "check.bundle-inventories"
 
 # Permanently NOT_CHECKED organizational claims (docs/claim-boundary.md).
 ORG_ACCEPTANCE_OWNERSHIP = "org.acceptance-ownership"
@@ -273,6 +287,11 @@ _RELEASE_O = StateMachine(
         Transition(
             source="prepared",
             command=CMD_SET_CRITERIA,
+            target="prepared",
+        ),
+        Transition(
+            source="prepared",
+            command=CMD_BIND_BUNDLE,
             target="prepared",
         ),
         Transition(
@@ -531,6 +550,24 @@ _OBLIGATIONS = (
         description="Every release-bound unit appears in at least one release roster.",
     ),
     Obligation(
+        obligation_id=CHECK_EVIDENCE_CHAINS,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description="Evidence heads resolve to coherent content-addressed chains.",
+    ),
+    Obligation(
+        obligation_id=CHECK_EVIDENCE_ANCHORS,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description="CI evidence anchors name real ancestors of their chains.",
+        applicability=(
+            Applicability(kind=ConditionKind.ANCHOR_MODE_IS, value="ci"),
+        ),
+    ),
+    Obligation(
+        obligation_id=CHECK_BUNDLE_INVENTORIES,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description="Bound release inventories resolve and decode canonically.",
+    ),
+    Obligation(
         obligation_id=ORG_ACCEPTANCE_OWNERSHIP,
         scope=ObligationScope.ORGANIZATIONAL,
         description="Acceptance ownership is real.",
@@ -593,6 +630,15 @@ _VOCABULARIES = (
         name="closure-trigger-kinds",
         values=("amendment", "operator", "supersession"),
     ),
+    ClosedVocabulary(
+        name="evidence-kinds",
+        values=("red", "green", "refactor"),
+    ),
+    ClosedVocabulary(
+        name="evidence-outcomes",
+        values=("tests-failed", "tests-passed"),
+    ),
+    ClosedVocabulary(name="anchor-modes", values=("none", "ci")),
 )
 
 _CLAIM_RULES = (
@@ -616,8 +662,8 @@ _CLAIM_RULES = (
 MK2 = PolicyIr(
     identity=IrIdentity(
         name="vouch-mk2-lifecycle",
-        version="phase-4",
-        source="IMPLEMENTATION-PLAN.md §4 Phase 4; DECISIONS.md D-3; ir/vouch_06.py",
+        version="phase-5",
+        source="IMPLEMENTATION-PLAN.md §4 Phase 5; DECISIONS.md D-4; ir/vouch_06.py",
     ),
     machines=(_UNIT, _DEVIATION, _RELEASE_O),
     claim_rules=_CLAIM_RULES,

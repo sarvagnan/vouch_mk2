@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 import pytest
 
 from vouch_mk2.core.model import (
+    AnchorMode,
+    BundleInventory,
     ClosureRecord,
     ClosureTriggerKind,
     Deviation,
     DeviationStatus,
     DeviationType,
+    EvidenceEvent,
+    EvidenceHead,
+    EvidenceKind,
+    EvidenceOutcome,
+    InventoryEntry,
     LaunchCriteria,
     Release,
     ReleaseArchetype,
@@ -19,7 +27,15 @@ from vouch_mk2.core.model import (
     UnitRef,
     UnitStatus,
 )
-from vouch_mk2.store import DecodeError, decode_snapshot, encode_snapshot
+from vouch_mk2.store import (
+    DecodeError,
+    decode_bundle_inventory,
+    decode_evidence_event,
+    decode_snapshot,
+    encode_bundle_inventory,
+    encode_evidence_event,
+    encode_snapshot,
+)
 
 
 def _populated_snapshot() -> Snapshot:
@@ -65,7 +81,7 @@ def _populated_snapshot() -> Snapshot:
     )
     ref = UnitRef(name="consumer", version="3")
     releases = (
-        Release("r-both", ReleaseArchetype.OPERATIONAL, ReleaseState.RETIRED, (ref,), criteria, closure),
+        Release("r-both", ReleaseArchetype.OPERATIONAL, ReleaseState.RETIRED, (ref,), criteria, closure, "a" * 64),
         Release("r-criteria", ReleaseArchetype.OPERATIONAL, ReleaseState.PREPARED, (ref,), criteria, None),
         Release("r-closure", ReleaseArchetype.OPERATIONAL, ReleaseState.INVALIDATED, (ref,), None, closure),
         Release("r-null", ReleaseArchetype.OPERATIONAL, ReleaseState.PREPARED, (ref,), None, None),
@@ -77,6 +93,8 @@ def _populated_snapshot() -> Snapshot:
 
 def _baseline_document() -> dict[str, object]:
     return {
+        "anchor_mode": "none",
+        "evidence_heads": [],
         "revision": 1,
         "units": [
             {
@@ -104,6 +122,7 @@ def _baseline_document() -> dict[str, object]:
 
 def _release_document() -> dict[str, object]:
     return {
+        "bundle_inventory_digest": "",
         "release_id": "r1",
         "archetype": "operational",
         "state": "retired",
@@ -230,6 +249,15 @@ def test_release_invalid_trigger_kind_is_refused() -> None:
         decode_snapshot(_json_bytes(document))
 
 
+def test_release_bundle_digest_shape_is_strict() -> None:
+    document = _baseline_document()
+    release = _release_document()
+    release["bundle_inventory_digest"] = "BAD"
+    document["releases"] = [release]
+    with pytest.raises(DecodeError, match="bundle_inventory_digest"):
+        decode_snapshot(_json_bytes(document))
+
+
 @pytest.mark.parametrize(("nested", "field"), (("criteria", "verification_window"), ("closure", "observations")))
 def test_release_missing_nested_field_is_refused(nested: str, field: str) -> None:
     document = _baseline_document()
@@ -283,11 +311,11 @@ def test_negative_revision_names_revision_path() -> None:
 
 
 def test_duplicate_json_keys_are_refused_at_every_level() -> None:
-    top = b'{"revision":0,"revision":9,"units":[],"deviations":[],"releases":[]}'
+    top = b'{"anchor_mode":"none","evidence_heads":[],"revision":0,"revision":9,"units":[],"deviations":[],"releases":[]}'
     with pytest.raises(DecodeError, match="duplicate object key 'revision'"):
         decode_snapshot(top)
     nested = (
-        b'{"revision":0,"deviations":[],"releases":[],"units":[{"name":"a","name":"b",'
+        b'{"anchor_mode":"none","evidence_heads":[],"revision":0,"deviations":[],"releases":[],"units":[{"name":"a","name":"b",'
         b'"version":"1","status":"specified","depends_on":[],'
         b'"acceptance_pack_version":""}]}'
     )
@@ -296,7 +324,7 @@ def test_duplicate_json_keys_are_refused_at_every_level() -> None:
 
 
 def test_non_utf8_encodings_are_refused() -> None:
-    document = '{"revision":3,"units":[],"deviations":[],"releases":[]}'
+    document = '{"anchor_mode":"none","evidence_heads":[],"revision":3,"units":[],"deviations":[],"releases":[]}'
     for encoding in ("utf-16", "utf-32"):
         with pytest.raises(DecodeError, match="must be UTF-8"):
             decode_snapshot(document.encode(encoding))
@@ -304,7 +332,7 @@ def test_non_utf8_encodings_are_refused() -> None:
 
 def test_utf8_bom_is_refused() -> None:
     with pytest.raises(DecodeError, match="invalid JSON"):
-        decode_snapshot(b'\xef\xbb\xbf{"revision":0,"units":[],"deviations":[],"releases":[]}')
+        decode_snapshot(b'\xef\xbb\xbf{"anchor_mode":"none","evidence_heads":[],"revision":0,"units":[],"deviations":[],"releases":[]}')
 
 
 def test_duplicate_roster_member_is_refused() -> None:
@@ -328,3 +356,177 @@ def test_unknown_roster_snapshot_status_is_refused() -> None:
     document["releases"] = [release]
     with pytest.raises(DecodeError, match="unknown roster status 'banana'"):
         decode_snapshot(_json_bytes(document))
+
+
+def test_phase5_snapshot_round_trip_and_head_refusals() -> None:
+    snapshot = Snapshot(
+        revision=8,
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+        anchor_mode=AnchorMode.CI,
+    )
+    assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
+
+    document = json.loads(encode_snapshot(snapshot))
+    assert isinstance(document, dict)
+    heads = document["evidence_heads"]
+    assert isinstance(heads, list)
+    heads.append(dict(heads[0]))
+    with pytest.raises(DecodeError, match="duplicate unit name"):
+        decode_snapshot(_json_bytes(document))
+
+
+def test_unknown_anchor_mode_is_refused() -> None:
+    document = _baseline_document()
+    document["anchor_mode"] = "command"
+    with pytest.raises(DecodeError, match="anchor_mode"):
+        decode_snapshot(_json_bytes(document))
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong", "message"),
+    (
+        ("head_sequence", 0, "head_sequence"),
+        ("head_sequence", True, "expected integer"),
+        ("anchored", "bad", "64 lowercase"),
+        ("head", "BAD", "64 lowercase"),
+    ),
+)
+def test_evidence_head_field_refusals(
+    field: str, wrong: object, message: str
+) -> None:
+    document = _baseline_document()
+    document["evidence_heads"] = [
+        {
+            "unit_name": "u",
+            "head": "a" * 64,
+            "head_sequence": 1,
+            "anchored": "GENESIS",
+        }
+    ]
+    heads = document["evidence_heads"]
+    assert isinstance(heads, list) and isinstance(heads[0], dict)
+    cast(dict[str, object], heads[0])[field] = wrong
+    with pytest.raises(DecodeError, match=message):
+        decode_snapshot(_json_bytes(document))
+
+
+def _evidence_document() -> dict[str, object]:
+    return {
+        "unit": {"name": "u", "version": "v1"},
+        "sequence": 1,
+        "parent": "GENESIS",
+        "kind": "red",
+        "command_line": "pytest",
+        "outcome": "tests-failed",
+        "recorded_at": "opaque",
+    }
+
+
+def test_evidence_event_round_trip() -> None:
+    event = EvidenceEvent(
+        UnitRef("u", "v1"),
+        1,
+        "GENESIS",
+        EvidenceKind.RED,
+        "pytest",
+        EvidenceOutcome.TESTS_FAILED,
+        "opaque",
+    )
+    assert decode_evidence_event(encode_evidence_event(event)) == event
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong", "message"),
+    (
+        ("kind", "blue", "kind"),
+        ("outcome", "unknown", "outcome"),
+        ("sequence", "1", "sequence"),
+        ("sequence", True, "sequence"),
+        ("sequence", 0, "sequence"),
+        ("parent", "bad", "parent"),
+        ("command_line", [], "command_line"),
+        ("recorded_at", 1, "recorded_at"),
+        ("unit", [], "unit"),
+    ),
+)
+def test_evidence_event_bad_fields_are_refused(
+    field: str, wrong: object, message: str
+) -> None:
+    document = _evidence_document()
+    document[field] = wrong
+    with pytest.raises(DecodeError, match=message):
+        decode_evidence_event(_json_bytes(document))
+
+
+def test_evidence_event_bad_unit_nesting_is_refused() -> None:
+    for unit in (
+        {"name": 1, "version": "v1"},
+        {"name": "u", "version": 1},
+        {"name": "u"},
+        {"name": "u", "version": "v1", "extra": True},
+    ):
+        document = _evidence_document()
+        document["unit"] = unit
+        with pytest.raises(DecodeError, match="unit"):
+            decode_evidence_event(_json_bytes(document))
+
+
+def test_evidence_event_unknown_and_missing_fields_are_refused() -> None:
+    document = _evidence_document()
+    document["extra"] = True
+    with pytest.raises(DecodeError, match="extra"):
+        decode_evidence_event(_json_bytes(document))
+    del document["extra"]
+    del document["recorded_at"]
+    with pytest.raises(DecodeError, match="recorded_at"):
+        decode_evidence_event(_json_bytes(document))
+
+
+def _inventory_document() -> dict[str, object]:
+    return {
+        "entries": [
+            {"path": "a.txt", "digest": "a" * 64},
+            {"path": "b.txt", "digest": "b" * 64},
+        ],
+        "exclusions": ["tmp/**"],
+    }
+
+
+def test_bundle_inventory_round_trip() -> None:
+    inventory = BundleInventory(
+        entries=(InventoryEntry("a", "a" * 64),), exclusions=("tmp/**",)
+    )
+    assert decode_bundle_inventory(encode_bundle_inventory(inventory)) == inventory
+
+
+@pytest.mark.parametrize(
+    ("paths", "message"),
+    (
+        (("b", "a"), "sorted"),
+        (("a", "a"), "duplicate"),
+        (("../a", "b"), "traversal"),
+    ),
+)
+def test_bundle_inventory_path_refusals(
+    paths: tuple[str, str], message: str
+) -> None:
+    document = _inventory_document()
+    document["entries"] = [
+        {"path": paths[0], "digest": "a" * 64},
+        {"path": paths[1], "digest": "b" * 64},
+    ]
+    with pytest.raises(DecodeError, match=message):
+        decode_bundle_inventory(_json_bytes(document))
+
+
+def test_bundle_inventory_strict_fields_and_digest() -> None:
+    document = _inventory_document()
+    entries = document["entries"]
+    assert isinstance(entries, list) and isinstance(entries[0], dict)
+    entries[0]["digest"] = "BAD"
+    with pytest.raises(DecodeError, match="digest"):
+        decode_bundle_inventory(_json_bytes(document))
+    entries[0]["digest"] = "a" * 64
+    entries[0]["extra"] = True
+    with pytest.raises(DecodeError, match="extra"):
+        decode_bundle_inventory(_json_bytes(document))

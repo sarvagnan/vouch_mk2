@@ -17,8 +17,10 @@ from collections.abc import Callable, Mapping
 from typing import assert_never
 
 from vouch_mk2.core.commands import (
+    AdvanceAnchor,
     AmendDeviation,
     BeginReverify,
+    BindBundle,
     CloseDeviation,
     Command,
     CompleteRelease,
@@ -29,12 +31,14 @@ from vouch_mk2.core.commands import (
     OpenDeviation,
     PrepareRelease,
     Publish,
+    RecordEvidence,
     RejectDeviation,
     ReleaseTransitionCommand,
     RetireRelease,
     Respecify,
     RollBack,
     SetReleaseCriteria,
+    SetAnchorMode,
     SpecifyUnit,
     StartDeploy,
     StartVerification,
@@ -44,12 +48,16 @@ from vouch_mk2.core.commands import (
 )
 from vouch_mk2.core.events import (
     AcceptanceFrozen,
+    AnchorAdvanced,
+    AnchorModeSet,
+    BundleBound,
     DeploymentStarted,
     DeviationAmended,
     DeviationClosed,
     DeviationOpened,
     DeviationRejected,
     Event,
+    EvidenceRecorded,
     GateCheck,
     GateRecord,
     ReleaseCriteriaSet,
@@ -77,6 +85,9 @@ from vouch_mk2.core.model import (
     ClosureTriggerKind,
     Deviation,
     DeviationStatus,
+    EvidenceHead,
+    EvidenceKind,
+    EvidenceOutcome,
     Release,
     ReleaseArchetype,
     ReleaseState,
@@ -147,6 +158,34 @@ type Decision = Accepted | Refused
 
 def _refuse(code: str, detail: str) -> Refused:
     return Refused(violations=(Violation(code=code, detail=detail),))
+
+
+def _valid_digest(digest: str) -> bool:
+    return len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)
+
+
+def _evidence_kind_outcome_coherent(
+    kind: EvidenceKind, outcome: EvidenceOutcome
+) -> bool:
+    match kind:
+        case EvidenceKind.RED:
+            match outcome:
+                case EvidenceOutcome.TESTS_FAILED:
+                    return True
+                case EvidenceOutcome.TESTS_PASSED:
+                    return False
+                case _:
+                    assert_never(outcome)
+        case EvidenceKind.GREEN | EvidenceKind.REFACTOR:
+            match outcome:
+                case EvidenceOutcome.TESTS_FAILED:
+                    return False
+                case EvidenceOutcome.TESTS_PASSED:
+                    return True
+                case _:
+                    assert_never(outcome)
+        case _:
+            assert_never(kind)
 
 
 # --- gate evaluation -----------------------------------------------------------
@@ -666,6 +705,84 @@ def _decide_set_release_criteria(
     )
 
 
+def _decide_bind_bundle(snapshot: Snapshot, command: BindBundle) -> Decision:
+    release = snapshot.release(command.release_id)
+    if release is None:
+        return _refuse(
+            "release.unknown", f"release {command.release_id!r} does not exist"
+        )
+    if _RELEASE_EDGES.get((release.state.value, command.ir_command)) is None:
+        return _refuse(
+            "transition.illegal",
+            f"bind-bundle is not legal from {release.state.value!r}",
+        )
+    if not _valid_digest(command.inventory_digest):
+        return _refuse(
+            "release.bundle-digest-invalid",
+            "bundle inventory digest must be 64 lowercase hexadecimal characters",
+        )
+    return Accepted(
+        events=(
+            BundleBound(
+                release_id=release.release_id,
+                inventory_digest=command.inventory_digest,
+            ),
+        )
+    )
+
+
+def _decide_record_evidence(
+    snapshot: Snapshot, command: RecordEvidence
+) -> Decision:
+    event = command.event
+    unit = snapshot.unit(event.unit.name)
+    if unit is None or unit.version != event.unit.version:
+        current = "missing" if unit is None else unit.ref().label()
+        return _refuse(
+            "evidence.binding-stale",
+            f"evidence binds {event.unit.label()!r}; current unit is {current!r}",
+        )
+    if not _valid_digest(command.event_digest):
+        return _refuse(
+            "evidence.digest-invalid",
+            "evidence digest must be 64 lowercase hexadecimal characters",
+        )
+    if not _evidence_kind_outcome_coherent(event.kind, event.outcome):
+        return _refuse(
+            "evidence.kind-outcome-mismatch",
+            f"kind {event.kind.value!r} contradicts outcome {event.outcome.value!r}",
+        )
+    head = snapshot.evidence_head(event.unit.name)
+    expected_parent = "GENESIS" if head is None else head.head
+    expected_sequence = 1 if head is None else head.head_sequence + 1
+    if event.parent != expected_parent or event.sequence != expected_sequence:
+        return _refuse(
+            "evidence.chain-mismatch",
+            f"expected parent {expected_parent!r}, sequence {expected_sequence}; "
+            f"got parent {event.parent!r}, sequence {event.sequence}",
+        )
+    return Accepted(events=(EvidenceRecorded(event, command.event_digest),))
+
+
+def _decide_advance_anchor(snapshot: Snapshot, command: AdvanceAnchor) -> Decision:
+    head = snapshot.evidence_head(command.unit_name)
+    if head is None:
+        return _refuse(
+            "evidence.no-chain",
+            f"unit {command.unit_name!r} has no evidence chain",
+        )
+    if head.anchored == head.head:
+        return _refuse(
+            "evidence.anchor-current",
+            f"unit {command.unit_name!r} anchor is already current",
+        )
+    return Accepted(events=(AnchorAdvanced(command.unit_name),))
+
+
+def _decide_set_anchor_mode(command: SetAnchorMode) -> Decision:
+    return Accepted(events=(AnchorModeSet(command.mode),))
+
+
 def _roster_snapshot(
     snapshot: Snapshot, release: Release
 ) -> tuple[tuple[str, str], ...]:
@@ -951,6 +1068,14 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             return _decide_prepare_release(snapshot, command)
         case SetReleaseCriteria():
             return _decide_set_release_criteria(snapshot, command)
+        case BindBundle():
+            return _decide_bind_bundle(snapshot, command)
+        case RecordEvidence():
+            return _decide_record_evidence(snapshot, command)
+        case AdvanceAnchor():
+            return _decide_advance_anchor(snapshot, command)
+        case SetAnchorMode():
+            return _decide_set_anchor_mode(command)
         case OpenDeviation():
             return _decide_open_deviation(snapshot, command)
         case AmendDeviation():
@@ -1010,10 +1135,19 @@ def _with_release(
     )
 
 
+def _with_evidence_head(
+    heads: tuple[EvidenceHead, ...], changed: EvidenceHead
+) -> tuple[EvidenceHead, ...]:
+    retained = tuple(head for head in heads if head.unit_name != changed.unit_name)
+    return tuple(sorted(retained + (changed,), key=lambda head: head.unit_name))
+
+
 def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
     units = snapshot.units
     deviations = snapshot.deviations
     releases = snapshot.releases
+    evidence_heads = snapshot.evidence_heads
+    anchor_mode = snapshot.anchor_mode
     match event:
         case UnitSpecified(name=name, version=version, depends_on=depends_on):
             units = units + (
@@ -1123,6 +1257,33 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             releases = _with_release(
                 releases, release_id, replace(release, criteria=criteria)
             )
+        case BundleBound(release_id=release_id, inventory_digest=inventory_digest):
+            release = _existing_release(snapshot, release_id)
+            releases = _with_release(
+                releases,
+                release_id,
+                replace(release, bundle_inventory_digest=inventory_digest),
+            )
+        case EvidenceRecorded(event=recorded, event_digest=event_digest):
+            prior = snapshot.evidence_head(recorded.unit.name)
+            changed = EvidenceHead(
+                unit_name=recorded.unit.name,
+                head=event_digest,
+                head_sequence=recorded.sequence,
+                anchored="GENESIS" if prior is None else prior.anchored,
+            )
+            evidence_heads = _with_evidence_head(evidence_heads, changed)
+        case AnchorAdvanced(unit_name=unit_name):
+            head = snapshot.evidence_head(unit_name)
+            if head is None:
+                raise LookupError(f"event references unknown evidence head {unit_name!r}")
+            # Promotion-only by construction: the fold derives the target from
+            # the head itself (D-4).
+            evidence_heads = _with_evidence_head(
+                evidence_heads, replace(head, anchored=head.head)
+            )
+        case AnchorModeSet(mode=mode):
+            anchor_mode = mode
         case DeploymentStarted(release_id=release_id):
             releases = _with_release_status(
                 snapshot, release_id, ReleaseState.DEPLOYING
@@ -1180,6 +1341,8 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
         units=units,
         deviations=deviations,
         releases=releases,
+        evidence_heads=evidence_heads,
+        anchor_mode=anchor_mode,
     )
 
 
@@ -1228,4 +1391,6 @@ def apply(snapshot: Snapshot, events: tuple[Event, ...]) -> Snapshot:
         units=current.units,
         deviations=current.deviations,
         releases=current.releases,
+        evidence_heads=current.evidence_heads,
+        anchor_mode=current.anchor_mode,
     )

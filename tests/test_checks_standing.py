@@ -71,6 +71,16 @@ def result(report: CheckReport, check_id: str) -> CheckResult:
     raise AssertionError(f"missing result {check_id!r}")
 
 
+ARTIFACT_RESULTS = tuple(
+    CheckResult(check_id=check_id, verdict=Verdict.PASS, detail="")
+    for check_id in (
+        mk2.CHECK_EVIDENCE_CHAINS,
+        mk2.CHECK_EVIDENCE_ANCHORS,
+        mk2.CHECK_BUNDLE_INVENTORIES,
+    )
+)
+
+
 def extra_evaluator(_snapshot: Snapshot) -> CheckResult:
     return CheckResult(check_id="check.extra", verdict=Verdict.PASS, detail="")
 
@@ -88,12 +98,38 @@ def test_real_registries_match_the_mk2_ir_and_meta_check_passes() -> None:
     }
     assert set(MECHANICAL_CHECKS) == declared_mechanical
     assert set(ORGANIZATIONAL_CHECKS) == declared_organizational
-    meta = result(run_checks(Snapshot()), mk2.CHECK_REGISTRY_COMPLETE)
+    meta = result(
+        run_checks(Snapshot(), artifact_results=ARTIFACT_RESULTS),
+        mk2.CHECK_REGISTRY_COMPLETE,
+    )
     assert meta == CheckResult(
         check_id=mk2.CHECK_REGISTRY_COMPLETE,
         verdict=Verdict.PASS,
         detail="",
     )
+
+
+def test_registry_meta_check_fails_for_missing_artifact_id() -> None:
+    artifact_results = tuple(
+        row for row in ARTIFACT_RESULTS if row.check_id != mk2.CHECK_EVIDENCE_ANCHORS
+    )
+    meta = result(
+        run_checks(Snapshot(), artifact_results=artifact_results),
+        mk2.CHECK_REGISTRY_COMPLETE,
+    )
+    assert meta.verdict is Verdict.FAIL
+    assert mk2.CHECK_EVIDENCE_ANCHORS in meta.detail
+
+
+def test_undeclared_artifact_result_is_guarded() -> None:
+    report = run_checks(
+        Snapshot(),
+        artifact_results=ARTIFACT_RESULTS
+        + (CheckResult("check.artifact-extra", Verdict.PASS, ""),),
+    )
+    extra = result(report, "check.artifact-extra")
+    assert extra.verdict is Verdict.FAIL
+    assert extra.detail == "undeclared artifact check"
 
 
 def test_registry_meta_check_fails_for_missing_mechanical_id() -> None:
@@ -488,3 +524,59 @@ def test_organizational_evaluator_returning_pass_fails_the_run() -> None:
     assert guarded.verdict is Verdict.FAIL
     assert "organizational" in guarded.detail
     assert report.composed() is Verdict.FAIL
+
+
+def test_artifact_not_applicable_without_ir_rule_is_guarded() -> None:
+    # check.evidence-chains declares no applicability, so a NOT_APPLICABLE
+    # claim for it must be converted to FAIL (the vacuous-coverage guard).
+    tampered = tuple(
+        CheckResult(
+            check_id=row.check_id,
+            verdict=(
+                Verdict.NOT_APPLICABLE
+                if row.check_id == mk2.CHECK_EVIDENCE_CHAINS
+                else row.verdict
+            ),
+            detail="",
+        )
+        for row in ARTIFACT_RESULTS
+    )
+    report = run_checks(Snapshot(), artifact_results=tampered)
+    guarded = result(report, mk2.CHECK_EVIDENCE_CHAINS)
+    assert guarded.verdict is Verdict.FAIL
+    assert "applicability" in guarded.detail
+    assert report.composed() is Verdict.FAIL
+
+
+def test_artifact_not_applicable_with_ir_rule_and_detail_is_accepted() -> None:
+    # check.evidence-anchors DOES declare an applicability rule; a cited
+    # NOT_APPLICABLE passes through.
+    rows = tuple(
+        CheckResult(
+            check_id=row.check_id,
+            verdict=(
+                Verdict.NOT_APPLICABLE
+                if row.check_id == mk2.CHECK_EVIDENCE_ANCHORS
+                else row.verdict
+            ),
+            detail=(
+                "IR applicability rule not met: anchor-mode-is: ci"
+                if row.check_id == mk2.CHECK_EVIDENCE_ANCHORS
+                else ""
+            ),
+        )
+        for row in ARTIFACT_RESULTS
+    )
+    report = run_checks(Snapshot(), artifact_results=rows)
+    accepted = result(report, mk2.CHECK_EVIDENCE_ANCHORS)
+    assert accepted.verdict is Verdict.NOT_APPLICABLE
+    assert report.composed() is Verdict.PASS
+
+
+def test_duplicate_artifact_results_fail_completeness() -> None:
+    report = run_checks(
+        Snapshot(), artifact_results=ARTIFACT_RESULTS + (ARTIFACT_RESULTS[0],)
+    )
+    meta = result(report, mk2.CHECK_REGISTRY_COMPLETE)
+    assert meta.verdict is Verdict.FAIL
+    assert "duplicated" in meta.detail

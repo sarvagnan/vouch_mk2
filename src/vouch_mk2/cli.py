@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.store import Store, StoreError
+from vouch_mk2.verify import run_artifact_checks
 
 
 class _Arguments(argparse.Namespace):
@@ -89,11 +90,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         with Store.open(parsed.root) as store:
             snapshot = store.read_snapshot()
+            artifact_results = run_artifact_checks(store, snapshot)
     except StoreError as error:
         print(f"vouch-mk2: {error}", file=sys.stderr)
         return 2
 
-    report = run_checks(snapshot)
+    report = run_checks(snapshot, artifact_results=artifact_results)
     if parsed.json_output:
         _present_json(report)
     else:

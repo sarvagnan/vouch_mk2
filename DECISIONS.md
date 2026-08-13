@@ -97,6 +97,36 @@ blocked` with an empty blocker array; in mk2 `blocked` means exactly "has blocki
 deviations", so an operational hold must be expressed as a typed deviation (usually
 `plan-gap` or `capability-request`), keeping the status and the record in lockstep.
 
+## D-4 — Evidence chains: promotion-only anchors, mode in the snapshot, split trust
+
+**Status:** decided 2026-08-13 (Phase 5).
+
+- **Anchor advance is promotion-only.** `advance-anchor` sets the anchored digest to
+  the chain's *current head*, never to a caller-chosen digest. Monotonicity ("prior
+  head must remain an ancestor") and refusal of backward rotation are then true by
+  construction — chains are append-only (parent-must-equal-head at record time), so
+  every past anchor is an ancestor of every later one. 0.6 verified ancestry at
+  rotation time and redesigned the machinery three times; mk2 makes the illegal
+  rotations unrepresentable instead. Rejected: caller-supplied anchor targets with
+  ancestry verification (requires object reads inside policy, and is exactly the
+  surface 0.6 kept getting wrong).
+- **Anchor mode lives in the snapshot, not a config sidecar.** 0.6 put `anchor.mode`
+  in `.vouch/config.json` ("project configuration, not the ledger"). mk2 has one
+  authoritative snapshot precisely so facts cannot drift between authorities; the
+  mode is recorded state (`set-anchor-mode` command), reversing the 0.6 precedent.
+- **Stagnant-GENESIS is NOT_CHECKED under mode `ci`, NOT_APPLICABLE under `none`.**
+  0.6 printed a warning and never failed. mk2's verdict lattice has no warning; under
+  mode `ci` a non-empty chain that was never anchored means the project's own claim
+  ("CI anchors our chains") is mechanically unproven — NOT_CHECKED, which gates the
+  CI exit. Under mode `none` the check is NOT_APPLICABLE citing the IR applicability
+  rule. This deliberately tightens 0.6: opting into `ci` is opting into the check.
+- **Digest trust is split, and said plainly.** The pure core cannot hash (the purity
+  contract bans `hashlib` — the digest registry is the store's). `decide()` validates
+  evidence *structure* (parent = head, sequence, version binding, kind/outcome
+  coherence); content addressing (the recorded digest actually names those bytes, the
+  chain walks to GENESIS) is verified by the artifact checks in CI. A lying digest
+  passes `decide()` and fails `vouch-mk2 check`.
+
 The Phase 0 transcription (`ir/vouch_06.py`) keeps the prose-faithful reading, since
 0.6's own precedence rule gives prose authority absent a recorded discrepancy; this
 entry is mk2's recorded discrepancy for its own semantics.

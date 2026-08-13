@@ -8,8 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from vouch_mk2.core.model import (
+    AnchorMode,
     ClosureRecord,
     DeviationType,
+    EvidenceEvent,
     LaunchCriteria,
     ReleaseArchetype,
     UnitRef,
@@ -146,6 +148,34 @@ class ReleaseCriteriaSet:
 
 
 @dataclass(frozen=True, slots=True)
+class BundleBound:
+    release_id: str
+    inventory_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceRecorded:
+    event: EvidenceEvent
+    event_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class AnchorAdvanced:
+    """The unit's chain anchor was promoted to its current head.
+
+    Deliberately payload-free (D-4): the target is derived from the head at
+    fold time, so an arbitrary-rotation event is unrepresentable at the event
+    layer too, not just refused by decide()."""
+
+    unit_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class AnchorModeSet:
+    mode: AnchorMode
+
+
+@dataclass(frozen=True, slots=True)
 class DeploymentStarted:
     release_id: str
     gate: GateRecord
@@ -208,6 +238,10 @@ type Event = (
     | ReleasePrepared
     | UnitReleaseBound
     | ReleaseCriteriaSet
+    | BundleBound
+    | EvidenceRecorded
+    | AnchorAdvanced
+    | AnchorModeSet
     | DeploymentStarted
     | VerificationStarted
     | ReleaseSucceeded

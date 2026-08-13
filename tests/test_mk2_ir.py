@@ -4,9 +4,12 @@ gate obligation it declares has exactly one registered evaluator."""
 from __future__ import annotations
 
 from vouch_mk2.core import (
+    AnchorMode,
     ClosureTriggerKind,
     DeviationStatus,
     DeviationType,
+    EvidenceKind,
+    EvidenceOutcome,
     ReleaseState,
     UnitStatus,
 )
@@ -57,13 +60,18 @@ def test_deviation_machine_matches_06() -> None:
 
 
 def test_operational_release_edges_match_06() -> None:
-    # mk2 adds one self-loop over 0.6: set-criteria is table-visible in
+    # mk2 adds prepared self-loops over 0.6: configuration is table-visible in
     # prepared (like the blocked open-deviation self-loop) instead of
     # hand-coded legality in decide().
     mk2_pairs = edge_pairs(MK2.machine(RELEASE_O_MACHINE))
     assert mk2_pairs - {("prepared", "prepared")} == edge_pairs(
         VOUCH_06.machine(V06_RELEASE_O)
     )
+    assert {
+        transition.command
+        for transition in MK2.machine(RELEASE_O_MACHINE).command_transitions
+        if transition.source == transition.target == "prepared"
+    } == {"set-criteria", "bind-bundle"}
 
 
 def test_operational_release_claim_rules_mirror_06_shapes() -> None:
@@ -155,10 +163,39 @@ def test_core_enums_conform_to_ir() -> None:
     assert {kind.value for kind in ClosureTriggerKind} == set(
         MK2.vocabulary("closure-trigger-kinds").values
     )
+    assert {kind.value for kind in EvidenceKind} == set(
+        MK2.vocabulary("evidence-kinds").values
+    )
+    assert {outcome.value for outcome in EvidenceOutcome} == set(
+        MK2.vocabulary("evidence-outcomes").values
+    )
+    assert {mode.value for mode in AnchorMode} == set(
+        MK2.vocabulary("anchor-modes").values
+    )
+
+
+def test_artifact_obligations_are_exactly_three_and_never_gates() -> None:
+    artifact_ids = {
+        obligation.obligation_id
+        for obligation in MK2.obligations
+        if obligation.scope is ObligationScope.ARTIFACT_CHECK
+    }
+    assert artifact_ids == {
+        "check.evidence-chains",
+        "check.evidence-anchors",
+        "check.bundle-inventories",
+    }
+    bound = {
+        gate
+        for machine in MK2.machines
+        for transition in machine.command_transitions
+        for gate in transition.gates
+    }
+    assert artifact_ids.isdisjoint(bound)
 
 
 def test_scope_misuse_is_a_named_violation() -> None:
-    # A standing-check or organizational obligation bound as a transition gate
+    # A standing, artifact, or organizational obligation bound as a transition gate
     # must be refused by validate() — this is the rule that keeps the check
     # scopes mechanically separate.
     from vouch_mk2.ir.schema import (
@@ -168,30 +205,35 @@ def test_scope_misuse_is_a_named_violation() -> None:
         Transition,
     )
 
-    broken = PolicyIr(
-        identity=IrIdentity(name="broken", version="test", source="test"),
-        machines=(
-            StateMachine(
-                name="m",
-                states=("a", "b"),
-                initial="a",
-                command_transitions=(
-                    Transition(
-                        source="a",
-                        command="go",
-                        target="b",
-                        gates=("check.standing-as-gate",),
+    for scope in (
+        ObligationScope.STANDING_CHECK,
+        ObligationScope.ARTIFACT_CHECK,
+        ObligationScope.ORGANIZATIONAL,
+    ):
+        broken = PolicyIr(
+            identity=IrIdentity(name="broken", version="test", source="test"),
+            machines=(
+                StateMachine(
+                    name="m",
+                    states=("a", "b"),
+                    initial="a",
+                    command_transitions=(
+                        Transition(
+                            source="a",
+                            command="go",
+                            target="b",
+                            gates=("check.non-gate",),
+                        ),
                     ),
                 ),
             ),
-        ),
-        obligations=(
-            Obligation(
-                obligation_id="check.standing-as-gate",
-                scope=ObligationScope.STANDING_CHECK,
-                description="misused",
+            obligations=(
+                Obligation(
+                    obligation_id="check.non-gate",
+                    scope=scope,
+                    description="misused",
+                ),
             ),
-        ),
-    )
-    codes = {violation.code for violation in validate(broken)}
-    assert "obligation.scope-misuse" in codes
+        )
+        codes = {violation.code for violation in validate(broken)}
+        assert "obligation.scope-misuse" in codes

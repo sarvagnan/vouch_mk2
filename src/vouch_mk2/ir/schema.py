@@ -35,6 +35,7 @@ class ObligationScope(Enum):
     TRANSITION_GATE = "transition-gate"
     CLAIM = "claim"
     STANDING_CHECK = "standing-check"
+    ARTIFACT_CHECK = "artifact-check"
     ORGANIZATIONAL = "organizational"
 
 
@@ -68,6 +69,7 @@ class ConditionKind(Enum):
     SUPERSESSION_POLICY_IS = "supersession-policy-is"
     ARCHETYPE_IS = "archetype-is"
     TIER_AT_LEAST = "tier-at-least"
+    ANCHOR_MODE_IS = "anchor-mode-is"
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,6 +337,7 @@ def validate(ir: PolicyIr) -> tuple[Violation, ...]:
                 obligation = obligations_by_id[gate]
                 if obligation.scope in {
                     ObligationScope.STANDING_CHECK,
+                    ObligationScope.ARTIFACT_CHECK,
                     ObligationScope.ORGANIZATIONAL,
                 }:
                     out.add(

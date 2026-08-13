@@ -58,6 +58,22 @@ class ReleaseState(Enum):
     INVALIDATED = "invalidated"
 
 
+class EvidenceKind(Enum):
+    RED = "red"
+    GREEN = "green"
+    REFACTOR = "refactor"
+
+
+class EvidenceOutcome(Enum):
+    TESTS_FAILED = "tests-failed"
+    TESTS_PASSED = "tests-passed"
+
+
+class AnchorMode(Enum):
+    NONE = "none"
+    CI = "ci"
+
+
 class ClosureTriggerKind(Enum):
     AMENDMENT = "amendment"
     OPERATOR = "operator"
@@ -80,6 +96,25 @@ class UnitRef:
 
     def label(self) -> str:
         return f"{self.name}@{self.version}"
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceEvent:
+    unit: UnitRef
+    sequence: int
+    parent: str
+    kind: EvidenceKind
+    command_line: str
+    outcome: EvidenceOutcome
+    recorded_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceHead:
+    unit_name: str
+    head: str
+    head_sequence: int
+    anchored: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +160,19 @@ class Release:
     includes: tuple[UnitRef, ...]
     criteria: LaunchCriteria | None
     closure: ClosureRecord | None
+    bundle_inventory_digest: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryEntry:
+    path: str
+    digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class BundleInventory:
+    entries: tuple[InventoryEntry, ...]
+    exclusions: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +192,8 @@ class Snapshot:
     units: tuple[Unit, ...] = ()
     deviations: tuple[Deviation, ...] = ()
     releases: tuple[Release, ...] = ()
+    evidence_heads: tuple[EvidenceHead, ...] = ()
+    anchor_mode: AnchorMode = AnchorMode.NONE
 
     def unit(self, name: str) -> Unit | None:
         for unit in self.units:
@@ -161,6 +211,12 @@ class Snapshot:
         for release in self.releases:
             if release.release_id == release_id:
                 return release
+        return None
+
+    def evidence_head(self, unit_name: str) -> EvidenceHead | None:
+        for head in self.evidence_heads:
+            if head.unit_name == unit_name:
+                return head
         return None
 
     def consumers_of(self, name: str) -> tuple[str, ...]:

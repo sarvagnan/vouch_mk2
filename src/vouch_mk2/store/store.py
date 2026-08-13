@@ -31,7 +31,9 @@ COMMIT_STEPS: tuple[str, ...] = (
 
 _DIGEST_LENGTH = 64
 _ROOT_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-_FILE_READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW
+# O_NONBLOCK: opening a planted FIFO must not hang the process; the fstat
+# S_ISREG check right after the open then refuses it with a typed error.
+_FILE_READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 _TEMP_WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 
 # Level-2 bounded decoding (docs/threat-model.md): a planted multi-gigabyte

@@ -13,6 +13,9 @@ class ArtifactKind(Enum):
 
     STATE = "state"
     OBJECT = "object"
+    EVIDENCE = "evidence"
+    BUNDLE_INVENTORY = "bundle-inventory"
+    FILE = "file"
 
 
 def digest_of(kind: ArtifactKind, payload: bytes) -> str:

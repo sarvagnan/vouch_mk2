@@ -36,6 +36,7 @@ def _check_registry_complete(
     snapshot: Snapshot,
     mechanical: Mapping[str, CheckEvaluator],
     organizational: Mapping[str, CheckEvaluator],
+    artifact_results: tuple[CheckResult, ...],
 ) -> CheckResult:
     del snapshot
     declared_mechanical = {
@@ -48,10 +49,16 @@ def _check_registry_complete(
         for obligation in mk2.MK2.obligations
         if obligation.scope is ObligationScope.ORGANIZATIONAL
     }
+    declared_artifact = {
+        obligation.obligation_id
+        for obligation in mk2.MK2.obligations
+        if obligation.scope is ObligationScope.ARTIFACT_CHECK
+    }
 
     parts: list[str] = []
     mechanical_keys = set(mechanical)
     organizational_keys = set(organizational)
+    artifact_ids = {result.check_id for result in artifact_results}
     missing_mechanical = tuple(sorted(declared_mechanical - mechanical_keys))
     extra_mechanical = tuple(sorted(mechanical_keys - declared_mechanical))
     missing_organizational = tuple(
@@ -59,6 +66,20 @@ def _check_registry_complete(
     )
     extra_organizational = tuple(
         sorted(organizational_keys - declared_organizational)
+    )
+    missing_artifact = tuple(sorted(declared_artifact - artifact_ids))
+    extra_artifact = tuple(sorted(artifact_ids - declared_artifact))
+    duplicate_artifact = tuple(
+        sorted(
+            {
+                result.check_id
+                for result in artifact_results
+                if sum(
+                    1 for other in artifact_results if other.check_id == result.check_id
+                )
+                > 1
+            }
+        )
     )
     if missing_mechanical:
         parts.append(f"mechanical missing: {missing_mechanical!r}")
@@ -68,6 +89,12 @@ def _check_registry_complete(
         parts.append(f"organizational missing: {missing_organizational!r}")
     if extra_organizational:
         parts.append(f"organizational extra: {extra_organizational!r}")
+    if missing_artifact:
+        parts.append(f"artifact missing: {missing_artifact!r}")
+    if extra_artifact:
+        parts.append(f"artifact extra: {extra_artifact!r}")
+    if duplicate_artifact:
+        parts.append(f"artifact duplicated: {duplicate_artifact!r}")
     return CheckResult(
         check_id=mk2.CHECK_REGISTRY_COMPLETE,
         verdict=Verdict.PASS if not parts else Verdict.FAIL,
@@ -76,7 +103,9 @@ def _check_registry_complete(
 
 
 def _check_default_registry_complete(snapshot: Snapshot) -> CheckResult:
-    return _check_registry_complete(snapshot, MECHANICAL_CHECKS, ORGANIZATIONAL_CHECKS)
+    return _check_registry_complete(
+        snapshot, MECHANICAL_CHECKS, ORGANIZATIONAL_CHECKS, ()
+    )
 
 
 MECHANICAL_CHECKS: Mapping[str, CheckEvaluator] = {
@@ -146,6 +175,7 @@ def run_checks(
     snapshot: Snapshot,
     mechanical: Mapping[str, CheckEvaluator] = MECHANICAL_CHECKS,
     organizational: Mapping[str, CheckEvaluator] = ORGANIZATIONAL_CHECKS,
+    artifact_results: tuple[CheckResult, ...] = (),
 ) -> CheckReport:
     """Run every supplied evaluator once, ordered by check id.
 
@@ -158,10 +188,47 @@ def run_checks(
     mechanical_ids = set(mechanical) | {mk2.CHECK_REGISTRY_COMPLETE}
     for check_id in sorted(mechanical_ids):
         if check_id == mk2.CHECK_REGISTRY_COMPLETE:
-            result = _check_registry_complete(snapshot, mechanical, organizational)
+            result = _check_registry_complete(
+                snapshot, mechanical, organizational, artifact_results
+            )
         else:
             result = _guard_mechanical(check_id, mechanical[check_id](snapshot))
         mechanical_results.append(result)
+
+    artifact_obligations = {
+        obligation.obligation_id: obligation
+        for obligation in mk2.MK2.obligations
+        if obligation.scope is ObligationScope.ARTIFACT_CHECK
+    }
+    for result in artifact_results:
+        obligation = artifact_obligations.get(result.check_id)
+        if obligation is None:
+            mechanical_results.append(
+                CheckResult(
+                    check_id=result.check_id,
+                    verdict=Verdict.FAIL,
+                    detail="undeclared artifact check",
+                )
+            )
+        elif result.verdict is Verdict.NOT_APPLICABLE and (
+            not obligation.applicability or not result.detail
+        ):
+            # The same vacuous-coverage guard the organizational rows have: a
+            # NOT_APPLICABLE that cites no IR applicability rule (or whose IR
+            # obligation declares none) would silently drop a check from
+            # coverage while composing clean.
+            mechanical_results.append(
+                CheckResult(
+                    check_id=result.check_id,
+                    verdict=Verdict.FAIL,
+                    detail=(
+                        "artifact result claims NOT_APPLICABLE without an IR "
+                        "applicability rule to cite"
+                    ),
+                )
+            )
+        else:
+            mechanical_results.append(result)
 
     organizational_results = tuple(
         _guard_organizational(check_id, organizational[check_id](snapshot))
@@ -169,6 +236,8 @@ def run_checks(
     )
     return CheckReport(
         revision=snapshot.revision,
-        mechanical=tuple(mechanical_results),
+        mechanical=tuple(
+            sorted(mechanical_results, key=lambda result: result.check_id)
+        ),
         organizational=organizational_results,
     )

@@ -14,6 +14,8 @@ import pytest
 
 from vouch_mk2.core import (
     Accepted,
+    AdvanceAnchor,
+    AnchorMode,
     AmendDeviation,
     BeginReverify,
     CloseDeviation,
@@ -22,6 +24,9 @@ from vouch_mk2.core import (
     Deviation,
     DeviationStatus,
     DeviationType,
+    EvidenceEvent,
+    EvidenceKind,
+    EvidenceOutcome,
     FreezeAcceptance,
     LaunchCriteria,
     MarkFailedUnrecovered,
@@ -30,12 +35,14 @@ from vouch_mk2.core import (
     OpenDeviation,
     PrepareRelease,
     Publish,
+    RecordEvidence,
     Refused,
     RejectDeviation,
     RetireRelease,
     Respecify,
     RollBack,
     SetReleaseCriteria,
+    SetAnchorMode,
     Snapshot,
     SpecifyUnit,
     StartDeploy,
@@ -49,12 +56,50 @@ from vouch_mk2.core import (
     decide,
 )
 from vouch_mk2.ir.mk2 import DEVIATION_MACHINE, MK2, RELEASE_O_MACHINE, UNIT_MACHINE
+from vouch_mk2.checks import CheckResult
+from vouch_mk2.ir import mk2
+from vouch_mk2.ir.schema import Verdict
+from vouch_mk2.store import ArtifactKind, digest_of, encode_evidence_event
 
 UNIT = MK2.machine(UNIT_MACHINE)
 DEVIATION = MK2.machine(DEVIATION_MACHINE)
 RELEASE = MK2.machine(RELEASE_O_MACHINE)
 
 REF = UnitRef(name="u", version="v1")
+B_REF = UnitRef(name="b", version="v1")
+B_RED_EVENT = EvidenceEvent(
+    unit=B_REF,
+    sequence=1,
+    parent="GENESIS",
+    kind=EvidenceKind.RED,
+    command_line="pytest",
+    outcome=EvidenceOutcome.TESTS_FAILED,
+    recorded_at="2026-08-13T00:00:00Z",
+)
+B_RED_DIGEST = digest_of(
+    ArtifactKind.EVIDENCE, encode_evidence_event(B_RED_EVENT)
+)
+B_GREEN_EVENT = EvidenceEvent(
+    unit=B_REF,
+    sequence=2,
+    parent=B_RED_DIGEST,
+    kind=EvidenceKind.GREEN,
+    command_line="pytest",
+    outcome=EvidenceOutcome.TESTS_PASSED,
+    recorded_at="2026-08-13T00:01:00Z",
+)
+B_GREEN_DIGEST = digest_of(
+    ArtifactKind.EVIDENCE, encode_evidence_event(B_GREEN_EVENT)
+)
+
+PURE_ARTIFACT_RESULTS = tuple(
+    CheckResult(check_id=check_id, verdict=Verdict.PASS, detail="")
+    for check_id in (
+        mk2.CHECK_EVIDENCE_CHAINS,
+        mk2.CHECK_EVIDENCE_ANCHORS,
+        mk2.CHECK_BUNDLE_INVENTORIES,
+    )
+)
 
 UNIT_COMMANDS: tuple[Command, ...] = (
     FreezeAcceptance(name="u", pack_version="p2"),
@@ -201,6 +246,8 @@ COMMAND_UNIVERSE: tuple[Command, ...] = (
     AmendDeviation(deviation_id="d2", amendment_version="v2"),
     RejectDeviation(deviation_id="d2"),
     CloseDeviation(deviation_id="d2"),
+    SetAnchorMode(AnchorMode.NONE),
+    SetAnchorMode(AnchorMode.CI),
 )
 
 
@@ -210,6 +257,11 @@ def snapshot_key(snapshot: Snapshot) -> tuple[object, ...]:
             (u.name, u.status.value, u.acceptance_pack_version)
             for u in snapshot.units
         ),
+        tuple(
+            (head.unit_name, head.head, head.head_sequence, head.anchored)
+            for head in snapshot.evidence_heads
+        ),
+        snapshot.anchor_mode.value,
         tuple((d.deviation_id, d.status.value) for d in snapshot.deviations),
         tuple(
             (
@@ -331,7 +383,7 @@ def test_all_reachable_snapshots_pass_standing_checks() -> None:
     frontier = [Snapshot()]
     while frontier:
         snapshot = frontier.pop()
-        report = run_checks(snapshot)
+        report = run_checks(snapshot, artifact_results=PURE_ARTIFACT_RESULTS)
         assert report.composed() is not Verdict.FAIL, (
             snapshot,
             [
@@ -370,7 +422,7 @@ def test_reachable_multi_unit_release_snapshots_pass_standing_checks() -> None:
     )
     from vouch_mk2.ir.schema import Verdict
 
-    b_ref = UnitRef(name="b", version="v1")
+    b_ref = B_REF
     criteria = LaunchCriteria(
         launch_criteria=("healthy",),
         verification_window="1h",
@@ -406,6 +458,11 @@ def test_reachable_multi_unit_release_snapshots_pass_standing_checks() -> None:
         CompleteRelease(release_id="r1"),
         RollBack(release_id="r1", trigger="errors"),
         RetireRelease(release_id="r1", trigger="done"),
+        SetAnchorMode(AnchorMode.NONE),
+        SetAnchorMode(AnchorMode.CI),
+        RecordEvidence(B_RED_EVENT, B_RED_DIGEST),
+        RecordEvidence(B_GREEN_EVENT, B_GREEN_DIGEST),
+        AdvanceAnchor("b"),
     )
 
     def key(snapshot: Snapshot) -> tuple[object, ...]:
@@ -419,6 +476,11 @@ def test_reachable_multi_unit_release_snapshots_pass_standing_checks() -> None:
                 (r.release_id, r.state.value, r.criteria is not None)
                 for r in snapshot.releases
             ),
+            tuple(
+                (head.unit_name, head.head, head.head_sequence, head.anchored)
+                for head in snapshot.evidence_heads
+            ),
+            snapshot.anchor_mode.value,
         )
 
     max_depth = 30
@@ -427,7 +489,7 @@ def test_reachable_multi_unit_release_snapshots_pass_standing_checks() -> None:
     checked = 0
     while frontier:
         snapshot, depth = frontier.pop()
-        report = run_checks(snapshot)
+        report = run_checks(snapshot, artifact_results=PURE_ARTIFACT_RESULTS)
         checked += 1
         assert report.composed() is not Verdict.FAIL, (
             snapshot,
