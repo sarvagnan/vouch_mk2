@@ -3,13 +3,20 @@ gate obligation it declares has exactly one registered evaluator."""
 
 from __future__ import annotations
 
-from vouch_mk2.core import DeviationStatus, DeviationType, UnitStatus
-from vouch_mk2.core.decide import GATE_EVALUATORS
+from vouch_mk2.core import (
+    ClosureTriggerKind,
+    DeviationStatus,
+    DeviationType,
+    ReleaseState,
+    UnitStatus,
+)
+from vouch_mk2.core.decide import GATE_EVALUATORS, RELEASE_GATE_EVALUATORS
 from vouch_mk2.ir import validate
-from vouch_mk2.ir.mk2 import DEVIATION_MACHINE, MK2, UNIT_MACHINE
+from vouch_mk2.ir.mk2 import DEVIATION_MACHINE, MK2, RELEASE_O_MACHINE, UNIT_MACHINE
 from vouch_mk2.ir.schema import ObligationScope, StateMachine
 from vouch_mk2.ir.vouch_06 import VOUCH_06
 from vouch_mk2.ir.vouch_06 import DEVIATION_MACHINE as V06_DEVIATION
+from vouch_mk2.ir.vouch_06 import RELEASE_O_MACHINE as V06_RELEASE_O
 from vouch_mk2.ir.vouch_06 import UNIT_MACHINE as V06_UNIT
 
 
@@ -26,14 +33,14 @@ def test_unit_states_match_06() -> None:
 
 
 def test_unit_edges_match_06_except_recorded_divergences() -> None:
-    # Phase 1 defers the release-bound *entry* edge (Phase 4 introduces release
-    # commands). mk2 adds exactly two recorded edges (DECISIONS.md D-3): the
+    # Phase 4 supplies the release-bound entry. mk2 adds exactly two recorded
+    # edges (DECISIONS.md D-3): the
     # blocked self-loop making deviation accumulation table-visible, and the
     # invalidated->specified respecify escape for never-frozen units caught in
     # an amendment impact closure.
     mk2_pairs = edge_pairs(MK2.machine(UNIT_MACHINE))
     v06_pairs = edge_pairs(VOUCH_06.machine(V06_UNIT))
-    assert v06_pairs - mk2_pairs == {("published", "release-bound")}
+    assert v06_pairs - mk2_pairs == set()
     assert mk2_pairs - v06_pairs == {
         ("blocked", "blocked"),
         ("invalidated", "specified"),
@@ -49,14 +56,36 @@ def test_deviation_machine_matches_06() -> None:
     ).states
 
 
-def test_every_unit_command_has_one_meaning() -> None:
+def test_operational_release_edges_match_06() -> None:
+    # mk2 adds one self-loop over 0.6: set-criteria is table-visible in
+    # prepared (like the blocked open-deviation self-loop) instead of
+    # hand-coded legality in decide().
+    mk2_pairs = edge_pairs(MK2.machine(RELEASE_O_MACHINE))
+    assert mk2_pairs - {("prepared", "prepared")} == edge_pairs(
+        VOUCH_06.machine(V06_RELEASE_O)
+    )
+
+
+def test_operational_release_claim_rules_mirror_06_shapes() -> None:
+    states = ("succeeded", "rolled-back", "failed-unrecovered", "retired", "invalidated")
+    for state in states:
+        mk2_rule = MK2.claim_rule(RELEASE_O_MACHINE, state)
+        v06_rule = VOUCH_06.claim_rule(V06_RELEASE_O, state)
+        assert mk2_rule is not None and v06_rule is not None
+        assert mk2_rule.shape is v06_rule.shape
+        assert len(mk2_rule.obligations) == len(v06_rule.obligations) == 1
+
+
+def test_every_command_has_one_meaning_per_machine() -> None:
     # A command label maps each source state to at most one target — decide()'s
     # (status, command) lookup is unambiguous.
     seen: set[tuple[str, str]] = set()
-    for transition in MK2.machine(UNIT_MACHINE).command_transitions:
-        key = (transition.source, transition.command)
-        assert key not in seen, key
-        seen.add(key)
+    for machine in MK2.machines:
+        seen = set()
+        for transition in machine.command_transitions:
+            key = (transition.source, transition.command)
+            assert key not in seen, (machine.name, key)
+            seen.add(key)
 
 
 def test_gate_registry_is_complete_both_ways() -> None:
@@ -76,7 +105,23 @@ def test_gate_registry_is_complete_both_ways() -> None:
     # and every registered evaluator is actually used. No gate orphans in either
     # direction; standing and organizational obligations are intentionally unbound.
     assert bound == declared_transition_gates
-    assert bound == set(GATE_EVALUATORS.keys())
+    unit_gates = {gate for gate in bound if not gate.startswith("gate.release.")}
+    release_gates = bound - unit_gates
+    assert unit_gates == set(GATE_EVALUATORS.keys())
+    assert release_gates == set(RELEASE_GATE_EVALUATORS.keys())
+
+
+def test_every_active_release_state_has_protective_escape() -> None:
+    # This is the CI-time guarantee behind the defensive standing evaluator;
+    # with the real closed IR its FAIL branch is intentionally unreachable.
+    machine = MK2.machine(RELEASE_O_MACHINE)
+    active = set(MK2.state_set("release.active.operational").states)
+    protective = set(MK2.state_set("release.protective.operational").states)
+    for state in active:
+        assert any(
+            transition.source == state and transition.target in protective
+            for transition in machine.command_transitions
+        )
 
 
 def test_satisfied_dependency_set_matches_06() -> None:
@@ -103,6 +148,12 @@ def test_core_enums_conform_to_ir() -> None:
     )
     assert {t.value for t in DeviationType} == set(
         MK2.vocabulary("deviation-types").values
+    )
+    assert {s.value for s in ReleaseState} == set(
+        MK2.machine(RELEASE_O_MACHINE).states
+    )
+    assert {kind.value for kind in ClosureTriggerKind} == set(
+        MK2.vocabulary("closure-trigger-kinds").values
     )
 
 

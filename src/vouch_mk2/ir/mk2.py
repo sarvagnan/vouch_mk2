@@ -1,6 +1,6 @@
 """The mk2 Policy IR: the tables ``decide()`` executes.
 
-Phase 1 scope: the unit lifecycle and the deviation lifecycle. The unit machine's
+Phase 4 scope: the unit, deviation, and operational-release lifecycles. The unit machine's
 states and (source, target) edge set are identical to the 0.6 machine transcribed in
 ``vouch_06.py`` — conformance is asserted in ``tests/test_mk2_ir.py`` — but every
 edge carries a named command instead of 0.6's overloaded ``set-status``, and DoR/DoD
@@ -10,14 +10,17 @@ are one code path.
 Semantics that deliberately differ from 0.6's implementation are recorded in
 ``DECISIONS.md`` D-3 (derived blocker set, no auto-unblock, amendment-impact scope).
 
-``release-bound`` is declared but unreachable until Phase 4 introduces release
-commands; no Phase 1 command produces it.
+Phase 4 makes ``release-bound`` reachable through release preparation and adds the
+operational release machine with ledger-native launch criteria and full completion /
+protective-closure claim taxonomy.
 """
 
 from __future__ import annotations
 
 from vouch_mk2.ir.schema import (
     AdjudicationEntry,
+    ClaimRule,
+    ClaimShape,
     ClosedVocabulary,
     IrIdentity,
     Obligation,
@@ -30,6 +33,7 @@ from vouch_mk2.ir.schema import (
 
 UNIT_MACHINE = "unit"
 DEVIATION_MACHINE = "deviation"
+RELEASE_O_MACHINE = "release-operational"
 
 TRIGGER_AMENDMENT_IMPACT = "amendment-impact"
 
@@ -45,6 +49,16 @@ CMD_SUPERSEDE = "supersede"
 CMD_RESPECIFY = "respecify"
 CMD_BEGIN_REVERIFY = "begin-reverify"
 CMD_OPEN_DEVIATION = "open-deviation"
+CMD_PREPARE_RELEASE = "prepare-release"
+
+# Operational release commands.
+CMD_SET_CRITERIA = "set-criteria"
+CMD_START_DEPLOY = "start-deploy"
+CMD_START_VERIFICATION = "start-verification"
+CMD_COMPLETE_RELEASE = "complete"
+CMD_ROLL_BACK = "roll-back"
+CMD_MARK_FAILED_UNRECOVERED = "mark-failed-unrecovered"
+CMD_RETIRE_RELEASE = "retire"
 
 # Deviation lifecycle commands.
 CMD_ADJUDICATE_AMEND = "adjudicate-amend"
@@ -60,6 +74,25 @@ GATE_DOD_DEPENDENCIES_SATISFIED = "gate.dod.dependencies-satisfied"
 GATE_DOD_NO_BLOCKING_DEVIATIONS = "gate.dod.no-blocking-deviations"
 GATE_UNBLOCK_NO_BLOCKING_DEVIATIONS = "gate.unblock.no-blocking-deviations"
 GATE_REVERIFY_PACK_RECORDED = "gate.reverify.pack-recorded"
+GATE_RELEASE_CRITERIA_BEFORE_PROGRESSION = (
+    "gate.release.criteria-before-progression"
+)
+GATE_RELEASE_COMPLETION_UNITS_RECHECK = (
+    "gate.release.completion-units-recheck"
+)
+GATE_RELEASE_COMPLETION_CRITERIA_RECORDED = (
+    "gate.release.completion-criteria-recorded"
+)
+GATE_RELEASE_COMPLETION_ROSTER_RESOLVES = (
+    "gate.release.completion-roster-resolves"
+)
+GATE_RELEASE_CLOSURE_RECORD_COMPLETE = "gate.release.closure-record-complete"
+GATE_RELEASE_ROSTER_DEPENDENCY_CLOSED = "gate.release.roster-dependency-closed"
+GATE_RELEASE_ROSTER_UNITS_ELIGIBLE = "gate.release.roster-units-eligible"
+
+# Release claim obligations.
+CLAIM_COMPLETION_RECHECK = "claim.completion-recheck"
+CLAIM_CLOSURE_RECORD = "claim.closure-record"
 
 # Phase 3 standing mechanical checks. These constants live with the IR because
 # obligation ids are IR-owned; evaluators import them from here so declarations
@@ -71,6 +104,13 @@ CHECK_DEVIATION_BINDINGS_RESOLVE = "check.deviation-bindings-resolve"
 CHECK_BLOCKED_STATUS_COHERENT = "check.blocked-status-coherent"
 CHECK_PUBLISHED_UNITS_GATED = "check.published-units-gated"
 CHECK_AMENDED_DEVIATIONS_COMPLETE = "check.amended-deviations-complete"
+CHECK_RELEASE_ESCAPE_PROPERTY = "check.release-escape-property"
+CHECK_RELEASE_ROSTERS_RESOLVE = "check.release-rosters-resolve"
+CHECK_RELEASE_CRITERIA_BEFORE_PROGRESSION = (
+    "check.release-criteria-before-progression"
+)
+CHECK_RELEASE_CLOSURE_RECORDS = "check.release-closure-records"
+CHECK_RELEASE_BOUND_UNITS_ROSTERED = "check.release-bound-units-rostered"
 
 # Permanently NOT_CHECKED organizational claims (docs/claim-boundary.md).
 ORG_ACCEPTANCE_OWNERSHIP = "org.acceptance-ownership"
@@ -148,6 +188,15 @@ _UNIT = StateMachine(
             gates=_DOD_GATES,
         ),
         Transition(
+            source="published",
+            command=CMD_PREPARE_RELEASE,
+            target="release-bound",
+            gates=(
+                GATE_RELEASE_ROSTER_DEPENDENCY_CLOSED,
+                GATE_RELEASE_ROSTER_UNITS_ELIGIBLE,
+            ),
+        ),
+        Transition(
             source="blocked",
             command=CMD_RESPECIFY,
             target="specified",
@@ -198,6 +247,89 @@ _UNIT = StateMachine(
             target="invalidated",
             sources=_UNIT_STATES,
             excluded_sources=("superseded",),
+        ),
+    ),
+)
+
+_RELEASE_O_STATES = (
+    "prepared",
+    "deploying",
+    "verifying",
+    "rolled-back",
+    "succeeded",
+    "failed-unrecovered",
+    "retired",
+    "invalidated",
+)
+
+_RELEASE_O = StateMachine(
+    name=RELEASE_O_MACHINE,
+    states=_RELEASE_O_STATES,
+    initial="prepared",
+    command_transitions=(
+        # Criteria are recorded while prepared; the self-loop keeps set-criteria
+        # legality in the tables (like the blocked open-deviation self-loop)
+        # instead of hand-coded in decide().
+        Transition(
+            source="prepared",
+            command=CMD_SET_CRITERIA,
+            target="prepared",
+        ),
+        Transition(
+            source="prepared",
+            command=CMD_START_DEPLOY,
+            target="deploying",
+            gates=(GATE_RELEASE_CRITERIA_BEFORE_PROGRESSION,),
+        ),
+        Transition(
+            source="deploying",
+            command=CMD_START_VERIFICATION,
+            target="verifying",
+        ),
+        Transition(
+            source="verifying",
+            command=CMD_COMPLETE_RELEASE,
+            target="succeeded",
+            gates=(
+                GATE_RELEASE_COMPLETION_UNITS_RECHECK,
+                GATE_RELEASE_COMPLETION_CRITERIA_RECORDED,
+                GATE_RELEASE_COMPLETION_ROSTER_RESOLVES,
+            ),
+        ),
+        Transition(
+            source="deploying",
+            command=CMD_ROLL_BACK,
+            target="rolled-back",
+            gates=(GATE_RELEASE_CLOSURE_RECORD_COMPLETE,),
+        ),
+        Transition(
+            source="verifying",
+            command=CMD_ROLL_BACK,
+            target="rolled-back",
+            gates=(GATE_RELEASE_CLOSURE_RECORD_COMPLETE,),
+        ),
+        Transition(
+            source="rolled-back",
+            command=CMD_MARK_FAILED_UNRECOVERED,
+            target="failed-unrecovered",
+            gates=(GATE_RELEASE_CLOSURE_RECORD_COMPLETE,),
+        ),
+        *(
+            Transition(
+                source=source,
+                command=CMD_RETIRE_RELEASE,
+                target="retired",
+                gates=(GATE_RELEASE_CLOSURE_RECORD_COMPLETE,),
+            )
+            for source in ("prepared", "deploying", "verifying", "succeeded")
+        ),
+    ),
+    adjudication_entries=(
+        AdjudicationEntry(
+            trigger="amendment",
+            target="invalidated",
+            sources=_RELEASE_O_STATES,
+            excluded_sources=("invalidated",),
         ),
     ),
 )
@@ -268,6 +400,72 @@ _OBLIGATIONS = (
         ),
     ),
     Obligation(
+        obligation_id=GATE_RELEASE_CRITERIA_BEFORE_PROGRESSION,
+        scope=ObligationScope.TRANSITION_GATE,
+        description=(
+            "A release advances out of prepared only with recorded launch criteria."
+        ),
+    ),
+    Obligation(
+        obligation_id=GATE_RELEASE_COMPLETION_UNITS_RECHECK,
+        scope=ObligationScope.TRANSITION_GATE,
+        description=(
+            "On every transition into succeeded, every roster member re-checks: "
+            "exists at the bound version, status release-bound, non-empty pack, "
+            "and no blocking deviations."
+        ),
+    ),
+    Obligation(
+        obligation_id=GATE_RELEASE_COMPLETION_CRITERIA_RECORDED,
+        scope=ObligationScope.TRANSITION_GATE,
+        description="A completion claim requires recorded launch criteria.",
+    ),
+    Obligation(
+        obligation_id=GATE_RELEASE_COMPLETION_ROSTER_RESOLVES,
+        scope=ObligationScope.TRANSITION_GATE,
+        description="Every include resolves NAME@VERSION.",
+    ),
+    Obligation(
+        obligation_id=GATE_RELEASE_CLOSURE_RECORD_COMPLETE,
+        scope=ObligationScope.TRANSITION_GATE,
+        description=(
+            "A protective closure requires a non-empty trigger; record "
+            "incompleteness is the only permitted refusal, never roster health."
+        ),
+    ),
+    Obligation(
+        obligation_id=GATE_RELEASE_ROSTER_DEPENDENCY_CLOSED,
+        scope=ObligationScope.TRANSITION_GATE,
+        description=(
+            "The roster contains every dependency of every member — the 0.6 I9 lesson."
+        ),
+    ),
+    Obligation(
+        obligation_id=GATE_RELEASE_ROSTER_UNITS_ELIGIBLE,
+        scope=ObligationScope.TRANSITION_GATE,
+        description=(
+            "Every roster member is published or release-bound, has a recorded "
+            "pack, and no blocking deviations."
+        ),
+    ),
+    Obligation(
+        obligation_id=CLAIM_COMPLETION_RECHECK,
+        scope=ObligationScope.CLAIM,
+        description=(
+            "Re-check included unit-done, integrity, criteria digest, and roster "
+            "bindings on every transition into a completion claim."
+        ),
+    ),
+    Obligation(
+        obligation_id=CLAIM_CLOSURE_RECORD,
+        scope=ObligationScope.CLAIM,
+        description=(
+            "Record the trigger, required trigger_kind, frozen-roster status "
+            "snapshot, no_completion_claim: true, and observations; record "
+            "incompleteness is the only permitted refusal, never roster health."
+        ),
+    ),
+    Obligation(
         obligation_id=CHECK_REGISTRY_COMPLETE,
         scope=ObligationScope.STANDING_CHECK,
         description="Every Phase 3 IR check obligation has exactly one registered evaluator.",
@@ -306,6 +504,31 @@ _OBLIGATIONS = (
         obligation_id=CHECK_AMENDED_DEVIATIONS_COMPLETE,
         scope=ObligationScope.STANDING_CHECK,
         description="Every amended deviation records its amendment and a resolving impact set.",
+    ),
+    Obligation(
+        obligation_id=CHECK_RELEASE_ESCAPE_PROPERTY,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every active operational release state has a protective escape edge.",
+    ),
+    Obligation(
+        obligation_id=CHECK_RELEASE_ROSTERS_RESOLVE,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Active and succeeded release rosters resolve at their bound versions.",
+    ),
+    Obligation(
+        obligation_id=CHECK_RELEASE_CRITERIA_BEFORE_PROGRESSION,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every progressed release retains ledger-native launch criteria.",
+    ),
+    Obligation(
+        obligation_id=CHECK_RELEASE_CLOSURE_RECORDS,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Release closure records match their claim-bearing state semantics.",
+    ),
+    Obligation(
+        obligation_id=CHECK_RELEASE_BOUND_UNITS_ROSTERED,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every release-bound unit appears in at least one release roster.",
     ),
     Obligation(
         obligation_id=ORG_ACCEPTANCE_OWNERSHIP,
@@ -349,6 +572,16 @@ _STATE_SETS = (
         machine=UNIT_MACHINE,
         states=("published", "release-bound", "superseded"),
     ),
+    StateSet(
+        name="release.active.operational",
+        machine=RELEASE_O_MACHINE,
+        states=("prepared", "deploying", "verifying"),
+    ),
+    StateSet(
+        name="release.protective.operational",
+        machine=RELEASE_O_MACHINE,
+        states=("rolled-back", "failed-unrecovered", "retired", "invalidated"),
+    ),
 )
 
 _VOCABULARIES = (
@@ -356,15 +589,38 @@ _VOCABULARIES = (
         name="deviation-types",
         values=("pack-defect", "contract-conflict", "plan-gap", "capability-request"),
     ),
+    ClosedVocabulary(
+        name="closure-trigger-kinds",
+        values=("amendment", "operator", "supersession"),
+    ),
+)
+
+_CLAIM_RULES = (
+    ClaimRule(
+        machine=RELEASE_O_MACHINE,
+        state="succeeded",
+        shape=ClaimShape.COMPLETION_CLAIM,
+        obligations=(CLAIM_COMPLETION_RECHECK,),
+    ),
+    *(
+        ClaimRule(
+            machine=RELEASE_O_MACHINE,
+            state=state,
+            shape=ClaimShape.PROTECTIVE_CLOSURE,
+            obligations=(CLAIM_CLOSURE_RECORD,),
+        )
+        for state in ("rolled-back", "failed-unrecovered", "retired", "invalidated")
+    ),
 )
 
 MK2 = PolicyIr(
     identity=IrIdentity(
         name="vouch-mk2-lifecycle",
-        version="phase-1",
-        source="IMPLEMENTATION-PLAN.md §4 Phase 1; DECISIONS.md D-3; ir/vouch_06.py",
+        version="phase-4",
+        source="IMPLEMENTATION-PLAN.md §4 Phase 4; DECISIONS.md D-3; ir/vouch_06.py",
     ),
-    machines=(_UNIT, _DEVIATION),
+    machines=(_UNIT, _DEVIATION, _RELEASE_O),
+    claim_rules=_CLAIM_RULES,
     obligations=_OBLIGATIONS,
     state_sets=_STATE_SETS,
     vocabularies=_VOCABULARIES,

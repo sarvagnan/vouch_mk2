@@ -4,8 +4,8 @@
   as the IR tables license — accepted onto the IR target, or refused with a named
   violation;
 - every legal transition is reachable by driving ``decide``/``apply`` from the
-  empty snapshot (BFS over a small command universe), except the two edges that
-  touch the Phase 4-deferred ``release-bound`` entry.
+  empty snapshot (BFS over a small command universe), with only true self-loops
+  unobservable as status changes.
 """
 
 from __future__ import annotations
@@ -18,19 +18,28 @@ from vouch_mk2.core import (
     BeginReverify,
     CloseDeviation,
     Command,
+    CompleteRelease,
     Deviation,
     DeviationStatus,
     DeviationType,
     FreezeAcceptance,
+    LaunchCriteria,
+    MarkFailedUnrecovered,
     MarkDone,
     MarkReady,
     OpenDeviation,
+    PrepareRelease,
     Publish,
     Refused,
     RejectDeviation,
+    RetireRelease,
     Respecify,
+    RollBack,
+    SetReleaseCriteria,
     Snapshot,
     SpecifyUnit,
+    StartDeploy,
+    StartVerification,
     StartWork,
     Supersede,
     Unit,
@@ -39,10 +48,11 @@ from vouch_mk2.core import (
     apply,
     decide,
 )
-from vouch_mk2.ir.mk2 import DEVIATION_MACHINE, MK2, UNIT_MACHINE
+from vouch_mk2.ir.mk2 import DEVIATION_MACHINE, MK2, RELEASE_O_MACHINE, UNIT_MACHINE
 
 UNIT = MK2.machine(UNIT_MACHINE)
 DEVIATION = MK2.machine(DEVIATION_MACHINE)
+RELEASE = MK2.machine(RELEASE_O_MACHINE)
 
 REF = UnitRef(name="u", version="v1")
 
@@ -160,6 +170,22 @@ COMMAND_UNIVERSE: tuple[Command, ...] = (
     StartWork(name="u"),
     MarkDone(name="u"),
     Publish(name="u"),
+    PrepareRelease(release_id="r1", includes=("u",)),
+    SetReleaseCriteria(
+        release_id="r1",
+        criteria=LaunchCriteria(
+            launch_criteria=("healthy",),
+            verification_window="1h",
+            rollback_triggers=(),
+            go_no_go_authority="operator",
+        ),
+    ),
+    StartDeploy(release_id="r1"),
+    StartVerification(release_id="r1"),
+    CompleteRelease(release_id="r1"),
+    RollBack(release_id="r1", trigger="trigger"),
+    MarkFailedUnrecovered(release_id="r1", trigger="trigger"),
+    RetireRelease(release_id="r1", trigger="trigger"),
     Supersede(name="u"),
     Respecify(name="u"),
     BeginReverify(name="u"),
@@ -185,6 +211,15 @@ def snapshot_key(snapshot: Snapshot) -> tuple[object, ...]:
             for u in snapshot.units
         ),
         tuple((d.deviation_id, d.status.value) for d in snapshot.deviations),
+        tuple(
+            (
+                release.release_id,
+                release.state.value,
+                release.criteria is not None,
+                release.closure is not None,
+            )
+            for release in snapshot.releases
+        ),
     )
 
 
@@ -192,6 +227,7 @@ def test_every_legal_transition_is_reachable() -> None:
     seen_unit_edges: set[tuple[str, str, str]] = set()
     seen_adjudication_edges: set[tuple[str, str]] = set()
     seen_deviation_edges: set[tuple[str, str, str]] = set()
+    seen_release_edges: set[tuple[str, str, str]] = set()
     visited = {snapshot_key(Snapshot())}
     frontier = [Snapshot()]
     while frontier:
@@ -231,6 +267,21 @@ def test_every_legal_transition_is_reachable() -> None:
                     seen_deviation_edges.add(
                         (before_d.status.value, label, after_d.status.value)
                     )
+            before_release = snapshot.release("r1")
+            after_release = after.release("r1")
+            if (
+                before_release is not None
+                and after_release is not None
+                and before_release.state is not after_release.state
+                and not isinstance(command, AmendDeviation)
+            ):
+                seen_release_edges.add(
+                    (
+                        before_release.state.value,
+                        command.ir_command,
+                        after_release.state.value,
+                    )
+                )
             key = snapshot_key(after)
             if key not in visited:
                 visited.add(key)
@@ -239,17 +290,23 @@ def test_every_legal_transition_is_reachable() -> None:
     ir_unit_edges = {
         (t.source, t.command, t.target) for t in UNIT.command_transitions
     }
-    # The BFS records status *changes*, so self-loops (deviation accumulation on
-    # a blocked unit) and the Phase 4-deferred release-bound edges are expected
-    # to be absent.
+    # The BFS records status *changes*, so only true self-loops (deviation
+    # accumulation on a blocked unit) are expected to be absent.
     unobservable = {
         edge
         for edge in ir_unit_edges
-        if "release-bound" in (edge[0], edge[2]) or edge[0] == edge[2]
+        if edge[0] == edge[2]
     }
     assert seen_unit_edges == ir_unit_edges - unobservable
     assert seen_deviation_edges == {
         (t.source, t.command, t.target) for t in DEVIATION.command_transitions
+    }
+    # Self-loops (set-criteria in prepared) do not change state and are
+    # therefore invisible to a status-change recorder.
+    assert seen_release_edges == {
+        (t.source, t.command, t.target)
+        for t in RELEASE.command_transitions
+        if t.source != t.target
     }
     # The adjudication entry fired, its targets are all `invalidated`, and its
     # sources respect the IR entry's source/exclusion lists.
@@ -292,3 +349,103 @@ def test_all_reachable_snapshots_pass_standing_checks() -> None:
             if key not in visited:
                 visited.add(key)
                 frontier.append(after)
+
+
+def test_reachable_multi_unit_release_snapshots_pass_standing_checks() -> None:
+    # A sweep over a RICHER universe than the exhaustive test above: two
+    # units with a dependency edge, a release over both, and a deviation.
+    # The reachable space under this universe saturates (~612 distinct states
+    # by depth 30 — calibrated), so the depth bound below is a safety valve,
+    # not a silent cap: the sweep is effectively exhaustive for this universe.
+    from vouch_mk2.checks import run_checks
+    from vouch_mk2.core import (
+        CompleteRelease,
+        LaunchCriteria,
+        PrepareRelease,
+        RetireRelease,
+        RollBack,
+        SetReleaseCriteria,
+        StartDeploy,
+        StartVerification,
+    )
+    from vouch_mk2.ir.schema import Verdict
+
+    b_ref = UnitRef(name="b", version="v1")
+    criteria = LaunchCriteria(
+        launch_criteria=("healthy",),
+        verification_window="1h",
+        rollback_triggers=("errors",),
+        go_no_go_authority="ops",
+    )
+    universe: tuple[Command, ...] = (
+        SpecifyUnit(name="b", version="v1"),
+        SpecifyUnit(name="a", version="v1", depends_on=("b",)),
+        FreezeAcceptance(name="b", pack_version="p"),
+        FreezeAcceptance(name="a", pack_version="p"),
+        MarkReady(name="b"),
+        MarkReady(name="a"),
+        StartWork(name="b"),
+        StartWork(name="a"),
+        MarkDone(name="b"),
+        MarkDone(name="a"),
+        Publish(name="b"),
+        Publish(name="a"),
+        Supersede(name="b"),
+        BeginReverify(name="b"),
+        Respecify(name="b"),
+        OpenDeviation(
+            deviation_id="d1", deviation_type=DeviationType.PACK_DEFECT, unit=b_ref
+        ),
+        AmendDeviation(deviation_id="d1", amendment_version="v2"),
+        RejectDeviation(deviation_id="d1"),
+        CloseDeviation(deviation_id="d1"),
+        PrepareRelease(release_id="r1", includes=("a", "b")),
+        SetReleaseCriteria(release_id="r1", criteria=criteria),
+        StartDeploy(release_id="r1"),
+        StartVerification(release_id="r1"),
+        CompleteRelease(release_id="r1"),
+        RollBack(release_id="r1", trigger="errors"),
+        RetireRelease(release_id="r1", trigger="done"),
+    )
+
+    def key(snapshot: Snapshot) -> tuple[object, ...]:
+        return (
+            tuple(
+                (u.name, u.status.value, u.acceptance_pack_version)
+                for u in snapshot.units
+            ),
+            tuple((d.deviation_id, d.status.value) for d in snapshot.deviations),
+            tuple(
+                (r.release_id, r.state.value, r.criteria is not None)
+                for r in snapshot.releases
+            ),
+        )
+
+    max_depth = 30
+    visited = {key(Snapshot()): 0}
+    frontier: list[tuple[Snapshot, int]] = [(Snapshot(), 0)]
+    checked = 0
+    while frontier:
+        snapshot, depth = frontier.pop()
+        report = run_checks(snapshot)
+        checked += 1
+        assert report.composed() is not Verdict.FAIL, (
+            snapshot,
+            [
+                (r.check_id, r.detail)
+                for r in report.mechanical
+                if r.verdict is Verdict.FAIL
+            ],
+        )
+        if depth >= max_depth:
+            continue
+        for command in universe:
+            decision = decide(snapshot, command)
+            if not isinstance(decision, Accepted):
+                continue
+            after = apply(snapshot, decision.events)
+            after_key = key(after)
+            if after_key not in visited or visited[after_key] > depth + 1:
+                visited[after_key] = depth + 1
+                frontier.append((after, depth + 1))
+    assert checked > 500

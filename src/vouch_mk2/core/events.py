@@ -7,7 +7,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vouch_mk2.core.model import DeviationType, UnitRef
+from vouch_mk2.core.model import (
+    ClosureRecord,
+    DeviationType,
+    LaunchCriteria,
+    ReleaseArchetype,
+    UnitRef,
+)
 from vouch_mk2.ir.schema import Verdict
 
 
@@ -102,6 +108,7 @@ class DeviationAmended:
     deviation_id: str
     amendment_version: str
     impact_set: tuple[str, ...]
+    release_impact_set: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +127,68 @@ class DeviationClosed:
     deviation_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ReleasePrepared:
+    release_id: str
+    archetype: ReleaseArchetype
+    includes: tuple[UnitRef, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class UnitReleaseBound:
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseCriteriaSet:
+    release_id: str
+    criteria: LaunchCriteria
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentStarted:
+    release_id: str
+    gate: GateRecord
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationStarted:
+    release_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseSucceeded:
+    release_id: str
+    gate: GateRecord
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseRolledBack:
+    release_id: str
+    closure: ClosureRecord
+    gate: GateRecord
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseFailedUnrecovered:
+    release_id: str
+    closure: ClosureRecord
+    gate: GateRecord
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseRetired:
+    release_id: str
+    closure: ClosureRecord
+    gate: GateRecord
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseInvalidated:
+    release_id: str
+    closure: ClosureRecord | None
+
+
 type Event = (
     UnitSpecified
     | AcceptanceFrozen
@@ -136,4 +205,14 @@ type Event = (
     | UnitInvalidated
     | DeviationRejected
     | DeviationClosed
+    | ReleasePrepared
+    | UnitReleaseBound
+    | ReleaseCriteriaSet
+    | DeploymentStarted
+    | VerificationStarted
+    | ReleaseSucceeded
+    | ReleaseRolledBack
+    | ReleaseFailedUnrecovered
+    | ReleaseRetired
+    | ReleaseInvalidated
 )

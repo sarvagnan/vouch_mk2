@@ -7,9 +7,15 @@ from collections.abc import Callable
 from typing import cast
 
 from vouch_mk2.core.model import (
+    ClosureRecord,
+    ClosureTriggerKind,
     Deviation,
     DeviationStatus,
     DeviationType,
+    LaunchCriteria,
+    Release,
+    ReleaseArchetype,
+    ReleaseState,
     Snapshot,
     Unit,
     UnitRef,
@@ -27,6 +33,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
                 "deviation_id": deviation.deviation_id,
                 "deviation_type": deviation.deviation_type.value,
                 "impact_set": list(deviation.impact_set),
+                "release_impact_set": list(deviation.release_impact_set),
                 "status": deviation.status.value,
                 "unit": {
                     "name": deviation.unit.name,
@@ -36,6 +43,52 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
             for deviation in snapshot.deviations
         ],
         "revision": snapshot.revision,
+        "releases": [
+            {
+                "archetype": release.archetype.value,
+                "closure": (
+                    None
+                    if release.closure is None
+                    else {
+                        "no_completion_claim": (
+                            release.closure.no_completion_claim
+                        ),
+                        "observations": list(release.closure.observations),
+                        "roster_snapshot": [
+                            [name, status]
+                            for name, status in release.closure.roster_snapshot
+                        ],
+                        "trigger": release.closure.trigger,
+                        "trigger_kind": release.closure.trigger_kind.value,
+                    }
+                ),
+                "criteria": (
+                    None
+                    if release.criteria is None
+                    else {
+                        "go_no_go_authority": (
+                            release.criteria.go_no_go_authority
+                        ),
+                        "launch_criteria": list(
+                            release.criteria.launch_criteria
+                        ),
+                        "rollback_triggers": list(
+                            release.criteria.rollback_triggers
+                        ),
+                        "verification_window": (
+                            release.criteria.verification_window
+                        ),
+                    }
+                ),
+                "includes": [
+                    {"name": ref.name, "version": ref.version}
+                    for ref in release.includes
+                ],
+                "release_id": release.release_id,
+                "state": release.state.value,
+            }
+            for release in snapshot.releases
+        ],
         "units": [
             {
                 "acceptance_pack_version": unit.acceptance_pack_version,
@@ -68,7 +121,7 @@ def _object(value: object, path: str) -> dict[str, object]:
     for key, item in raw.items():
         if type(key) is not str:
             raise DecodeError(f"{path or '$'}: expected string field name")
-        result[cast(str, key)] = item
+        result[key] = item
     return result
 
 
@@ -81,14 +134,20 @@ def _array(value: object, path: str) -> list[object]:
 def _string(value: object, path: str) -> str:
     if type(value) is not str:
         raise DecodeError(f"{path}: expected string")
-    return cast(str, value)
+    return value
 
 
 def _integer(value: object, path: str) -> int:
     # Exact type equality is intentional: bool is an int subclass in Python.
     if type(value) is not int:
         raise DecodeError(f"{path}: expected integer")
-    return cast(int, value)
+    return value
+
+
+def _boolean(value: object, path: str) -> bool:
+    if type(value) is not bool:
+        raise DecodeError(f"{path}: expected boolean")
+    return value
 
 
 def _fields(
@@ -135,9 +194,30 @@ _DEVIATION_FIELDS = frozenset(
         "status",
         "amendment_version",
         "impact_set",
+        "release_impact_set",
     }
 )
-_SNAPSHOT_FIELDS = frozenset({"revision", "units", "deviations"})
+_CRITERIA_FIELDS = frozenset(
+    {
+        "launch_criteria",
+        "verification_window",
+        "rollback_triggers",
+        "go_no_go_authority",
+    }
+)
+_CLOSURE_FIELDS = frozenset(
+    {
+        "trigger",
+        "trigger_kind",
+        "roster_snapshot",
+        "no_completion_claim",
+        "observations",
+    }
+)
+_RELEASE_FIELDS = frozenset(
+    {"release_id", "archetype", "state", "includes", "criteria", "closure"}
+)
+_SNAPSHOT_FIELDS = frozenset({"revision", "units", "deviations", "releases"})
 
 
 def _decode_unit(value: object, path: str) -> Unit:
@@ -182,6 +262,104 @@ def _decode_deviation(value: object, path: str) -> Deviation:
             _child(path, "amendment_version"),
         ),
         impact_set=_strings(obj["impact_set"], _child(path, "impact_set")),
+        release_impact_set=_strings(
+            obj["release_impact_set"], _child(path, "release_impact_set")
+        ),
+    )
+
+
+def _decode_criteria(value: object, path: str) -> LaunchCriteria | None:
+    if value is None:
+        return None
+    obj = _fields(value, path, _CRITERIA_FIELDS)
+    return LaunchCriteria(
+        launch_criteria=_strings(
+            obj["launch_criteria"], _child(path, "launch_criteria")
+        ),
+        verification_window=_string(
+            obj["verification_window"], _child(path, "verification_window")
+        ),
+        rollback_triggers=_strings(
+            obj["rollback_triggers"], _child(path, "rollback_triggers")
+        ),
+        go_no_go_authority=_string(
+            obj["go_no_go_authority"], _child(path, "go_no_go_authority")
+        ),
+    )
+
+
+# Roster snapshots record each member's status at closure time; "missing" is
+# the honest marker for a member that was dangling when the record was taken.
+_ROSTER_SNAPSHOT_STATUSES = frozenset(
+    status.value for status in UnitStatus
+) | {"missing"}
+
+
+def _decode_roster_snapshot(
+    value: object, path: str
+) -> tuple[tuple[str, str], ...]:
+    entries: list[tuple[str, str]] = []
+    for index, raw_entry in enumerate(_array(value, path)):
+        entry_path = f"{path}[{index}]"
+        pair = _array(raw_entry, entry_path)
+        if len(pair) != 2:
+            raise DecodeError(f"{entry_path}: expected two-item array")
+        status = _string(pair[1], f"{entry_path}[1]")
+        if status not in _ROSTER_SNAPSHOT_STATUSES:
+            raise DecodeError(
+                f"{entry_path}[1]: unknown roster status {status!r}"
+            )
+        entries.append((_string(pair[0], f"{entry_path}[0]"), status))
+    return tuple(entries)
+
+
+def _decode_closure(value: object, path: str) -> ClosureRecord | None:
+    if value is None:
+        return None
+    obj = _fields(value, path, _CLOSURE_FIELDS)
+    return ClosureRecord(
+        trigger=_string(obj["trigger"], _child(path, "trigger")),
+        trigger_kind=_enum_value(
+            obj["trigger_kind"],
+            _child(path, "trigger_kind"),
+            ClosureTriggerKind,
+        ),
+        roster_snapshot=_decode_roster_snapshot(
+            obj["roster_snapshot"], _child(path, "roster_snapshot")
+        ),
+        no_completion_claim=_boolean(
+            obj["no_completion_claim"], _child(path, "no_completion_claim")
+        ),
+        observations=_strings(
+            obj["observations"], _child(path, "observations")
+        ),
+    )
+
+
+def _decode_release(value: object, path: str) -> Release:
+    obj = _fields(value, path, _RELEASE_FIELDS)
+    includes_path = _child(path, "includes")
+    includes = tuple(
+        _decode_unit_ref(item, f"{includes_path}[{index}]")
+        for index, item in enumerate(_array(obj["includes"], includes_path))
+    )
+    seen_members: set[str] = set()
+    for index, ref in enumerate(includes):
+        if ref.name in seen_members:
+            raise DecodeError(
+                f"{includes_path}[{index}].name: duplicate roster member "
+                f"{ref.name!r}"
+            )
+        seen_members.add(ref.name)
+    return Release(
+        release_id=_string(obj["release_id"], _child(path, "release_id")),
+        archetype=_enum_value(
+            obj["archetype"], _child(path, "archetype"), ReleaseArchetype
+        ),
+        state=_enum_value(obj["state"], _child(path, "state"), ReleaseState),
+        includes=includes,
+        criteria=_decode_criteria(obj["criteria"], _child(path, "criteria")),
+        closure=_decode_closure(obj["closure"], _child(path, "closure")),
     )
 
 
@@ -242,4 +420,22 @@ def decode_snapshot(data: bytes) -> Snapshot:
             )
         seen_deviations.add(deviation.deviation_id)
 
-    return Snapshot(revision=revision, units=units, deviations=deviations)
+    releases = tuple(
+        _decode_release(item, f"releases[{index}]")
+        for index, item in enumerate(_array(obj["releases"], "releases"))
+    )
+    seen_releases: set[str] = set()
+    for index, release in enumerate(releases):
+        if release.release_id in seen_releases:
+            raise DecodeError(
+                f"releases[{index}].release_id: duplicate release id "
+                f"{release.release_id!r}"
+            )
+        seen_releases.add(release.release_id)
+
+    return Snapshot(
+        revision=revision,
+        units=units,
+        deviations=deviations,
+        releases=releases,
+    )

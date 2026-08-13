@@ -21,20 +21,30 @@ from vouch_mk2.core.commands import (
     BeginReverify,
     CloseDeviation,
     Command,
+    CompleteRelease,
     FreezeAcceptance,
+    MarkFailedUnrecovered,
     MarkDone,
     MarkReady,
     OpenDeviation,
+    PrepareRelease,
     Publish,
     RejectDeviation,
+    ReleaseTransitionCommand,
+    RetireRelease,
     Respecify,
+    RollBack,
+    SetReleaseCriteria,
     SpecifyUnit,
+    StartDeploy,
+    StartVerification,
     StartWork,
     Supersede,
     UnitTransitionCommand,
 )
 from vouch_mk2.core.events import (
     AcceptanceFrozen,
+    DeploymentStarted,
     DeviationAmended,
     DeviationClosed,
     DeviationOpened,
@@ -42,20 +52,34 @@ from vouch_mk2.core.events import (
     Event,
     GateCheck,
     GateRecord,
+    ReleaseCriteriaSet,
+    ReleaseFailedUnrecovered,
+    ReleaseInvalidated,
+    ReleasePrepared,
+    ReleaseRetired,
+    ReleaseRolledBack,
+    ReleaseSucceeded,
     ReverificationStarted,
     UnitBlocked,
     UnitInvalidated,
     UnitMarkedDone,
     UnitMarkedReady,
     UnitPublished,
+    UnitReleaseBound,
     UnitRespecified,
     UnitSpecified,
     UnitSuperseded,
+    VerificationStarted,
     WorkStarted,
 )
 from vouch_mk2.core.model import (
+    ClosureRecord,
+    ClosureTriggerKind,
     Deviation,
     DeviationStatus,
+    Release,
+    ReleaseArchetype,
+    ReleaseState,
     Snapshot,
     Unit,
     UnitStatus,
@@ -66,6 +90,7 @@ from vouch_mk2.ir.schema import Transition, Verdict, Violation
 
 _UNIT_MACHINE = mk2.MK2.machine(mk2.UNIT_MACHINE)
 _DEVIATION_MACHINE = mk2.MK2.machine(mk2.DEVIATION_MACHINE)
+_RELEASE_MACHINE = mk2.MK2.machine(mk2.RELEASE_O_MACHINE)
 _SATISFIED_DEPENDENCY_STATUSES = frozenset(
     mk2.MK2.state_set("unit.satisfied-dependency").states
 )
@@ -78,6 +103,7 @@ def _index(machine_name: str) -> Mapping[tuple[str, str], Transition]:
 
 _UNIT_EDGES = _index(mk2.UNIT_MACHINE)
 _DEVIATION_EDGES = _index(mk2.DEVIATION_MACHINE)
+_RELEASE_EDGES = _index(mk2.RELEASE_O_MACHINE)
 
 
 def _amendment_entry() -> tuple[str, frozenset[str]]:
@@ -92,6 +118,18 @@ def _amendment_entry() -> tuple[str, frozenset[str]]:
 
 
 _AMENDMENT_TARGET, _AMENDMENT_SOURCES = _amendment_entry()
+
+
+def _release_amendment_entry() -> tuple[str, frozenset[str]]:
+    for entry in _RELEASE_MACHINE.adjudication_entries:
+        if entry.trigger == ClosureTriggerKind.AMENDMENT.value:
+            return entry.target, frozenset(entry.sources) - frozenset(
+                entry.excluded_sources
+            )
+    raise LookupError("mk2 release machine declares no amendment entry")
+
+
+_RELEASE_AMENDMENT_TARGET, _RELEASE_AMENDMENT_SOURCES = _release_amendment_entry()
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +246,168 @@ GATE_EVALUATORS: Mapping[str, Callable[[_GateContext], tuple[Violation, ...]]] =
 }
 
 
+@dataclass(frozen=True, slots=True)
+class _ReleaseGateContext:
+    """Release-gate inputs, including a candidate release during preparation."""
+
+    snapshot: Snapshot
+    release: Release
+    trigger: str = ""
+
+
+def _gate_release_criteria(ctx: _ReleaseGateContext) -> tuple[Violation, ...]:
+    if ctx.release.criteria is not None:
+        return ()
+    return (
+        Violation(
+            code="gate.release.criteria-missing",
+            detail=f"release {ctx.release.release_id!r} has no launch criteria",
+        ),
+    )
+
+
+def _gate_release_roster_resolves(
+    ctx: _ReleaseGateContext,
+) -> tuple[Violation, ...]:
+    stale: list[str] = []
+    for ref in ctx.release.includes:
+        unit = ctx.snapshot.unit(ref.name)
+        if unit is None:
+            stale.append(f"{ref.label()} (missing)")
+        elif unit.version != ref.version:
+            stale.append(f"{ref.label()} (current {unit.ref().label()})")
+    if not stale:
+        return ()
+    return (
+        Violation(
+            code="gate.release.roster-stale",
+            detail=(
+                f"release {ctx.release.release_id!r} has stale roster bindings "
+                f"{tuple(stale)!r}"
+            ),
+        ),
+    )
+
+
+def _gate_release_completion_units(
+    ctx: _ReleaseGateContext,
+) -> tuple[Violation, ...]:
+    offenders: list[str] = []
+    for ref in ctx.release.includes:
+        unit = ctx.snapshot.unit(ref.name)
+        # Binding failures belong exclusively to roster-resolves, so one defect
+        # produces the one named violation operators need to repair.
+        if unit is None or unit.version != ref.version:
+            continue
+        reasons: list[str] = []
+        if unit.status is not UnitStatus.RELEASE_BOUND:
+            reasons.append(f"status {unit.status.value!r}")
+        if not unit.acceptance_pack_version:
+            reasons.append("empty acceptance pack")
+        blockers = blocking_deviations(ctx.snapshot, unit)
+        if blockers:
+            reasons.append(
+                f"blocking deviations {tuple(d.deviation_id for d in blockers)!r}"
+            )
+        if reasons:
+            offenders.append(f"{unit.name}: {', '.join(reasons)}")
+    if not offenders:
+        return ()
+    return (
+        Violation(
+            code="gate.release.member-not-done",
+            detail=(
+                f"release {ctx.release.release_id!r} has members that cannot "
+                f"support completion: {tuple(offenders)!r}"
+            ),
+        ),
+    )
+
+
+def _gate_release_closure_record(
+    ctx: _ReleaseGateContext,
+) -> tuple[Violation, ...]:
+    if ctx.trigger:
+        return ()
+    return (
+        Violation(
+            code="gate.release.closure-trigger-required",
+            detail=f"release {ctx.release.release_id!r} closure trigger is required",
+        ),
+    )
+
+
+def _gate_release_roster_dependency_closed(
+    ctx: _ReleaseGateContext,
+) -> tuple[Violation, ...]:
+    roster = {ref.name for ref in ctx.release.includes}
+    missing: set[str] = set()
+    for ref in ctx.release.includes:
+        unit = ctx.snapshot.unit(ref.name)
+        if unit is not None:
+            missing.update(dep for dep in unit.depends_on if dep not in roster)
+    if not missing:
+        return ()
+    return (
+        Violation(
+            code="gate.release.roster-not-closed",
+            detail=(
+                f"release {ctx.release.release_id!r} omits dependencies "
+                f"{tuple(sorted(missing))!r}"
+            ),
+        ),
+    )
+
+
+def _gate_release_roster_units_eligible(
+    ctx: _ReleaseGateContext,
+) -> tuple[Violation, ...]:
+    eligible = {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND}
+    offenders: list[str] = []
+    for ref in ctx.release.includes:
+        unit = ctx.snapshot.unit(ref.name)
+        if unit is None:
+            continue
+        reasons: list[str] = []
+        if unit.status not in eligible:
+            reasons.append(f"status {unit.status.value!r}")
+        if not unit.acceptance_pack_version:
+            reasons.append("empty acceptance pack")
+        blockers = blocking_deviations(ctx.snapshot, unit)
+        if blockers:
+            reasons.append(
+                f"blocking deviations {tuple(d.deviation_id for d in blockers)!r}"
+            )
+        if reasons:
+            offenders.append(f"{unit.name}: {', '.join(reasons)}")
+    if not offenders:
+        return ()
+    return (
+        Violation(
+            code="gate.release.roster-ineligible",
+            detail=(
+                f"release {ctx.release.release_id!r} has ineligible members "
+                f"{tuple(offenders)!r}"
+            ),
+        ),
+    )
+
+
+RELEASE_GATE_EVALUATORS: Mapping[
+    str, Callable[[_ReleaseGateContext], tuple[Violation, ...]]
+] = {
+    mk2.GATE_RELEASE_CRITERIA_BEFORE_PROGRESSION: _gate_release_criteria,
+    mk2.GATE_RELEASE_COMPLETION_UNITS_RECHECK: _gate_release_completion_units,
+    mk2.GATE_RELEASE_COMPLETION_CRITERIA_RECORDED: _gate_release_criteria,
+    mk2.GATE_RELEASE_COMPLETION_ROSTER_RESOLVES: _gate_release_roster_resolves,
+    mk2.GATE_RELEASE_CLOSURE_RECORD_COMPLETE: _gate_release_closure_record,
+    mk2.GATE_RELEASE_ROSTER_DEPENDENCY_CLOSED: (
+        _gate_release_roster_dependency_closed
+    ),
+    mk2.GATE_RELEASE_ROSTER_UNITS_ELIGIBLE: _gate_release_roster_units_eligible,
+}
+
+
 def _check_gate_registry() -> None:
     """Fail at import, not mid-decision: an IR gate without an evaluator would
     otherwise surface as a KeyError escaping decide()'s Accepted|Refused contract."""
@@ -217,10 +417,14 @@ def _check_gate_registry() -> None:
         for transition in machine.command_transitions
         for gate in transition.gates
     }
-    unregistered = bound - set(GATE_EVALUATORS)
-    if unregistered:
+    release_bound = {gate for gate in bound if gate.startswith("gate.release.")}
+    unit_bound = bound - release_bound
+    missing_unit = unit_bound ^ set(GATE_EVALUATORS)
+    missing_release = release_bound ^ set(RELEASE_GATE_EVALUATORS)
+    if missing_unit or missing_release:
         raise LookupError(
-            f"IR gates without registered evaluators: {sorted(unregistered)}"
+            "IR gate/evaluator mismatch: "
+            f"unit={sorted(missing_unit)}, release={sorted(missing_release)}"
         )
 
 
@@ -242,6 +446,29 @@ def _evaluate_gates(
         checks=tuple(checks),
     )
     return record, tuple(violations)
+
+
+def _evaluate_release_gates(
+    transition: Transition, ctx: _ReleaseGateContext
+) -> tuple[GateRecord, tuple[Violation, ...]]:
+    checks: list[GateCheck] = []
+    violations: list[Violation] = []
+    for obligation_id in transition.gates:
+        found = RELEASE_GATE_EVALUATORS[obligation_id](ctx)
+        checks.append(
+            GateCheck(
+                obligation_id=obligation_id,
+                verdict=Verdict.PASS if not found else Verdict.FAIL,
+            )
+        )
+        violations.extend(found)
+    return (
+        GateRecord(
+            transition=f"{transition.source}->{transition.target}",
+            checks=tuple(checks),
+        ),
+        tuple(violations),
+    )
 
 
 # --- unit lifecycle ------------------------------------------------------------
@@ -319,6 +546,233 @@ def _decide_unit_transition(
     if violations:
         return Refused(violations=violations)
     return Accepted(events=(_transition_event(command, unit, record),))
+
+
+# --- operational releases -----------------------------------------------------
+
+
+def _prepare_transition() -> Transition:
+    for transition in _UNIT_MACHINE.command_transitions:
+        if (
+            transition.source == UnitStatus.PUBLISHED.value
+            and transition.command == mk2.CMD_PREPARE_RELEASE
+        ):
+            return transition
+    raise LookupError("mk2 unit machine declares no prepare-release binding edge")
+
+
+_PREPARE_TRANSITION = _prepare_transition()
+
+
+def _candidate_release(
+    snapshot: Snapshot, release_id: str, includes: tuple[str, ...]
+) -> Release:
+    refs = tuple(
+        sorted(
+            (
+                unit.ref()
+                for name in includes
+                if (unit := snapshot.unit(name)) is not None
+            ),
+            key=lambda ref: ref.name,
+        )
+    )
+    return Release(
+        release_id=release_id,
+        archetype=ReleaseArchetype.OPERATIONAL,
+        state=ReleaseState.PREPARED,
+        includes=refs,
+        criteria=None,
+        closure=None,
+    )
+
+
+def _decide_prepare_release(snapshot: Snapshot, command: PrepareRelease) -> Decision:
+    if not command.release_id:
+        return _refuse("release.identity-required", "release id is required")
+    if snapshot.release(command.release_id) is not None:
+        return _refuse(
+            "release.exists", f"release {command.release_id!r} already exists"
+        )
+    if not command.includes:
+        # An empty roster would let a completion claim succeed with every
+        # roster gate passing vacuously — the vacuous-coverage class.
+        return _refuse("release.roster-empty", "a release roster must be non-empty")
+    duplicates = tuple(
+        sorted(
+            {name for name in command.includes if command.includes.count(name) > 1}
+        )
+    )
+    if duplicates:
+        return _refuse(
+            "release.roster-duplicate",
+            f"roster binds units more than once: {duplicates!r}",
+        )
+    unknown = tuple(
+        sorted({name for name in command.includes if snapshot.unit(name) is None})
+    )
+    if unknown:
+        return _refuse("unit.unknown", f"unknown release roster units {unknown!r}")
+    release = _candidate_release(snapshot, command.release_id, command.includes)
+    _record, violations = _evaluate_release_gates(
+        _PREPARE_TRANSITION,
+        _ReleaseGateContext(snapshot=snapshot, release=release),
+    )
+    if violations:
+        return Refused(violations=violations)
+    events: list[Event] = [
+        ReleasePrepared(
+            release_id=release.release_id,
+            archetype=release.archetype,
+            includes=release.includes,
+        )
+    ]
+    events.extend(
+        UnitReleaseBound(name=ref.name)
+        for ref in release.includes
+        if (unit := snapshot.unit(ref.name)) is not None
+        and unit.status is UnitStatus.PUBLISHED
+    )
+    return Accepted(events=tuple(events))
+
+
+def _decide_set_release_criteria(
+    snapshot: Snapshot, command: SetReleaseCriteria
+) -> Decision:
+    release = snapshot.release(command.release_id)
+    if release is None:
+        return _refuse(
+            "release.unknown", f"release {command.release_id!r} does not exist"
+        )
+    if _RELEASE_EDGES.get((release.state.value, command.ir_command)) is None:
+        return _refuse(
+            "transition.illegal",
+            f"set-criteria is not legal from {release.state.value!r}",
+        )
+    if (
+        not command.criteria.go_no_go_authority
+        or not command.criteria.launch_criteria
+    ):
+        return _refuse(
+            "release.criteria-incomplete",
+            "launch criteria and go/no-go authority are required",
+        )
+    return Accepted(
+        events=(
+            ReleaseCriteriaSet(
+                release_id=release.release_id, criteria=command.criteria
+            ),
+        )
+    )
+
+
+def _roster_snapshot(
+    snapshot: Snapshot, release: Release
+) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        sorted(
+            (
+                ref.name,
+                unit.status.value if (unit := snapshot.unit(ref.name)) else "missing",
+            )
+            for ref in release.includes
+        )
+    )
+
+
+def _closure_command_fields(
+    command: RollBack | MarkFailedUnrecovered | RetireRelease,
+) -> tuple[str, tuple[str, ...]]:
+    match command:
+        case RollBack(trigger=trigger, observations=observations):
+            return trigger, observations
+        case MarkFailedUnrecovered(trigger=trigger, observations=observations):
+            return trigger, observations
+        case RetireRelease(trigger=trigger, observations=observations):
+            return trigger, observations
+        case _:
+            assert_never(command)
+
+
+def _release_transition_event(
+    command: ReleaseTransitionCommand,
+    release: Release,
+    record: GateRecord,
+    closure: ClosureRecord | None,
+) -> Event:
+    match command:
+        case StartDeploy():
+            return DeploymentStarted(release_id=release.release_id, gate=record)
+        case StartVerification():
+            return VerificationStarted(release_id=release.release_id)
+        case CompleteRelease():
+            return ReleaseSucceeded(release_id=release.release_id, gate=record)
+        case RollBack():
+            if closure is None:
+                raise AssertionError("roll-back requires a closure record")
+            return ReleaseRolledBack(
+                release_id=release.release_id, closure=closure, gate=record
+            )
+        case MarkFailedUnrecovered():
+            if closure is None:
+                raise AssertionError("mark-failed-unrecovered requires a closure record")
+            return ReleaseFailedUnrecovered(
+                release_id=release.release_id, closure=closure, gate=record
+            )
+        case RetireRelease():
+            if closure is None:
+                raise AssertionError("retire requires a closure record")
+            return ReleaseRetired(
+                release_id=release.release_id, closure=closure, gate=record
+            )
+        case _:
+            assert_never(command)
+
+
+def _decide_release_transition(
+    snapshot: Snapshot, command: ReleaseTransitionCommand
+) -> Decision:
+    release = snapshot.release(command.release_id)
+    if release is None:
+        return _refuse(
+            "release.unknown", f"release {command.release_id!r} does not exist"
+        )
+    transition = _RELEASE_EDGES.get((release.state.value, command.ir_command))
+    if transition is None:
+        return _refuse(
+            "transition.illegal",
+            f"{command.ir_command!r} is not a legal release command from "
+            f"{release.state.value!r}",
+        )
+    trigger = ""
+    observations: tuple[str, ...] = ()
+    if isinstance(command, RollBack | MarkFailedUnrecovered | RetireRelease):
+        trigger, observations = _closure_command_fields(command)
+    record, violations = _evaluate_release_gates(
+        transition,
+        _ReleaseGateContext(
+            snapshot=snapshot, release=release, trigger=trigger
+        ),
+    )
+    if violations:
+        return Refused(violations=violations)
+    # I3 inversion: protective closure legality never inspects roster health.
+    # A missing, blocked, or invalidated roster member is evidence captured in
+    # the snapshot below, never a reason to trap the release in a contaminated state.
+    closure = (
+        ClosureRecord(
+            trigger=trigger,
+            trigger_kind=ClosureTriggerKind.OPERATOR,
+            roster_snapshot=_roster_snapshot(snapshot, release),
+            no_completion_claim=True,
+            observations=observations,
+        )
+        if isinstance(command, RollBack | MarkFailedUnrecovered | RetireRelease)
+        else None
+    )
+    return Accepted(
+        events=(_release_transition_event(command, release, record, closure),)
+    )
 
 
 # --- deviations ----------------------------------------------------------------
@@ -415,21 +869,56 @@ def _decide_amend(snapshot: Snapshot, command: AmendDeviation) -> Decision:
             "deviation.amendment-version-required",
             "adjudicating amend requires the amendment version",
         )
+    impacted = _amendment_impact(snapshot, found.unit.name)
     invalidated: list[str] = []
-    for name in _amendment_impact(snapshot, found.unit.name):
+    for name in impacted:
         unit = snapshot.unit(name)
         if unit is not None and unit.status.value in _AMENDMENT_SOURCES:
             invalidated.append(name)
+    affected_releases = tuple(
+        sorted(
+            (
+                release
+                for release in snapshot.releases
+                if release.state.value in _RELEASE_AMENDMENT_SOURCES
+                and any(ref.name in impacted for ref in release.includes)
+            ),
+            key=lambda release: release.release_id,
+        )
+    )
+    # Unit and release impact are separate typed fields — 0.6's "release:"
+    # string-prefix convention is an ambiguous encoding (a unit may legally be
+    # named "release:r1") and dies here.
     events: list[Event] = [
         DeviationAmended(
             deviation_id=command.deviation_id,
             amendment_version=command.amendment_version,
             impact_set=tuple(invalidated),
+            release_impact_set=tuple(
+                release.release_id for release in affected_releases
+            ),
         )
     ]
     events.extend(
         UnitInvalidated(name=name, trigger_deviation_id=command.deviation_id)
         for name in invalidated
+    )
+    events.extend(
+        ReleaseInvalidated(
+            release_id=release.release_id,
+            closure=(
+                ClosureRecord(
+                    trigger=f"amendment:{command.deviation_id}",
+                    trigger_kind=ClosureTriggerKind.AMENDMENT,
+                    roster_snapshot=_roster_snapshot(snapshot, release),
+                    no_completion_claim=True,
+                    observations=(),
+                )
+                if release.closure is None
+                else None
+            ),
+        )
+        for release in affected_releases
     )
     return Accepted(events=tuple(events))
 
@@ -458,6 +947,10 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
     match command:
         case SpecifyUnit():
             return _decide_specify(snapshot, command)
+        case PrepareRelease():
+            return _decide_prepare_release(snapshot, command)
+        case SetReleaseCriteria():
+            return _decide_set_release_criteria(snapshot, command)
         case OpenDeviation():
             return _decide_open_deviation(snapshot, command)
         case AmendDeviation():
@@ -466,6 +959,15 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             return _decide_reject(snapshot, command)
         case CloseDeviation():
             return _decide_close(snapshot, command)
+        case (
+            StartDeploy()
+            | StartVerification()
+            | CompleteRelease()
+            | RollBack()
+            | MarkFailedUnrecovered()
+            | RetireRelease()
+        ):
+            return _decide_release_transition(snapshot, command)
         case (
             FreezeAcceptance()
             | MarkReady()
@@ -476,6 +978,8 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             | Respecify()
             | BeginReverify()
         ):
+            # Plan §1 non-goal: the exposed supersession policy retains releases;
+            # superseding a unit therefore changes no release state in Phase 4.
             return _decide_unit_transition(snapshot, command)
         case _:
             assert_never(command)
@@ -497,9 +1001,19 @@ def _with_deviation(
     )
 
 
+def _with_release(
+    releases: tuple[Release, ...], release_id: str, changed: Release
+) -> tuple[Release, ...]:
+    return tuple(
+        changed if release.release_id == release_id else release
+        for release in releases
+    )
+
+
 def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
     units = snapshot.units
     deviations = snapshot.deviations
+    releases = snapshot.releases
     match event:
         case UnitSpecified(name=name, version=version, depends_on=depends_on):
             units = units + (
@@ -531,6 +1045,8 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             units = _with_status(snapshot, name, UnitStatus.PUBLISHED)
         case UnitSuperseded(name=name):
             units = _with_status(snapshot, name, UnitStatus.SUPERSEDED)
+        case UnitReleaseBound(name=name):
+            units = _with_status(snapshot, name, UnitStatus.RELEASE_BOUND)
         case UnitRespecified(name=name):
             unit = _existing(snapshot, name)
             units = _with_unit(
@@ -561,6 +1077,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             deviation_id=deviation_id,
             amendment_version=amendment_version,
             impact_set=impact_set,
+            release_impact_set=release_impact_set,
         ):
             deviation = _existing_deviation(snapshot, deviation_id)
             deviations = _with_deviation(
@@ -571,6 +1088,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                     status=DeviationStatus.AMENDED,
                     amendment_version=amendment_version,
                     impact_set=impact_set,
+                    release_impact_set=release_impact_set,
                 ),
             )
         case DeviationRejected(deviation_id=deviation_id):
@@ -587,9 +1105,82 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                 deviation_id,
                 replace(deviation, status=DeviationStatus.CLOSED),
             )
+        case ReleasePrepared(
+            release_id=release_id, archetype=archetype, includes=includes
+        ):
+            releases = releases + (
+                Release(
+                    release_id=release_id,
+                    archetype=archetype,
+                    state=ReleaseState(_RELEASE_MACHINE.initial),
+                    includes=includes,
+                    criteria=None,
+                    closure=None,
+                ),
+            )
+        case ReleaseCriteriaSet(release_id=release_id, criteria=criteria):
+            release = _existing_release(snapshot, release_id)
+            releases = _with_release(
+                releases, release_id, replace(release, criteria=criteria)
+            )
+        case DeploymentStarted(release_id=release_id):
+            releases = _with_release_status(
+                snapshot, release_id, ReleaseState.DEPLOYING
+            )
+        case VerificationStarted(release_id=release_id):
+            releases = _with_release_status(
+                snapshot, release_id, ReleaseState.VERIFYING
+            )
+        case ReleaseSucceeded(release_id=release_id):
+            releases = _with_release_status(
+                snapshot, release_id, ReleaseState.SUCCEEDED
+            )
+        case ReleaseRolledBack(release_id=release_id, closure=closure):
+            release = _existing_release(snapshot, release_id)
+            releases = _with_release(
+                releases,
+                release_id,
+                replace(
+                    release, state=ReleaseState.ROLLED_BACK, closure=closure
+                ),
+            )
+        case ReleaseFailedUnrecovered(release_id=release_id, closure=closure):
+            release = _existing_release(snapshot, release_id)
+            releases = _with_release(
+                releases,
+                release_id,
+                replace(
+                    release,
+                    state=ReleaseState.FAILED_UNRECOVERED,
+                    closure=closure,
+                ),
+            )
+        case ReleaseRetired(release_id=release_id, closure=closure):
+            release = _existing_release(snapshot, release_id)
+            releases = _with_release(
+                releases,
+                release_id,
+                replace(release, state=ReleaseState.RETIRED, closure=closure),
+            )
+        case ReleaseInvalidated(release_id=release_id, closure=closure):
+            release = _existing_release(snapshot, release_id)
+            releases = _with_release(
+                releases,
+                release_id,
+                replace(
+                    release,
+                    state=ReleaseState(_RELEASE_AMENDMENT_TARGET),
+                    closure=release.closure if closure is None else closure,
+                ),
+            )
         case _:
             assert_never(event)
-    return Snapshot(revision=snapshot.revision, units=units, deviations=deviations)
+    return Snapshot(
+        revision=snapshot.revision,
+        units=units,
+        deviations=deviations,
+        releases=releases,
+    )
 
 
 def _existing(snapshot: Snapshot, name: str) -> Unit:
@@ -606,9 +1197,25 @@ def _existing_deviation(snapshot: Snapshot, deviation_id: str) -> Deviation:
     return deviation
 
 
+def _existing_release(snapshot: Snapshot, release_id: str) -> Release:
+    release = snapshot.release(release_id)
+    if release is None:
+        raise LookupError(f"event references unknown release {release_id!r}")
+    return release
+
+
 def _with_status(snapshot: Snapshot, name: str, status: UnitStatus) -> tuple[Unit, ...]:
     unit = _existing(snapshot, name)
     return _with_unit(snapshot.units, name, replace(unit, status=status))
+
+
+def _with_release_status(
+    snapshot: Snapshot, release_id: str, state: ReleaseState
+) -> tuple[Release, ...]:
+    release = _existing_release(snapshot, release_id)
+    return _with_release(
+        snapshot.releases, release_id, replace(release, state=state)
+    )
 
 
 def apply(snapshot: Snapshot, events: tuple[Event, ...]) -> Snapshot:
@@ -620,4 +1227,5 @@ def apply(snapshot: Snapshot, events: tuple[Event, ...]) -> Snapshot:
         revision=snapshot.revision + 1,
         units=current.units,
         deviations=current.deviations,
+        releases=current.releases,
     )

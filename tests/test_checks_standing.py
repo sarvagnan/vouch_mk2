@@ -242,18 +242,34 @@ def test_published_units_gated_fails_for_empty_pack_only() -> None:
     assert "dependencies" not in found.detail and "blocking" not in found.detail
 
 
-def test_published_units_gated_fails_for_unsettled_dependency_only() -> None:
+def test_published_units_gated_fails_for_invalidated_dependency_only() -> None:
+    # The only upstream status that cannot legally coexist with a published
+    # consumer: amendment invalidation propagates through the consumer closure,
+    # so a published unit over an invalidated upstream is drift.
     snapshot = Snapshot(
         units=(
-            unit("up", UnitStatus.IN_PROGRESS),
+            unit("up", UnitStatus.INVALIDATED, pack="p-up"),
             unit("u", UnitStatus.PUBLISHED, depends_on=("up",), pack="p-u"),
         )
     )
     found = check_published_units_gated(snapshot)
     assert found.verdict is Verdict.FAIL
-    assert "unit.settled" in found.detail and "up" in found.detail
+    assert "invalidated" in found.detail and "up" in found.detail
     assert "acceptance_pack_version" not in found.detail
     assert "blocking" not in found.detail
+
+
+def test_published_units_gated_accepts_blocked_dependency() -> None:
+    # Legal history: upstream published, consumer published, upstream later
+    # takes a deviation and blocks. The consumer stays healthy at rest.
+    snapshot = Snapshot(
+        units=(
+            unit("up", UnitStatus.BLOCKED, pack="p-up"),
+            unit("u", UnitStatus.PUBLISHED, depends_on=("up",), pack="p-u"),
+        ),
+        deviations=(deviation("d", "up"),),
+    )
+    assert check_published_units_gated(snapshot).verdict is Verdict.PASS
 
 
 def test_published_units_gated_accepts_superseded_dependency() -> None:

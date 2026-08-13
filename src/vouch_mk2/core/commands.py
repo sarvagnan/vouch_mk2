@@ -1,6 +1,6 @@
 """The closed command union. Every mutation enters through exactly one of these.
 
-Each unit-lifecycle command carries the IR command label it is decided under
+Each lifecycle command carries the IR command label it is decided under
 (``ir_command``); ``decide`` looks the (status, label) pair up in the mk2 IR unit
 machine, so legality lives in the tables, not in code.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
 
-from vouch_mk2.core.model import DeviationType, UnitRef
+from vouch_mk2.core.model import DeviationType, LaunchCriteria, UnitRef
 from vouch_mk2.ir import mk2
 
 
@@ -101,6 +101,62 @@ class CloseDeviation:
     deviation_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class PrepareRelease:
+    ir_command: ClassVar[str] = mk2.CMD_PREPARE_RELEASE
+    release_id: str
+    includes: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SetReleaseCriteria:
+    ir_command: ClassVar[str] = mk2.CMD_SET_CRITERIA
+    release_id: str
+    criteria: LaunchCriteria
+
+
+@dataclass(frozen=True, slots=True)
+class StartDeploy:
+    ir_command: ClassVar[str] = mk2.CMD_START_DEPLOY
+    release_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class StartVerification:
+    ir_command: ClassVar[str] = mk2.CMD_START_VERIFICATION
+    release_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class CompleteRelease:
+    ir_command: ClassVar[str] = mk2.CMD_COMPLETE_RELEASE
+    release_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RollBack:
+    ir_command: ClassVar[str] = mk2.CMD_ROLL_BACK
+    release_id: str
+    trigger: str
+    observations: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MarkFailedUnrecovered:
+    ir_command: ClassVar[str] = mk2.CMD_MARK_FAILED_UNRECOVERED
+    release_id: str
+    trigger: str
+    observations: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RetireRelease:
+    ir_command: ClassVar[str] = mk2.CMD_RETIRE_RELEASE
+    release_id: str
+    trigger: str
+    observations: tuple[str, ...] = ()
+
+
 type UnitTransitionCommand = (
     FreezeAcceptance
     | MarkReady
@@ -114,4 +170,21 @@ type UnitTransitionCommand = (
 
 type DeviationCommand = AmendDeviation | RejectDeviation | CloseDeviation
 
-type Command = SpecifyUnit | UnitTransitionCommand | OpenDeviation | DeviationCommand
+type ReleaseTransitionCommand = (
+    StartDeploy
+    | StartVerification
+    | CompleteRelease
+    | RollBack
+    | MarkFailedUnrecovered
+    | RetireRelease
+)
+
+type Command = (
+    SpecifyUnit
+    | UnitTransitionCommand
+    | OpenDeviation
+    | DeviationCommand
+    | PrepareRelease
+    | SetReleaseCriteria
+    | ReleaseTransitionCommand
+)

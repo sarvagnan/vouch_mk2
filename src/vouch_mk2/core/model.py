@@ -43,6 +43,27 @@ class DeviationStatus(Enum):
     CLOSED = "closed"
 
 
+class ReleaseArchetype(Enum):
+    OPERATIONAL = "operational"
+
+
+class ReleaseState(Enum):
+    PREPARED = "prepared"
+    DEPLOYING = "deploying"
+    VERIFYING = "verifying"
+    ROLLED_BACK = "rolled-back"
+    SUCCEEDED = "succeeded"
+    FAILED_UNRECOVERED = "failed-unrecovered"
+    RETIRED = "retired"
+    INVALIDATED = "invalidated"
+
+
+class ClosureTriggerKind(Enum):
+    AMENDMENT = "amendment"
+    OPERATOR = "operator"
+    SUPERSESSION = "supersession"
+
+
 # A deviation blocks its unit until it is closed: rejected-but-unclosed still
 # blocks (closure is the executor's acknowledgment to resume as written).
 BLOCKING_DEVIATION_STATUSES = frozenset(
@@ -74,6 +95,39 @@ class Unit:
 
 
 @dataclass(frozen=True, slots=True)
+class LaunchCriteria:
+    """Ledger-native release criteria.
+
+    These fields live directly on the release, never in a sidecar, closing the
+    criteria-sidecar drift chain inherited from 0.6.
+    """
+
+    launch_criteria: tuple[str, ...]
+    verification_window: str
+    rollback_triggers: tuple[str, ...]
+    go_no_go_authority: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClosureRecord:
+    trigger: str
+    trigger_kind: ClosureTriggerKind
+    roster_snapshot: tuple[tuple[str, str], ...]
+    no_completion_claim: bool
+    observations: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Release:
+    release_id: str
+    archetype: ReleaseArchetype
+    state: ReleaseState
+    includes: tuple[UnitRef, ...]
+    criteria: LaunchCriteria | None
+    closure: ClosureRecord | None
+
+
+@dataclass(frozen=True, slots=True)
 class Deviation:
     deviation_id: str
     deviation_type: DeviationType
@@ -81,6 +135,7 @@ class Deviation:
     status: DeviationStatus
     amendment_version: str = ""
     impact_set: tuple[str, ...] = ()
+    release_impact_set: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +143,7 @@ class Snapshot:
     revision: int = 0
     units: tuple[Unit, ...] = ()
     deviations: tuple[Deviation, ...] = ()
+    releases: tuple[Release, ...] = ()
 
     def unit(self, name: str) -> Unit | None:
         for unit in self.units:
@@ -99,6 +155,12 @@ class Snapshot:
         for deviation in self.deviations:
             if deviation.deviation_id == deviation_id:
                 return deviation
+        return None
+
+    def release(self, release_id: str) -> Release | None:
+        for release in self.releases:
+            if release.release_id == release_id:
+                return release
         return None
 
     def consumers_of(self, name: str) -> tuple[str, ...]:

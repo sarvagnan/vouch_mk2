@@ -5,9 +5,15 @@ import json
 import pytest
 
 from vouch_mk2.core.model import (
+    ClosureRecord,
+    ClosureTriggerKind,
     Deviation,
     DeviationStatus,
     DeviationType,
+    LaunchCriteria,
+    Release,
+    ReleaseArchetype,
+    ReleaseState,
     Snapshot,
     Unit,
     UnitRef,
@@ -40,10 +46,33 @@ def _populated_snapshot() -> Snapshot:
             status=status,
             amendment_version="4" if status is DeviationStatus.AMENDED else "",
             impact_set=("consumer", "downstream"),
+            release_impact_set=("r-both",),
         )
         for index, status in enumerate(DeviationStatus)
     )
-    return Snapshot(revision=7, units=units, deviations=deviations)
+    criteria = LaunchCriteria(
+        launch_criteria=("healthy",),
+        verification_window="30m",
+        rollback_triggers=("errors",),
+        go_no_go_authority="ops",
+    )
+    closure = ClosureRecord(
+        trigger="operator stop",
+        trigger_kind=ClosureTriggerKind.OPERATOR,
+        roster_snapshot=(("consumer", "release-bound"),),
+        no_completion_claim=True,
+        observations=("latency",),
+    )
+    ref = UnitRef(name="consumer", version="3")
+    releases = (
+        Release("r-both", ReleaseArchetype.OPERATIONAL, ReleaseState.RETIRED, (ref,), criteria, closure),
+        Release("r-criteria", ReleaseArchetype.OPERATIONAL, ReleaseState.PREPARED, (ref,), criteria, None),
+        Release("r-closure", ReleaseArchetype.OPERATIONAL, ReleaseState.INVALIDATED, (ref,), None, closure),
+        Release("r-null", ReleaseArchetype.OPERATIONAL, ReleaseState.PREPARED, (ref,), None, None),
+    )
+    return Snapshot(
+        revision=7, units=units, deviations=deviations, releases=releases
+    )
 
 
 def _baseline_document() -> dict[str, object]:
@@ -66,8 +95,32 @@ def _baseline_document() -> dict[str, object]:
                 "status": "open",
                 "amendment_version": "",
                 "impact_set": [],
+                "release_impact_set": [],
             }
         ],
+        "releases": [],
+    }
+
+
+def _release_document() -> dict[str, object]:
+    return {
+        "release_id": "r1",
+        "archetype": "operational",
+        "state": "retired",
+        "includes": [{"name": "alpha", "version": "1"}],
+        "criteria": {
+            "launch_criteria": ["healthy"],
+            "verification_window": "1h",
+            "rollback_triggers": ["errors"],
+            "go_no_go_authority": "ops",
+        },
+        "closure": {
+            "trigger": "operator",
+            "trigger_kind": "operator",
+            "roster_snapshot": [["alpha", "release-bound"]],
+            "no_completion_claim": True,
+            "observations": [],
+        },
     }
 
 
@@ -159,6 +212,69 @@ def test_duplicate_deviation_id_names_second_id_path() -> None:
         decode_snapshot(_json_bytes(document))
 
 
+def test_duplicate_release_id_names_second_id_path() -> None:
+    document = _baseline_document()
+    document["releases"] = [_release_document(), _release_document()]
+    with pytest.raises(DecodeError, match="releases\\[1\\]\\.release_id"):
+        decode_snapshot(_json_bytes(document))
+
+
+def test_release_invalid_trigger_kind_is_refused() -> None:
+    document = _baseline_document()
+    release = _release_document()
+    closure = release["closure"]
+    assert isinstance(closure, dict)
+    closure["trigger_kind"] = "mystery"
+    document["releases"] = [release]
+    with pytest.raises(DecodeError, match="trigger_kind"):
+        decode_snapshot(_json_bytes(document))
+
+
+@pytest.mark.parametrize(("nested", "field"), (("criteria", "verification_window"), ("closure", "observations")))
+def test_release_missing_nested_field_is_refused(nested: str, field: str) -> None:
+    document = _baseline_document()
+    release = _release_document()
+    value = release[nested]
+    assert isinstance(value, dict)
+    del value[field]
+    document["releases"] = [release]
+    with pytest.raises(DecodeError, match=f"{nested}\\.{field}"):
+        decode_snapshot(_json_bytes(document))
+
+
+def test_release_criteria_must_be_object_or_null() -> None:
+    document = _baseline_document()
+    release = _release_document()
+    release["criteria"] = []
+    document["releases"] = [release]
+    with pytest.raises(DecodeError, match="criteria: expected object"):
+        decode_snapshot(_json_bytes(document))
+
+
+def test_release_includes_must_be_array() -> None:
+    document = _baseline_document()
+    release = _release_document()
+    release["includes"] = {"name": "alpha", "version": "1"}
+    document["releases"] = [release]
+    with pytest.raises(DecodeError, match="includes: expected array"):
+        decode_snapshot(_json_bytes(document))
+
+
+def test_closure_no_completion_claim_must_be_bool_but_false_decodes() -> None:
+    document = _baseline_document()
+    release = _release_document()
+    closure = release["closure"]
+    assert isinstance(closure, dict)
+    closure["no_completion_claim"] = "true"
+    document["releases"] = [release]
+    with pytest.raises(DecodeError, match="no_completion_claim: expected boolean"):
+        decode_snapshot(_json_bytes(document))
+    closure["no_completion_claim"] = False
+    decoded = decode_snapshot(_json_bytes(document))
+    assert decoded.releases[0].closure is not None
+    assert decoded.releases[0].closure.no_completion_claim is False
+
+
 def test_negative_revision_names_revision_path() -> None:
     document = _baseline_document()
     document["revision"] = -1
@@ -167,11 +283,11 @@ def test_negative_revision_names_revision_path() -> None:
 
 
 def test_duplicate_json_keys_are_refused_at_every_level() -> None:
-    top = b'{"revision":0,"revision":9,"units":[],"deviations":[]}'
+    top = b'{"revision":0,"revision":9,"units":[],"deviations":[],"releases":[]}'
     with pytest.raises(DecodeError, match="duplicate object key 'revision'"):
         decode_snapshot(top)
     nested = (
-        b'{"revision":0,"deviations":[],"units":[{"name":"a","name":"b",'
+        b'{"revision":0,"deviations":[],"releases":[],"units":[{"name":"a","name":"b",'
         b'"version":"1","status":"specified","depends_on":[],'
         b'"acceptance_pack_version":""}]}'
     )
@@ -180,7 +296,7 @@ def test_duplicate_json_keys_are_refused_at_every_level() -> None:
 
 
 def test_non_utf8_encodings_are_refused() -> None:
-    document = '{"revision":3,"units":[],"deviations":[]}'
+    document = '{"revision":3,"units":[],"deviations":[],"releases":[]}'
     for encoding in ("utf-16", "utf-32"):
         with pytest.raises(DecodeError, match="must be UTF-8"):
             decode_snapshot(document.encode(encoding))
@@ -188,4 +304,27 @@ def test_non_utf8_encodings_are_refused() -> None:
 
 def test_utf8_bom_is_refused() -> None:
     with pytest.raises(DecodeError, match="invalid JSON"):
-        decode_snapshot(b'\xef\xbb\xbf{"revision":0,"units":[],"deviations":[]}')
+        decode_snapshot(b'\xef\xbb\xbf{"revision":0,"units":[],"deviations":[],"releases":[]}')
+
+
+def test_duplicate_roster_member_is_refused() -> None:
+    document = _baseline_document()
+    release = _release_document()
+    release["includes"] = [
+        {"name": "alpha", "version": "1"},
+        {"name": "alpha", "version": "2"},
+    ]
+    document["releases"] = [release]
+    with pytest.raises(DecodeError, match=r"includes\[1\]\.name.*duplicate"):
+        decode_snapshot(_json_bytes(document))
+
+
+def test_unknown_roster_snapshot_status_is_refused() -> None:
+    document = _baseline_document()
+    release = _release_document()
+    closure = release["closure"]
+    assert isinstance(closure, dict)
+    closure["roster_snapshot"] = [["alpha", "banana"]]
+    document["releases"] = [release]
+    with pytest.raises(DecodeError, match="unknown roster status 'banana'"):
+        decode_snapshot(_json_bytes(document))

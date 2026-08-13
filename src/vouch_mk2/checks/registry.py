@@ -19,6 +19,11 @@ from vouch_mk2.checks.standing import (
     check_dependency_graph_acyclic,
     check_deviation_bindings_resolve,
     check_published_units_gated,
+    check_release_bound_units_rostered,
+    check_release_closure_records,
+    check_release_criteria_before_progression,
+    check_release_escape_property,
+    check_release_rosters_resolve,
 )
 from vouch_mk2.core.model import Snapshot
 from vouch_mk2.ir import mk2
@@ -82,6 +87,13 @@ MECHANICAL_CHECKS: Mapping[str, CheckEvaluator] = {
     mk2.CHECK_BLOCKED_STATUS_COHERENT: check_blocked_status_coherent,
     mk2.CHECK_PUBLISHED_UNITS_GATED: check_published_units_gated,
     mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE: check_amended_deviations_complete,
+    mk2.CHECK_RELEASE_ESCAPE_PROPERTY: check_release_escape_property,
+    mk2.CHECK_RELEASE_ROSTERS_RESOLVE: check_release_rosters_resolve,
+    mk2.CHECK_RELEASE_CRITERIA_BEFORE_PROGRESSION: (
+        check_release_criteria_before_progression
+    ),
+    mk2.CHECK_RELEASE_CLOSURE_RECORDS: check_release_closure_records,
+    mk2.CHECK_RELEASE_BOUND_UNITS_ROSTERED: check_release_bound_units_rostered,
 }
 
 ORGANIZATIONAL_CHECKS: Mapping[str, CheckEvaluator] = {
