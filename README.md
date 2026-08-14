@@ -19,15 +19,27 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
 - [`docs/claim-boundary.md`](docs/claim-boundary.md) — what mk2 proves mechanically
   vs. what is permanently `NOT_CHECKED`.
 
-## Code (Phase 0)
+## Code (Phases 0–6)
 
-- `src/vouch_mk2/ir/schema.py` — Policy IR schema: frozen dataclasses for state
-  machines, claim taxonomy, applicability, tier requirements, obligation registry,
-  version identity; pure structural validation.
-- `src/vouch_mk2/ir/vouch_06.py` — the 0.6.2 lifecycle transcribed as IR data (the
-  Phase 0 exit-criterion artifact).
-- `tests/` — diffs the transcription against 0.6's own machine-readable tables
-  (vendored, digest-pinned under `tests/data/`) and the machine.md §14 tables.
+- `src/vouch_mk2/ir/` — Policy IR schema (frozen dataclasses, structural
+  validation), the 0.6.2 lifecycle transcription, and the mk2 tables `decide()`
+  executes.
+- `src/vouch_mk2/core/` — the pure typed domain core: closed command/event
+  unions and `decide(Snapshot, Command) → Accepted | Refused` with gates inside
+  transitions; `apply()` folds events into the next snapshot.
+- `src/vouch_mk2/store/` — the only I/O: capability-rooted CAS store, the sole
+  digest registry (domain-separated), and one strict canonical codec per
+  artifact type.
+- `src/vouch_mk2/checks/` — verdict lattice, standing mechanical checks,
+  organizational NOT_CHECKED rows, registry completeness as a FAILable result.
+- `src/vouch_mk2/verify.py` / `bundle.py` — I/O-side artifact checks (evidence
+  chains, anchors, bundles, formal certificates) and exclusion-glob bundle
+  inventories.
+- `src/vouch_mk2/formal/` — the model checker: the relation is emitted by
+  executing `decide()` over the core-v1 universe; nine hand-authored invariants
+  with private mutation witnesses; recomputed content-addressed certificates.
+- `src/vouch_mk2/cli.py` — thin transports: `vouch-mk2 check` and
+  `vouch-mk2 formal [--record]`.
 
 ## Gates
 
@@ -37,5 +49,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check   # D-1: strict types
 uv run lint-imports    # D-1: Policy IR purity contract
-uv run pytest          # transcription diff + schema validation
+uv run pytest          # 424 tests: matrices, property BFS, fault rig, formal
+uv run vouch-mk2 formal  # invariants + witness discrimination over core-v1
 ```
