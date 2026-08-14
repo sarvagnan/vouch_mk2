@@ -3,9 +3,13 @@
 from vouch_mk2.store.codec import (
     decode_bundle_inventory,
     decode_evidence_event,
+    decode_formal_certificate,
     decode_snapshot,
     encode_bundle_inventory,
     encode_evidence_event,
+    encode_formal_certificate,
+    encode_formal_relation,
+    encode_formal_tables,
     encode_snapshot,
 )
 from vouch_mk2.store.digests import ArtifactKind, digest_of
@@ -37,8 +41,12 @@ __all__ = [
     "decode_snapshot",
     "decode_bundle_inventory",
     "decode_evidence_event",
+    "decode_formal_certificate",
     "digest_of",
     "encode_snapshot",
     "encode_bundle_inventory",
     "encode_evidence_event",
+    "encode_formal_certificate",
+    "encode_formal_relation",
+    "encode_formal_tables",
 ]

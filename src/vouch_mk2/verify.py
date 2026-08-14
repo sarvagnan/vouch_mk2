@@ -17,10 +17,13 @@ from vouch_mk2.core import (
     EvidenceHead,
     EvidenceKind,
     RecordEvidence,
+    RecordFormalCertificate,
     Snapshot,
     apply,
     decide,
 )
+from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
+from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.store import (
@@ -29,8 +32,12 @@ from vouch_mk2.store import (
     StoreError,
     decode_bundle_inventory,
     decode_evidence_event,
+    decode_formal_certificate,
     digest_of,
     encode_evidence_event,
+    encode_formal_certificate,
+    encode_formal_relation,
+    encode_formal_tables,
 )
 
 
@@ -241,6 +248,105 @@ def _check_bundle_inventories(store: Store, snapshot: Snapshot) -> CheckResult:
     )
 
 
+def build_certificate(run: FormalRun) -> tuple[FormalCertificate, bytes]:
+    tables_digest = digest_of(
+        ArtifactKind.FORMAL_TABLES, encode_formal_tables(run.tables)
+    )
+    relation_digest = digest_of(
+        ArtifactKind.FORMAL_RELATION, encode_formal_relation(run.relation)
+    )
+    certificate = FormalCertificate(
+        universe_name=run.universe_name,
+        checker_version=CHECKER_VERSION,
+        tables_digest=tables_digest,
+        relation_digest=relation_digest,
+        state_count=run.state_count,
+        transition_count=run.transition_count,
+        invariants=tuple(
+            sorted((verdict.invariant_id, verdict.held) for verdict in run.invariants)
+        ),
+        witnesses=tuple(
+            sorted(
+                (
+                    verdict.witness_id,
+                    verdict.invariant_id,
+                    verdict.discriminated,
+                )
+                for verdict in run.witnesses
+            )
+        ),
+    )
+    return certificate, encode_formal_certificate(certificate)
+
+
+def _formal_failure(detail: str) -> CheckResult:
+    return CheckResult(
+        check_id=mk2.CHECK_FORMAL_CERTIFICATE,
+        verdict=Verdict.FAIL,
+        detail=detail,
+    )
+
+
+def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
+    digest = snapshot.formal_certificate_digest
+    if not digest:
+        return CheckResult(mk2.CHECK_FORMAL_CERTIFICATE, Verdict.PASS, "")
+    try:
+        certificate = decode_formal_certificate(
+            store.get_object(ArtifactKind.FORMAL_CERTIFICATE, digest)
+        )
+    except StoreError as error:
+        return _formal_failure(f"missing/corrupt formal certificate: {error}")
+
+    fresh = run_formal()
+    expected, _data = build_certificate(fresh)
+    if certificate.universe_name != expected.universe_name:
+        return _formal_failure("universe_name mismatch")
+    if certificate.checker_version != expected.checker_version:
+        return _formal_failure("checker_version mismatch")
+    if certificate.tables_digest != expected.tables_digest:
+        return _formal_failure("tables_digest mismatch")
+    if certificate.relation_digest != expected.relation_digest:
+        return _formal_failure("relation_digest mismatch")
+    if (
+        certificate.state_count != expected.state_count
+        or certificate.transition_count != expected.transition_count
+    ):
+        return _formal_failure("relation counts mismatch")
+    if certificate.invariants != expected.invariants:
+        recorded = dict(certificate.invariants)
+        recomputed = dict(expected.invariants)
+        divergent = tuple(
+            sorted(
+                invariant_id
+                for invariant_id in set(recorded) | set(recomputed)
+                if recorded.get(invariant_id) is not recomputed.get(invariant_id)
+            )
+        )
+        return _formal_failure(
+            f"invariant verdict mismatch: {divergent!r} disagree with recomputation"
+        )
+    failed_invariant = next(
+        (invariant_id for invariant_id, held in certificate.invariants if not held),
+        "",
+    )
+    if failed_invariant:
+        return _formal_failure(f"invariant {failed_invariant!r} did not hold")
+    if certificate.witnesses != expected.witnesses:
+        return _formal_failure("witness verdict mismatch")
+    failed_witness = next(
+        (
+            witness_id
+            for witness_id, _invariant_id, discriminated in certificate.witnesses
+            if not discriminated
+        ),
+        "",
+    )
+    if failed_witness:
+        return _formal_failure(f"witness {failed_witness!r} did not discriminate")
+    return CheckResult(mk2.CHECK_FORMAL_CERTIFICATE, Verdict.PASS, "")
+
+
 def run_artifact_checks(store: Store, snapshot: Snapshot) -> tuple[CheckResult, ...]:
     """Run all IR-declared artifact checks, reusing one parent walk per head."""
     walks = tuple(_walk_chain(store, head) for head in snapshot.evidence_heads)
@@ -250,6 +356,7 @@ def run_artifact_checks(store: Store, snapshot: Snapshot) -> tuple[CheckResult, 
                 _check_evidence_chains(snapshot, walks),
                 _check_evidence_anchors(snapshot, walks),
                 _check_bundle_inventories(store, snapshot),
+                _check_formal_certificate(store, snapshot),
             ),
             key=lambda result: result.check_id,
         )
@@ -267,5 +374,35 @@ def record_evidence(store: Store, event: EvidenceEvent) -> str:
     store.commit(
         apply(snapshot, decision.events),
         objects=((ArtifactKind.EVIDENCE, data),),
+    )
+    return digest
+
+
+def record_formal_certificate(store: Store, run: FormalRun | None = None) -> str:
+    if run is None:
+        run = run_formal()
+    if not passed(run):
+        failed_invariants = tuple(
+            verdict.invariant_id for verdict in run.invariants if not verdict.held
+        )
+        failed_witnesses = tuple(
+            verdict.witness_id
+            for verdict in run.witnesses
+            if not verdict.discriminated
+        )
+        raise StoreError(
+            "formal run failed: "
+            f"invariants={failed_invariants!r}, witnesses={failed_witnesses!r}"
+        )
+    _certificate, data = build_certificate(run)
+    digest = digest_of(ArtifactKind.FORMAL_CERTIFICATE, data)
+    snapshot = store.read_snapshot()
+    decision = decide(snapshot, RecordFormalCertificate(digest))
+    if not isinstance(decision, Accepted):
+        codes = tuple(violation.code for violation in decision.violations)
+        raise StoreError(f"record-formal-certificate refused: {codes!r}")
+    store.commit(
+        apply(snapshot, decision.events),
+        objects=((ArtifactKind.FORMAL_CERTIFICATE, data),),
     )
     return digest

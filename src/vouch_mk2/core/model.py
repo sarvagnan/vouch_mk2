@@ -194,6 +194,7 @@ class Snapshot:
     releases: tuple[Release, ...] = ()
     evidence_heads: tuple[EvidenceHead, ...] = ()
     anchor_mode: AnchorMode = AnchorMode.NONE
+    formal_certificate_digest: str = ""
 
     def unit(self, name: str) -> Unit | None:
         for unit in self.units:

@@ -148,6 +148,12 @@ class SetAnchorMode:
 
 
 @dataclass(frozen=True, slots=True)
+class RecordFormalCertificate:
+    ir_command: ClassVar[str] = mk2.CMD_RECORD_FORMAL_CERTIFICATE
+    certificate_digest: str
+
+
+@dataclass(frozen=True, slots=True)
 class StartDeploy:
     ir_command: ClassVar[str] = mk2.CMD_START_DEPLOY
     release_id: str
@@ -222,5 +228,6 @@ type Command = (
     | RecordEvidence
     | AdvanceAnchor
     | SetAnchorMode
+    | RecordFormalCertificate
     | ReleaseTransitionCommand
 )

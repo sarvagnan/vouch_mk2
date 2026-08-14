@@ -31,6 +31,7 @@ from vouch_mk2.core.commands import (
     OpenDeviation,
     PrepareRelease,
     Publish,
+    RecordFormalCertificate,
     RecordEvidence,
     RejectDeviation,
     ReleaseTransitionCommand,
@@ -58,6 +59,7 @@ from vouch_mk2.core.events import (
     DeviationRejected,
     Event,
     EvidenceRecorded,
+    FormalCertificateRecorded,
     GateCheck,
     GateRecord,
     ReleaseCriteriaSet,
@@ -783,6 +785,17 @@ def _decide_set_anchor_mode(command: SetAnchorMode) -> Decision:
     return Accepted(events=(AnchorModeSet(command.mode),))
 
 
+def _decide_record_formal_certificate(
+    command: RecordFormalCertificate,
+) -> Decision:
+    if not _valid_digest(command.certificate_digest):
+        return _refuse(
+            "formal.digest-invalid",
+            "formal certificate digest must be 64 lowercase hexadecimal characters",
+        )
+    return Accepted(events=(FormalCertificateRecorded(command.certificate_digest),))
+
+
 def _roster_snapshot(
     snapshot: Snapshot, release: Release
 ) -> tuple[tuple[str, str], ...]:
@@ -1076,6 +1089,8 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             return _decide_advance_anchor(snapshot, command)
         case SetAnchorMode():
             return _decide_set_anchor_mode(command)
+        case RecordFormalCertificate():
+            return _decide_record_formal_certificate(command)
         case OpenDeviation():
             return _decide_open_deviation(snapshot, command)
         case AmendDeviation():
@@ -1148,6 +1163,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
     releases = snapshot.releases
     evidence_heads = snapshot.evidence_heads
     anchor_mode = snapshot.anchor_mode
+    formal_certificate_digest = snapshot.formal_certificate_digest
     match event:
         case UnitSpecified(name=name, version=version, depends_on=depends_on):
             units = units + (
@@ -1284,6 +1300,8 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             )
         case AnchorModeSet(mode=mode):
             anchor_mode = mode
+        case FormalCertificateRecorded(certificate_digest=certificate_digest):
+            formal_certificate_digest = certificate_digest
         case DeploymentStarted(release_id=release_id):
             releases = _with_release_status(
                 snapshot, release_id, ReleaseState.DEPLOYING
@@ -1343,6 +1361,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
         releases=releases,
         evidence_heads=evidence_heads,
         anchor_mode=anchor_mode,
+        formal_certificate_digest=formal_certificate_digest,
     )
 
 
@@ -1393,4 +1412,5 @@ def apply(snapshot: Snapshot, events: tuple[Event, ...]) -> Snapshot:
         releases=current.releases,
         evidence_heads=current.evidence_heads,
         anchor_mode=current.anchor_mode,
+        formal_certificate_digest=current.formal_certificate_digest,
     )

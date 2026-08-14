@@ -35,6 +35,7 @@ from vouch_mk2.core import (
     OpenDeviation,
     PrepareRelease,
     Publish,
+    RecordFormalCertificate,
     RecordEvidence,
     Refused,
     RejectDeviation,
@@ -98,6 +99,7 @@ PURE_ARTIFACT_RESULTS = tuple(
         mk2.CHECK_EVIDENCE_CHAINS,
         mk2.CHECK_EVIDENCE_ANCHORS,
         mk2.CHECK_BUNDLE_INVENTORIES,
+        mk2.CHECK_FORMAL_CERTIFICATE,
     )
 )
 
@@ -248,6 +250,7 @@ COMMAND_UNIVERSE: tuple[Command, ...] = (
     CloseDeviation(deviation_id="d2"),
     SetAnchorMode(AnchorMode.NONE),
     SetAnchorMode(AnchorMode.CI),
+    RecordFormalCertificate("f" * 64),
 )
 
 
@@ -262,6 +265,7 @@ def snapshot_key(snapshot: Snapshot) -> tuple[object, ...]:
             for head in snapshot.evidence_heads
         ),
         snapshot.anchor_mode.value,
+        snapshot.formal_certificate_digest,
         tuple((d.deviation_id, d.status.value) for d in snapshot.deviations),
         tuple(
             (
@@ -273,6 +277,19 @@ def snapshot_key(snapshot: Snapshot) -> tuple[object, ...]:
             for release in snapshot.releases
         ),
     )
+
+
+def test_formal_certificate_command_validates_and_records_digest() -> None:
+    invalid = decide(Snapshot(), RecordFormalCertificate("BAD"))
+    assert isinstance(invalid, Refused)
+    assert invalid.violations[0].code == "formal.digest-invalid"
+
+    digest = "f" * 64
+    accepted = decide(Snapshot(), RecordFormalCertificate(digest))
+    assert isinstance(accepted, Accepted)
+    after = apply(Snapshot(), accepted.events)
+    assert after.formal_certificate_digest == digest
+    assert after.revision == 1
 
 
 def test_every_legal_transition_is_reachable() -> None:
@@ -481,6 +498,7 @@ def test_reachable_multi_unit_release_snapshots_pass_standing_checks() -> None:
                 for head in snapshot.evidence_heads
             ),
             snapshot.anchor_mode.value,
+            snapshot.formal_certificate_digest,
         )
 
     max_depth = 30

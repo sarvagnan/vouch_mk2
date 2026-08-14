@@ -68,6 +68,7 @@ CMD_BIND_BUNDLE = "bind-bundle"
 CMD_RECORD_EVIDENCE = "record-evidence"
 CMD_ADVANCE_ANCHOR = "advance-anchor"
 CMD_SET_ANCHOR_MODE = "set-anchor-mode"
+CMD_RECORD_FORMAL_CERTIFICATE = "record-formal-certificate"
 
 # Deviation lifecycle commands.
 CMD_ADJUDICATE_AMEND = "adjudicate-amend"
@@ -125,6 +126,7 @@ CHECK_RELEASE_BOUND_UNITS_ROSTERED = "check.release-bound-units-rostered"
 CHECK_EVIDENCE_CHAINS = "check.evidence-chains"
 CHECK_EVIDENCE_ANCHORS = "check.evidence-anchors"
 CHECK_BUNDLE_INVENTORIES = "check.bundle-inventories"
+CHECK_FORMAL_CERTIFICATE = "check.formal-certificate"
 
 # Permanently NOT_CHECKED organizational claims (docs/claim-boundary.md).
 ORG_ACCEPTANCE_OWNERSHIP = "org.acceptance-ownership"
@@ -566,6 +568,13 @@ _OBLIGATIONS = (
         obligation_id=CHECK_BUNDLE_INVENTORIES,
         scope=ObligationScope.ARTIFACT_CHECK,
         description="Bound release inventories resolve and decode canonically.",
+    ),
+    Obligation(
+        obligation_id=CHECK_FORMAL_CERTIFICATE,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description=(
+            "A recorded formal certificate matches a fresh exhaustive run."
+        ),
     ),
     Obligation(
         obligation_id=ORG_ACCEPTANCE_OWNERSHIP,

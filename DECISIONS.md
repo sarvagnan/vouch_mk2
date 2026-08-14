@@ -127,6 +127,40 @@ deviations", so an operational hold must be expressed as a typed deviation (usua
   chain walks to GENESIS) is verified by the artifact checks in CI. A lying digest
   passes `decide()` and fails `vouch-mk2 check`.
 
+## D-5 — Formal checking: the model is decide() itself
+
+**Status:** decided 2026-08-13 (Phase 6).
+
+- **The transition relation is emitted by executing `decide()`/`apply()`** over a
+  canonical bounded command universe, breadth-first from the empty snapshot. There is
+  no separately-maintained model: model↔implementation conformance is an identity,
+  not a correspondence 0.6 had to re-verify with a conformance harness. What the
+  checker explores IS what the runtime executes. Rejected: a hand-written model plus
+  conformance scenarios (0.6's design — the gap between them produced the D040/D042
+  class).
+- **Invariants are hand-authored; generating them is forbidden.** An invariant
+  derived from the IR or from `decide()` would certify the implementation against
+  itself (the D023/D043 discriminator rule at the formal layer). The catalog cites
+  each 0.6 invariant it descends from.
+- **Every counted invariant carries a private mutation witness over the relation** —
+  a named perturbation of the explored relation that makes that invariant's check
+  fail. Privacy means the one-witness-per-invariant ownership mapping — a missing
+  witness, a witness whose owned invariant still passes, or two invariants sharing
+  one witness ("borrowing") is a build failure, not a report line. Privacy does NOT
+  mean behavioral exclusivity: a mutation may legitimately trip other invariants too
+  (0.6's applicability lesson — "applicability affects reporting, not behavioral
+  exclusivity"). Witnesses mutate the *relation*, never the invariant or the checker.
+- **Dummy digests are sound inside the formal universe.** decide() is structural by
+  D-4, so the universe records evidence with literal placeholder digests; the formal
+  layer stays pure (no hashing) and the evidence-content checks remain CI's job.
+- **Bounded exhaustive exploration; `unknown` cannot exist silently.** The universe
+  is finite and exploration runs to closure; if a state cap were ever hit the run
+  reports UNKNOWN and the certificate build fails — never a pass (0.6 D057 lesson).
+- **Certificates are recomputed by consumers.** The content-addressed certificate
+  binds the emitted-table digest, relation digest, per-invariant verdicts, and
+  witness verdicts; `vouch-mk2 check` re-runs the exploration and compares — a
+  recorded certificate that no longer matches the source is a FAIL, not a stale pass.
+
 The Phase 0 transcription (`ir/vouch_06.py`) keeps the prose-faithful reading, since
 0.6's own precedence rule gives prose authority absent a recorded discrepancy; this
 entry is mk2's recorded discrepancy for its own semantics.

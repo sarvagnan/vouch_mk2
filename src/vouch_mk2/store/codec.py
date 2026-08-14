@@ -33,6 +33,8 @@ from vouch_mk2.core.model import (
     UnitRef,
     UnitStatus,
 )
+from vouch_mk2.formal.certificate import FormalCertificate
+from vouch_mk2.formal.explore import EmittedTables, Relation
 from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
@@ -51,6 +53,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
     """Encode every Snapshot field as stable canonical JSON plus one newline."""
     document = {
         "anchor_mode": snapshot.anchor_mode.value,
+        "formal_certificate_digest": snapshot.formal_certificate_digest,
         "deviations": [
             {
                 "amendment_version": deviation.amendment_version,
@@ -170,6 +173,43 @@ def encode_bundle_inventory(inventory: BundleInventory) -> bytes:
                 for entry in inventory.entries
             ],
             "exclusions": list(inventory.exclusions),
+        }
+    )
+
+
+def encode_formal_tables(tables: EmittedTables) -> bytes:
+    return _canonical_json(tables)
+
+
+def encode_formal_relation(relation: Relation) -> bytes:
+    return _canonical_json(
+        {
+            "initial": relation.initial,
+            "states": list(relation.states),
+            "transitions": [list(row) for row in relation.transitions],
+        }
+    )
+
+
+def encode_formal_certificate(certificate: FormalCertificate) -> bytes:
+    return _canonical_json(
+        {
+            "checker_version": certificate.checker_version,
+            "invariants": [
+                [invariant_id, held]
+                for invariant_id, held in sorted(certificate.invariants)
+            ],
+            "relation_digest": certificate.relation_digest,
+            "state_count": certificate.state_count,
+            "tables_digest": certificate.tables_digest,
+            "transition_count": certificate.transition_count,
+            "universe_name": certificate.universe_name,
+            "witnesses": [
+                [witness_id, invariant_id, discriminated]
+                for witness_id, invariant_id, discriminated in sorted(
+                    certificate.witnesses
+                )
+            ],
         }
     )
 
@@ -298,8 +338,28 @@ _EVIDENCE_EVENT_FIELDS = frozenset(
 )
 _INVENTORY_ENTRY_FIELDS = frozenset({"path", "digest"})
 _BUNDLE_INVENTORY_FIELDS = frozenset({"entries", "exclusions"})
+_FORMAL_CERTIFICATE_FIELDS = frozenset(
+    {
+        "universe_name",
+        "checker_version",
+        "tables_digest",
+        "relation_digest",
+        "state_count",
+        "transition_count",
+        "invariants",
+        "witnesses",
+    }
+)
 _SNAPSHOT_FIELDS = frozenset(
-    {"revision", "units", "deviations", "releases", "evidence_heads", "anchor_mode"}
+    {
+        "revision",
+        "units",
+        "deviations",
+        "releases",
+        "evidence_heads",
+        "anchor_mode",
+        "formal_certificate_digest",
+    }
 )
 
 
@@ -563,6 +623,58 @@ def decode_bundle_inventory(data: bytes) -> BundleInventory:
     return inventory
 
 
+def decode_formal_certificate(data: bytes) -> FormalCertificate:
+    obj = _fields(
+        _decode_json(data, "formal certificate"),
+        "",
+        _FORMAL_CERTIFICATE_FIELDS,
+    )
+    state_count = _integer(obj["state_count"], "state_count")
+    transition_count = _integer(obj["transition_count"], "transition_count")
+    if state_count < 0:
+        raise DecodeError("state_count: must be non-negative")
+    if transition_count < 0:
+        raise DecodeError("transition_count: must be non-negative")
+    invariants: list[tuple[str, bool]] = []
+    for index, raw in enumerate(_array(obj["invariants"], "invariants")):
+        path = f"invariants[{index}]"
+        pair = _array(raw, path)
+        if len(pair) != 2:
+            raise DecodeError(f"{path}: expected two-item array")
+        invariants.append(
+            (
+                _string(pair[0], f"{path}[0]"),
+                _boolean(pair[1], f"{path}[1]"),
+            )
+        )
+    witnesses: list[tuple[str, str, bool]] = []
+    for index, raw in enumerate(_array(obj["witnesses"], "witnesses")):
+        path = f"witnesses[{index}]"
+        triple = _array(raw, path)
+        if len(triple) != 3:
+            raise DecodeError(f"{path}: expected three-item array")
+        witnesses.append(
+            (
+                _string(triple[0], f"{path}[0]"),
+                _string(triple[1], f"{path}[1]"),
+                _boolean(triple[2], f"{path}[2]"),
+            )
+        )
+    certificate = FormalCertificate(
+        universe_name=_string(obj["universe_name"], "universe_name"),
+        checker_version=_string(obj["checker_version"], "checker_version"),
+        tables_digest=_digest(obj["tables_digest"], "tables_digest"),
+        relation_digest=_digest(obj["relation_digest"], "relation_digest"),
+        state_count=state_count,
+        transition_count=transition_count,
+        invariants=tuple(invariants),
+        witnesses=tuple(witnesses),
+    )
+    if encode_formal_certificate(certificate) != data:
+        raise DecodeError("$: non-canonical formal certificate encoding")
+    return certificate
+
+
 def decode_snapshot(data: bytes) -> Snapshot:
     """Strictly decode bytes into Snapshot; no raw JSON escapes this function."""
     # Decode UTF-8 explicitly first: json.loads on bytes BOM-sniffs and would
@@ -633,4 +745,9 @@ def decode_snapshot(data: bytes) -> Snapshot:
         releases=releases,
         evidence_heads=evidence_heads,
         anchor_mode=_enum_value(obj["anchor_mode"], "anchor_mode", AnchorMode),
+        formal_certificate_digest=_digest(
+            obj["formal_certificate_digest"],
+            "formal_certificate_digest",
+            allow_empty=True,
+        ),
     )

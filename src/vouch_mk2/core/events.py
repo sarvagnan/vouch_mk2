@@ -176,6 +176,11 @@ class AnchorModeSet:
 
 
 @dataclass(frozen=True, slots=True)
+class FormalCertificateRecorded:
+    certificate_digest: str
+
+
+@dataclass(frozen=True, slots=True)
 class DeploymentStarted:
     release_id: str
     gate: GateRecord
@@ -242,6 +247,7 @@ type Event = (
     | EvidenceRecorded
     | AnchorAdvanced
     | AnchorModeSet
+    | FormalCertificateRecorded
     | DeploymentStarted
     | VerificationStarted
     | ReleaseSucceeded

@@ -95,6 +95,7 @@ def _baseline_document() -> dict[str, object]:
     return {
         "anchor_mode": "none",
         "evidence_heads": [],
+        "formal_certificate_digest": "",
         "revision": 1,
         "units": [
             {
@@ -311,11 +312,11 @@ def test_negative_revision_names_revision_path() -> None:
 
 
 def test_duplicate_json_keys_are_refused_at_every_level() -> None:
-    top = b'{"anchor_mode":"none","evidence_heads":[],"revision":0,"revision":9,"units":[],"deviations":[],"releases":[]}'
+    top = b'{"anchor_mode":"none","evidence_heads":[],"formal_certificate_digest":"","revision":0,"revision":9,"units":[],"deviations":[],"releases":[]}'
     with pytest.raises(DecodeError, match="duplicate object key 'revision'"):
         decode_snapshot(top)
     nested = (
-        b'{"anchor_mode":"none","evidence_heads":[],"revision":0,"deviations":[],"releases":[],"units":[{"name":"a","name":"b",'
+        b'{"anchor_mode":"none","evidence_heads":[],"formal_certificate_digest":"","revision":0,"deviations":[],"releases":[],"units":[{"name":"a","name":"b",'
         b'"version":"1","status":"specified","depends_on":[],'
         b'"acceptance_pack_version":""}]}'
     )
@@ -324,7 +325,7 @@ def test_duplicate_json_keys_are_refused_at_every_level() -> None:
 
 
 def test_non_utf8_encodings_are_refused() -> None:
-    document = '{"anchor_mode":"none","evidence_heads":[],"revision":3,"units":[],"deviations":[],"releases":[]}'
+    document = '{"anchor_mode":"none","evidence_heads":[],"formal_certificate_digest":"","revision":3,"units":[],"deviations":[],"releases":[]}'
     for encoding in ("utf-16", "utf-32"):
         with pytest.raises(DecodeError, match="must be UTF-8"):
             decode_snapshot(document.encode(encoding))
@@ -332,7 +333,7 @@ def test_non_utf8_encodings_are_refused() -> None:
 
 def test_utf8_bom_is_refused() -> None:
     with pytest.raises(DecodeError, match="invalid JSON"):
-        decode_snapshot(b'\xef\xbb\xbf{"anchor_mode":"none","evidence_heads":[],"revision":0,"units":[],"deviations":[],"releases":[]}')
+        decode_snapshot(b'\xef\xbb\xbf{"anchor_mode":"none","evidence_heads":[],"formal_certificate_digest":"","revision":0,"units":[],"deviations":[],"releases":[]}')
 
 
 def test_duplicate_roster_member_is_refused() -> None:

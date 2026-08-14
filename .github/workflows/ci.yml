@@ -27,3 +27,5 @@ jobs:
         # masked by json.tool's success.
         shell: bash
         run: uv run vouch-mk2 check --ci --json --root "$RUNNER_TEMP/vouch-mk2-ci-check" | python3 -m json.tool > /dev/null
+      - name: Formal checking
+        run: uv run vouch-mk2 formal

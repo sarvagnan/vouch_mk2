@@ -171,6 +171,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_EVIDENCE_CHAINS,
         mk2.CHECK_EVIDENCE_ANCHORS,
         mk2.CHECK_BUNDLE_INVENTORIES,
+        mk2.CHECK_FORMAL_CERTIFICATE,
     ):
         assert check_id in text
     assert main(["check", "--ci", "--json", "--root", str(root)]) == 0
@@ -181,6 +182,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_EVIDENCE_CHAINS,
         mk2.CHECK_EVIDENCE_ANCHORS,
         mk2.CHECK_BUNDLE_INVENTORIES,
+        mk2.CHECK_FORMAL_CERTIFICATE,
     } <= ids
 
 
@@ -207,3 +209,31 @@ def test_cli_none_anchor_is_not_applicable_but_overall_passes(
     assert "NOT-APPLICABLE" in output
     assert mk2.CHECK_EVIDENCE_ANCHORS in output
     assert output.rstrip().endswith("composed: PASS")
+
+
+def test_cli_formal_reports_closed_relation_and_discriminators(
+    tmp_path: Path,
+    capsys: CaptureFixture[str],
+) -> None:
+    root = tmp_path / "store"
+    init_store(root)
+    assert main(["formal", "--record", "--root", str(root)]) == 0
+    output = capsys.readouterr().out
+    assert "states: 96266" in output
+    assert "transitions: 540210" in output
+    assert "PASS  M1.no-direct-republication" in output
+    assert "PASS  M9.anchor-monotonic" in output
+    assert "DISCRIMINATED     W1.direct-republication" in output
+    assert "DISCRIMINATED     W9.anchor-rotation" in output
+    assert "formal certificate: " in output
+    with Store.open(str(root)) as store:
+        assert len(store.read_snapshot().formal_certificate_digest) == 64
+
+
+def test_cli_formal_record_requires_explicit_root(
+    capsys: CaptureFixture[str],
+) -> None:
+    assert main(["formal", "--record"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --root" in captured.err
