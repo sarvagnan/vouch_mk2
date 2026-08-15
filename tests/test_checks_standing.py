@@ -13,6 +13,7 @@ from vouch_mk2.checks.standing import (
     check_dependencies_exist,
     check_dependency_graph_acyclic,
     check_deviation_bindings_resolve,
+    check_one_active_record_per_name,
     check_published_units_gated,
 )
 from vouch_mk2.core.model import (
@@ -205,14 +206,14 @@ def test_deviation_bindings_resolve_passes_for_current_binding() -> None:
     assert check_deviation_bindings_resolve(snapshot).verdict is Verdict.PASS
 
 
-def test_deviation_bindings_resolve_fails_for_stale_binding() -> None:
+def test_deviation_bindings_resolve_fails_for_missing_historical_binding() -> None:
     snapshot = Snapshot(
         units=(unit("u", version="v2"),),
         deviations=(deviation("d-stale", "u", unit_version="v1"),),
     )
     found = check_deviation_bindings_resolve(snapshot)
     assert found.verdict is Verdict.FAIL
-    assert "stale" in found.detail and "d-stale" in found.detail
+    assert "dangling" in found.detail and "d-stale" in found.detail
 
 
 def test_deviation_bindings_resolve_fails_for_dangling_binding() -> None:
@@ -440,17 +441,27 @@ def test_blocked_coherence_accepts_invalidated_unit_with_own_blockers() -> None:
     assert check_blocked_status_coherent(snapshot).verdict is Verdict.PASS
 
 
-def test_dependency_graph_check_refuses_duplicate_unit_names() -> None:
+def test_one_active_record_per_name_fails_for_two_active_versions() -> None:
     snapshot = Snapshot(
         units=(
-            unit("a", depends_on=("b",)),
-            unit("a"),
-            unit("b", depends_on=("a",)),
+            unit("u", version="v1"),
+            unit("u", version="v2"),
         )
     )
-    found = check_dependency_graph_acyclic(snapshot)
+    found = check_one_active_record_per_name(snapshot)
     assert found.verdict is Verdict.FAIL
+    assert found.check_id == mk2.CHECK_ONE_ACTIVE_RECORD_PER_NAME
     assert "duplicate unit names" in found.detail
+
+
+def test_one_active_record_per_name_passes_for_superseded_twin() -> None:
+    snapshot = Snapshot(
+        units=(
+            unit("u", UnitStatus.SUPERSEDED, version="v1"),
+            unit("u", UnitStatus.PUBLISHED, version="v2", pack="p2"),
+        )
+    )
+    assert check_one_active_record_per_name(snapshot).verdict is Verdict.PASS
 
 
 def test_dependency_cycle_detection_survives_deep_chains() -> None:

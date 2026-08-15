@@ -8,7 +8,7 @@ from functools import lru_cache
 
 from vouch_mk2.formal.explore import EmittedTables, Relation, emit_tables, explore
 from vouch_mk2.formal.invariants import INVARIANTS
-from vouch_mk2.formal.universe import CORE_V1
+from vouch_mk2.formal.universe import CORE_V1, UNIVERSES, Universe
 from vouch_mk2.formal.witnesses import WitnessVerdict, run_witness_harness
 
 
@@ -20,19 +20,29 @@ class InvariantVerdict:
 
 
 @dataclass(frozen=True, slots=True)
-class FormalRun:
+class UniverseRun:
     universe_name: str
     state_count: int
     transition_count: int
     invariants: tuple[InvariantVerdict, ...]
-    witnesses: tuple[WitnessVerdict, ...]
-    tables: EmittedTables
     relation: Relation
 
 
-@lru_cache(maxsize=1)
-def run_formal() -> FormalRun:
-    relation = explore(CORE_V1)
+@dataclass(frozen=True, slots=True)
+class FormalRun:
+    universes: tuple[UniverseRun, ...]
+    witnesses: tuple[WitnessVerdict, ...]
+    tables: EmittedTables
+
+    def universe(self, name: str) -> UniverseRun:
+        for run in self.universes:
+            if run.universe_name == name:
+                return run
+        raise LookupError(f"unknown formal universe {name!r}")
+
+
+def _run_universe(universe: Universe) -> UniverseRun:
+    relation = explore(universe)
     invariant_verdicts: list[InvariantVerdict] = []
     for invariant in INVARIANTS:
         violations = invariant.check(relation)
@@ -43,20 +53,34 @@ def run_formal() -> FormalRun:
                 violations=violations,
             )
         )
-    return FormalRun(
-        universe_name=CORE_V1.name,
+    return UniverseRun(
+        universe_name=universe.name,
         state_count=len(relation.states),
         transition_count=len(relation.transitions),
         invariants=tuple(
             sorted(invariant_verdicts, key=lambda item: item.invariant_id)
         ),
-        witnesses=run_witness_harness(relation),
-        tables=emit_tables(),
         relation=relation,
     )
 
 
+@lru_cache(maxsize=1)
+def run_formal() -> FormalRun:
+    universes = tuple(_run_universe(universe) for universe in UNIVERSES)
+    return FormalRun(
+        universes=universes,
+        witnesses=run_witness_harness(
+            next(run.relation for run in universes if run.universe_name == CORE_V1.name)
+        ),
+        tables=emit_tables(),
+    )
+
+
 def passed(run: FormalRun) -> bool:
-    return all(verdict.held for verdict in run.invariants) and all(
+    return all(
+        verdict.held
+        for universe in run.universes
+        for verdict in universe.invariants
+    ) and all(
         verdict.discriminated for verdict in run.witnesses
     )

@@ -1,0 +1,243 @@
+{
+  "ledger": {
+    "project": {
+      "claim_version": "risk-alert-pipeline/1.0.0",
+      "assurance_tier": "high",
+      "independence_model": "separated-contexts",
+      "runner_identity": "hermetic-runner/3.2.1+sha256-4f7c2d",
+      "orchestration_identity": "risk-alert-orchestration/2.0.0",
+      "committed_map_path": "docs/vouch/system-map.html",
+      "common_pack_version": "risk-controls-common-pack/1.2.0",
+      "current_phase": "phase-5-frozen-release",
+      "schema_dialects": ["json-schema/2020-12"],
+      "methodology_events": [
+        {
+          "sequence": 1,
+          "parent_digest": "GENESIS",
+          "event": "adopted-delta",
+          "delta": "system-map/1",
+          "effective_from_release_id": "risk-core-2026.1"
+        },
+        {
+          "sequence": 2,
+          "parent_digest": "8a1fe0476d73a4fb4c1252d372aab3c61c5d10c47943fe53092fe1993537521f",
+          "event": "tooling-upgrade",
+          "delta": "vouch/0.5.0",
+          "effective_from_release_id": "risk-resilient-2026.2"
+        }
+      ]
+    },
+    "releases": [
+      {
+        "id": "risk-core-2025.4",
+        "archetype": "qualified",
+        "includes": [
+          {"name": "observe-market-primary", "version": "1.0.0"}
+        ],
+        "state": "retired",
+        "closure_record": {
+          "trigger": "retroactive-migration",
+          "trigger_kind": "operator",
+          "no_completion_claim": true,
+          "roster": [
+            {
+              "name": "observe-market-primary",
+              "version": "1.0.0",
+              "status": "published"
+            }
+          ],
+          "observations": [],
+          "retroactive": true
+        }
+      },
+      {
+        "id": "risk-core-2026.1",
+        "archetype": "qualified",
+        "includes": [
+          {"name": "observe-market-primary", "version": "1.0.0"},
+          {"name": "score-risk", "version": "2.0.0"},
+          {"name": "compose-alert", "version": "1.0.0"},
+          {"name": "deliver-alert", "version": "1.0.0"}
+        ],
+        "state": "prepared",
+        "frozen_at": "2026-07-15T09:30:00Z",
+        "system_map_digest": "PENDING-GENERATOR-COMPUTATION-r1-SYSTEM-MAP",
+        "map_generator_identity": "PENDING-GENERATOR-COMPUTATION-r1-PACKAGE",
+        "map_input_manifest_digest": "PENDING-GENERATOR-COMPUTATION-r1-MANIFEST",
+        "evaluation_procedure": "sealed risk-core qualification protocol Q-2026.1",
+        "criteria_digest": "PENDING-CRITERIA-DIGEST-r1",
+        "bundle_inventory_digest": "PENDING-BUNDLE-INVENTORY-DIGEST-r1"
+      },
+      {
+        "id": "risk-resilient-2026.2",
+        "archetype": "operational",
+        "includes": [
+          {"name": "observe-market-primary", "version": "1.0.0"},
+          {"name": "observe-market-fallback", "version": "1.0.0"},
+          {"name": "score-risk", "version": "2.0.0"},
+          {"name": "compose-alert", "version": "1.0.0"},
+          {"name": "deliver-alert", "version": "1.0.0"},
+          {"name": "observe-archive-index", "version": "1.0.0"}
+        ],
+        "state": "prepared",
+        "frozen_at": "2026-07-29T09:30:00Z",
+        "system_map_digest": "PENDING-GENERATOR-COMPUTATION-r2-SYSTEM-MAP",
+        "map_generator_identity": "PENDING-GENERATOR-COMPUTATION-r2-PACKAGE",
+        "map_input_manifest_digest": "PENDING-GENERATOR-COMPUTATION-r2-MANIFEST",
+        "launch_criteria": "all high-tier delivery gates are green",
+        "verification_window": "30 minutes after deployment",
+        "rollback_triggers": "health check failure or error-budget breach",
+        "go_no_go_authority": "risk release owner",
+        "criteria_digest": "PENDING-CRITERIA-DIGEST-r2",
+        "bundle_inventory_digest": "PENDING-BUNDLE-INVENTORY-DIGEST-r2"
+      }
+    ],
+    "units": [
+      {
+        "name": "observe-market-primary",
+        "class": "observation",
+        "contract_version": "1.0.0",
+        "depends_on": [],
+        "status": "published",
+        "acceptance_pack_version": "observe-market-primary-pack/1.0.0",
+        "artifact_digest": "ab0bd08a3d52e502db206d5e2b1a35a8e34c1d946d4d806a274f1d840610be2e",
+        "gate_results": ["acceptance-pack-pass", "boundary-capture-pass"],
+        "blocked_on": [],
+        "definition_path": "fixture/units/observe-market-primary-v1.unit.yaml.json",
+        "criticality": "critical",
+        "approval_required": false
+      },
+      {
+        "name": "observe-market-fallback",
+        "class": "observation",
+        "contract_version": "1.0.0",
+        "depends_on": [],
+        "status": "published",
+        "acceptance_pack_version": "observe-market-fallback-pack/1.0.0",
+        "artifact_digest": "c54ed683734df57799c48bfc9388b486c742aa1aabe018e2dca8e0ab3d857c82",
+        "gate_results": ["acceptance-pack-pass", "boundary-capture-pass"],
+        "blocked_on": [],
+        "definition_path": "fixture/units/observe-market-fallback-v1.unit.yaml.json",
+        "criticality": "critical",
+        "approval_required": false
+      },
+      {
+        "name": "score-risk",
+        "class": "transform",
+        "contract_version": "1.0.0",
+        "depends_on": ["observe-market-primary"],
+        "status": "superseded",
+        "acceptance_pack_version": "score-risk-pack/1.0.0",
+        "artifact_digest": "2d564c91e98ce98e35cb7dee5214b11e1b8ff817fe0460a499b7d8063dac8112",
+        "gate_results": ["withdrawal-recorded", "replacement-bound"],
+        "blocked_on": [],
+        "definition_path": "fixture/units/score-risk-v1.unit.yaml.json",
+        "criticality": "critical",
+        "approval_required": false
+      },
+      {
+        "name": "score-risk",
+        "class": "transform",
+        "contract_version": "2.0.0",
+        "depends_on": ["observe-market-primary"],
+        "independence_model": "human-owner",
+        "status": "published",
+        "acceptance_pack_version": "score-risk-pack/2.0.0",
+        "artifact_digest": "71dfe28cf82b6d1a4dc9fcd81bdb30981711f7af5ee6670c4a8f0c678d42edb7",
+        "gate_results": ["acceptance-pack-pass", "deterministic-replay-pass"],
+        "blocked_on": [],
+        "definition_path": "fixture/units/score-risk-v2.unit.yaml.json",
+        "criticality": "critical",
+        "approval_required": false
+      },
+      {
+        "name": "compose-alert",
+        "class": "transform",
+        "contract_version": "1.0.0",
+        "depends_on": ["score-risk"],
+        "status": "published",
+        "acceptance_pack_version": "compose-alert-pack/1.0.0",
+        "artifact_digest": "0637562d8ef51e31bc925843d907740c4dfb4b67f5f4c8d15ba36993b5b1fa37",
+        "gate_results": ["acceptance-pack-pass", "deterministic-replay-pass"],
+        "blocked_on": [],
+        "definition_path": "fixture/units/compose-alert-v1.unit.yaml.json",
+        "criticality": "critical",
+        "approval_required": false
+      },
+      {
+        "name": "deliver-alert",
+        "class": "action",
+        "contract_version": "1.0.0",
+        "depends_on": ["compose-alert"],
+        "status": "release-bound",
+        "acceptance_pack_version": "deliver-alert-pack/1.0.0",
+        "artifact_digest": "4d21780eacd8d7b7660c61bbe51a80a8132f2a563af980df54a58f820e70146b",
+        "gate_results": ["acceptance-pack-pass", "sandbox-lifecycle-pass", "approval-gate-bound"],
+        "blocked_on": [],
+        "definition_path": "fixture/units/deliver-alert-v1.unit.yaml.json",
+        "criticality": "critical",
+        "approval_required": true
+      },
+      {
+        "name": "calibrate-threshold",
+        "class": "transform",
+        "contract_version": "0.1.0",
+        "depends_on": ["score-risk"],
+        "status": "specified",
+        "acceptance_pack_version": "",
+        "artifact_digest": "bf5947cf9aa854a621725306bf2c371b9ff0bfe71ad198c49f1c13f932c7bcec",
+        "gate_results": [],
+        "blocked_on": [],
+        "definition_path": "fixture/units/calibrate-threshold-v0.1.unit.yaml.json",
+        "criticality": "standard",
+        "approval_required": false
+      },
+      {
+        "name": "legacy-score-export",
+        "class": "transform",
+        "contract_version": "1.0.0",
+        "depends_on": ["observe-market-fallback"],
+        "status": "invalidated",
+        "acceptance_pack_version": "legacy-score-export-pack/1.0.0",
+        "artifact_digest": "0fae89659aafcbbd18f6c553af23b9bd27b737632e59d78508e7c26957c3cfd9",
+        "gate_results": ["invalidation-recorded", "withdrawal-propagated"],
+        "blocked_on": [],
+        "definition_path": "fixture/units/legacy-score-export-v1.unit.yaml.json",
+        "criticality": "standard",
+        "approval_required": false
+      },
+      {
+        "name": "observe-archive-index",
+        "class": "observation",
+        "contract_version": "1.0.0",
+        "depends_on": [],
+        "status": "published",
+        "acceptance_pack_version": "observe-archive-index-pack/1.0.0",
+        "artifact_digest": "5ce587ee2d9acc85d25ca47148f5f69add4eb96faf46cdf4907ca36ba58b4959",
+        "gate_results": ["acceptance-pack-pass", "boundary-capture-pass"],
+        "blocked_on": [],
+        "definition_path": "fixture/units/observe-archive-index-v1.unit.yaml.json",
+        "criticality": "standard",
+        "approval_required": false
+      }
+    ],
+    "deviations": [
+      {
+        "id": "DEV-LEGACY-EXPORT-WITHDRAWAL-01",
+        "unit": "legacy-score-export@1.0.0",
+        "type": "contract-conflict",
+        "frozen_artifact": "legacy-score-export-plan/1.0.0",
+        "description": "The legacy numeric scale conflicts with the published band contract; the unit remains invalidated.",
+        "status": "closed",
+        "amendment_version": "withdrawn-without-amendment",
+        "impact_set": ["legacy-score-export", "legacy-risk-score"]
+      }
+    ],
+    "next_actions": [
+      {
+        "unit": "calibrate-threshold",
+        "action": "commission acceptance criteria before freezing the experimental threshold contract"
+      }
+    ]
+  }
+}

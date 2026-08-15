@@ -1,0 +1,38 @@
+{
+  "ledger": {
+    "project": {
+      "claim_version": "corpus/1",
+      "assurance_tier": "lightweight",
+      "independence_model": "human-owner",
+      "runner_identity": "runner/1",
+      "orchestration_identity": "orchestration/1",
+      "common_pack_version": "",
+      "current_phase": "corpus",
+      "schema_dialects": ["json-schema/2020-12"],
+      "methodology_events": [
+        {
+          "sequence": 1,
+          "parent_digest": "GENESIS",
+          "event": "adopted-delta",
+          "delta": "system-map/1",
+          "effective_from_release_id": "unreleased"
+        }
+      ]
+    },
+    "releases": [],
+    "units": [],
+    "deviations": [
+      {
+        "id": "DEV-BARE-BINDING",
+        "unit": "unit-a",
+        "type": "plan-gap",
+        "frozen_artifact": "plan/1",
+        "description": "A bare name discards the affected unit version.",
+        "status": "open",
+        "amendment_version": "",
+        "impact_set": []
+      }
+    ],
+    "next_actions": []
+  }
+}

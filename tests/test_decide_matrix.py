@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from vouch_mk2.core import (
@@ -60,7 +62,12 @@ from vouch_mk2.ir.mk2 import DEVIATION_MACHINE, MK2, RELEASE_O_MACHINE, UNIT_MAC
 from vouch_mk2.checks import CheckResult
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
-from vouch_mk2.store import ArtifactKind, digest_of, encode_evidence_event
+from vouch_mk2.store import (
+    ArtifactKind,
+    digest_of,
+    encode_evidence_event,
+    encode_snapshot,
+)
 
 UNIT = MK2.machine(UNIT_MACHINE)
 DEVIATION = MK2.machine(DEVIATION_MACHINE)
@@ -530,3 +537,129 @@ def test_reachable_multi_unit_release_snapshots_pass_standing_checks() -> None:
                 visited[after_key] = depth + 1
                 frontier.append((after, depth + 1))
     assert checked > 500
+
+
+def test_reachable_snapshots_from_seeded_history_pass_standing_checks() -> None:
+    from vouch_mk2.checks import run_checks
+    from vouch_mk2.ir.schema import Verdict
+
+    u_v1_ref = UnitRef(name="u", version="v1")
+    u_v2_ref = UnitRef(name="u", version="v2")
+    historical_u = Unit(
+        name="u",
+        version="v1",
+        status=UnitStatus.SUPERSEDED,
+        acceptance_pack_version="p1",
+    )
+    # SEEDED, NOT REACHABLE: D-9 history enters through migration until a
+    # command exists that can mint the successor version.
+    seed = Snapshot(
+        units=(
+            historical_u,
+            Unit(
+                name="u",
+                version="v2",
+                status=UnitStatus.PUBLISHED,
+                acceptance_pack_version="p2",
+            ),
+            Unit(
+                name="w",
+                version="v1",
+                status=UnitStatus.SPECIFIED,
+                depends_on=("u",),
+            ),
+        ),
+        deviations=(
+            Deviation(
+                deviation_id="d0",
+                deviation_type=DeviationType.PACK_DEFECT,
+                unit=u_v1_ref,
+                status=DeviationStatus.CLOSED,
+                amendment_version="v2",
+                impact_set=("u",),
+            ),
+        ),
+    )
+    criteria = LaunchCriteria(
+        launch_criteria=("healthy",),
+        verification_window="1h",
+        rollback_triggers=("errors",),
+        go_no_go_authority="ops",
+    )
+    refused_history_open = OpenDeviation(
+        deviation_id="d-history-refused",
+        deviation_type=DeviationType.PACK_DEFECT,
+        unit=u_v1_ref,
+    )
+    universe: tuple[Command, ...] = (
+        FreezeAcceptance(name="u", pack_version="p2"),
+        MarkReady(name="u"),
+        StartWork(name="u"),
+        MarkDone(name="u"),
+        Publish(name="u"),
+        Respecify(name="u"),
+        BeginReverify(name="u"),
+        FreezeAcceptance(name="w", pack_version="p-w"),
+        MarkReady(name="w"),
+        StartWork(name="w"),
+        MarkDone(name="w"),
+        Publish(name="w"),
+        Respecify(name="w"),
+        BeginReverify(name="w"),
+        OpenDeviation(
+            deviation_id="d1",
+            deviation_type=DeviationType.PACK_DEFECT,
+            unit=u_v2_ref,
+        ),
+        refused_history_open,
+        AmendDeviation(deviation_id="d1", amendment_version="v3"),
+        RejectDeviation(deviation_id="d1"),
+        CloseDeviation(deviation_id="d1"),
+        PrepareRelease(release_id="r1", includes=("u", "w")),
+        SetReleaseCriteria(release_id="r1", criteria=criteria),
+        StartDeploy(release_id="r1"),
+        StartVerification(release_id="r1"),
+        CompleteRelease(release_id="r1"),
+        RollBack(release_id="r1", trigger="errors"),
+        MarkFailedUnrecovered(release_id="r1", trigger="unrecovered"),
+        RetireRelease(release_id="r1", trigger="retired"),
+    )
+    historical_bytes = encode_snapshot(Snapshot(units=(historical_u,)))
+
+    def key(snapshot: Snapshot) -> bytes:
+        return encode_snapshot(replace(snapshot, revision=0))
+
+    visited = {key(seed)}
+    frontier = [seed]
+    while frontier:
+        snapshot = frontier.pop()
+        report = run_checks(snapshot, artifact_results=PURE_ARTIFACT_RESULTS)
+        assert report.composed() is not Verdict.FAIL
+
+        active_u = tuple(
+            unit
+            for unit in snapshot.units
+            if unit.name == "u" and unit.status is not UnitStatus.SUPERSEDED
+        )
+        assert len(active_u) == 1
+        retained = snapshot.unit_ref(u_v1_ref)
+        assert retained is not None
+        assert (
+            encode_snapshot(Snapshot(units=(retained,))) == historical_bytes
+        )
+
+        refused = decide(snapshot, refused_history_open)
+        assert isinstance(refused, Refused)
+        assert refused.violations[0].code == "transition.illegal"
+
+        for command in universe:
+            decision = decide(snapshot, command)
+            if not isinstance(decision, Accepted):
+                continue
+            after = apply(snapshot, decision.events)
+            after_key = key(after)
+            if after_key not in visited:
+                visited.add(after_key)
+                frontier.append(after)
+
+    assert len(visited) > 1000, "the seeded sweep must actually explore (1,594 states at last calibration), not stall on refusals"

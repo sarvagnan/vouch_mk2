@@ -349,3 +349,61 @@ def test_frozen_event_carries_dor_gate_record() -> None:
     assert isinstance(event, AcceptanceFrozen)
     assert event.gate.transition == "specified->acceptance-frozen"
     assert all(c.verdict is Verdict.PASS for c in event.gate.checks)
+
+
+def test_superseded_records_are_inert_in_amendment_impact() -> None:
+    # D-9: a superseded version's dependency edges connect nothing. Amending an
+    # upstream that only the SUPERSEDED u@v1 depended on must not invalidate the
+    # current u@v2 (which has no such dependency).
+    s = Snapshot(
+        units=(
+            unit("x", UnitStatus.BLOCKED, pack="p"),
+            Unit("u", "v1", UnitStatus.SUPERSEDED, depends_on=("x",), acceptance_pack_version="p1"),
+            Unit("u", "v2", UnitStatus.PUBLISHED, depends_on=(), acceptance_pack_version="p2"),
+        ),
+        deviations=(
+            Deviation("d", DeviationType.CONTRACT_CONFLICT, UnitRef("x", "v1"), DeviationStatus.OPEN),
+        ),
+    )
+    decision = decide(s, AmendDeviation(deviation_id="d", amendment_version="v2"))
+    assert isinstance(decision, Accepted)
+    invalidated = {e.name for e in decision.events if isinstance(e, UnitInvalidated)}
+    assert invalidated == {"x"}
+    after = apply(s, decision.events)
+    current = after.unit("u")
+    assert current is not None and current.version == "v2"
+    assert current.status is UnitStatus.PUBLISHED
+    v1 = after.unit_ref(UnitRef("u", "v1"))
+    assert v1 is not None and v1.status is UnitStatus.SUPERSEDED
+
+
+def test_evidence_cannot_bind_a_superseded_version() -> None:
+    from vouch_mk2.core import EvidenceEvent, EvidenceKind, EvidenceOutcome, RecordEvidence
+
+    s = Snapshot(
+        units=(
+            Unit("u", "v1", UnitStatus.SUPERSEDED, acceptance_pack_version="p1"),
+            Unit("u", "v2", UnitStatus.PUBLISHED, acceptance_pack_version="p2"),
+        )
+    )
+    stale = RecordEvidence(
+        EvidenceEvent(UnitRef("u", "v1"), 1, "GENESIS", EvidenceKind.RED, "pytest",
+                      EvidenceOutcome.TESTS_FAILED, "t1"),
+        "1" * 64,
+    )
+    assert refused_codes(s, stale) == ("evidence.binding-stale",)
+    current = RecordEvidence(
+        EvidenceEvent(UnitRef("u", "v2"), 1, "GENESIS", EvidenceKind.RED, "pytest",
+                      EvidenceOutcome.TESTS_FAILED, "t1"),
+        "1" * 64,
+    )
+    assert isinstance(decide(s, current), Accepted)
+
+
+def test_current_record_fallback_is_order_independent() -> None:
+    a = Unit("u", "v1", UnitStatus.SUPERSEDED, acceptance_pack_version="p")
+    b = Unit("u", "v2", UnitStatus.SUPERSEDED, acceptance_pack_version="p")
+    forward = Snapshot(units=(a, b)).unit("u")
+    backward = Snapshot(units=(b, a)).unit("u")
+    assert forward is not None and backward is not None
+    assert forward.version == backward.version == "v2"

@@ -14,6 +14,7 @@ from vouch_mk2.core import (
     EvidenceHead,
     ReleaseState,
     Snapshot,
+    Unit,
     UnitRef,
     UnitStatus,
 )
@@ -390,6 +391,24 @@ def _mutate_m9(relation: Relation) -> Relation:
     raise WitnessBuildError("real relation lacks an evidence-head seed")
 
 
+def _mutate_m10(relation: Relation) -> Relation:
+    old, snapshot = _first_snapshot(relation, lambda item: bool(item.units))
+    existing = snapshot.units[0]
+    corrupted = replace(
+        snapshot,
+        units=snapshot.units
+        + (
+            Unit(
+                name=existing.name,
+                version=f"{existing.version}-w10",
+                status=UnitStatus.SPECIFIED,
+                depends_on=existing.depends_on,
+            ),
+        ),
+    )
+    return _replace_representative(relation, old, corrupted)
+
+
 WITNESSES: tuple[Witness, ...] = (
     Witness("W1.direct-republication", "M1.no-direct-republication", "Forge invalidated -> published.", _mutate_m1),
     Witness("W2.blocked-published", "M2.published-units-gated", "Attach an open deviation to a published unit.", _mutate_m2),
@@ -400,6 +419,7 @@ WITNESSES: tuple[Witness, ...] = (
     Witness("W7.no-escape", "M7.escape-property", "Remove one active state's protective exits.", _mutate_m7),
     Witness("W8.release-not-withdrawn", "M8.amendment-withdraws-releases", "Keep an amendment-affected release prepared.", _mutate_m8),
     Witness("W9.anchor-rotation", "M9.anchor-monotonic", "Rotate an anchor to an unrelated digest.", _mutate_m9),
+    Witness("W10.second-active-record", "M10.one-active-record-per-name", "Add a second active version for an existing name.", _mutate_m10),
 )
 
 

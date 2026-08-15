@@ -108,7 +108,7 @@ def state_fingerprint(snapshot: Snapshot) -> str:
 
 
 def explore(universe: Universe) -> Relation:
-    initial_snapshot = Snapshot()
+    initial_snapshot = universe.initial
     initial = state_fingerprint(initial_snapshot)
     representatives: dict[str, Snapshot] = {initial: initial_snapshot}
     frontier = [initial]

@@ -312,11 +312,9 @@ def _gate_release_roster_resolves(
 ) -> tuple[Violation, ...]:
     stale: list[str] = []
     for ref in ctx.release.includes:
-        unit = ctx.snapshot.unit(ref.name)
+        unit = ctx.snapshot.unit_ref(ref)
         if unit is None:
             stale.append(f"{ref.label()} (missing)")
-        elif unit.version != ref.version:
-            stale.append(f"{ref.label()} (current {unit.ref().label()})")
     if not stale:
         return ()
     return (
@@ -335,10 +333,10 @@ def _gate_release_completion_units(
 ) -> tuple[Violation, ...]:
     offenders: list[str] = []
     for ref in ctx.release.includes:
-        unit = ctx.snapshot.unit(ref.name)
+        unit = ctx.snapshot.unit_ref(ref)
         # Binding failures belong exclusively to roster-resolves, so one defect
         # produces the one named violation operators need to repair.
-        if unit is None or unit.version != ref.version:
+        if unit is None:
             continue
         reasons: list[str] = []
         if unit.status is not UnitStatus.RELEASE_BOUND:
@@ -384,7 +382,7 @@ def _gate_release_roster_dependency_closed(
     roster = {ref.name for ref in ctx.release.includes}
     missing: set[str] = set()
     for ref in ctx.release.includes:
-        unit = ctx.snapshot.unit(ref.name)
+        unit = ctx.snapshot.unit_ref(ref)
         if unit is not None:
             missing.update(dep for dep in unit.depends_on if dep not in roster)
     if not missing:
@@ -406,7 +404,7 @@ def _gate_release_roster_units_eligible(
     eligible = {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND}
     offenders: list[str] = []
     for ref in ctx.release.includes:
-        unit = ctx.snapshot.unit(ref.name)
+        unit = ctx.snapshot.unit_ref(ref)
         if unit is None:
             continue
         reasons: list[str] = []
@@ -671,7 +669,7 @@ def _decide_prepare_release(snapshot: Snapshot, command: PrepareRelease) -> Deci
     events.extend(
         UnitReleaseBound(name=ref.name)
         for ref in release.includes
-        if (unit := snapshot.unit(ref.name)) is not None
+        if (unit := snapshot.unit_ref(ref)) is not None
         and unit.status is UnitStatus.PUBLISHED
     )
     return Accepted(events=tuple(events))
@@ -737,9 +735,17 @@ def _decide_record_evidence(
     snapshot: Snapshot, command: RecordEvidence
 ) -> Decision:
     event = command.event
-    unit = snapshot.unit(event.unit.name)
-    if unit is None or unit.version != event.unit.version:
-        current = "missing" if unit is None else unit.ref().label()
+    unit = snapshot.unit_ref(event.unit)
+    # Evidence heads are keyed by unit NAME (one chain per unit), so evidence may
+    # bind only the CURRENT record: a superseded version is inert history (D-9)
+    # and recording against it would fold a stale version into the live head.
+    if unit is None or unit.status is UnitStatus.SUPERSEDED:
+        current_unit = snapshot.unit(event.unit.name)
+        current = (
+            "missing"
+            if current_unit is None or current_unit.status is UnitStatus.SUPERSEDED
+            else current_unit.ref().label()
+        )
         return _refuse(
             "evidence.binding-stale",
             f"evidence binds {event.unit.label()!r}; current unit is {current!r}",
@@ -803,7 +809,7 @@ def _roster_snapshot(
         sorted(
             (
                 ref.name,
-                unit.status.value if (unit := snapshot.unit(ref.name)) else "missing",
+                unit.status.value if (unit := snapshot.unit_ref(ref)) else "missing",
             )
             for ref in release.includes
         )
@@ -915,14 +921,15 @@ def _decide_open_deviation(snapshot: Snapshot, command: OpenDeviation) -> Decisi
         return _refuse(
             "deviation.exists", f"deviation {command.deviation_id!r} already exists"
         )
-    unit = snapshot.unit(command.unit.name)
+    unit = snapshot.unit_ref(command.unit)
     if unit is None:
-        return _refuse("unit.unknown", f"unit {command.unit.name!r} does not exist")
-    if unit.version != command.unit.version:
+        current = snapshot.unit(command.unit.name)
+        if current is None:
+            return _refuse("unit.unknown", f"unit {command.unit.name!r} does not exist")
         return _refuse(
             "deviation.binding-stale",
             f"deviation binds {command.unit.label()!r} but the unit is at "
-            f"version {unit.version!r}",
+            f"version {current.version!r}",
         )
     transition = _UNIT_EDGES.get((unit.status.value, command.ir_command))
     if transition is None:
@@ -971,10 +978,15 @@ def _deviation_edge_or_refusal(
 def _amendment_impact(snapshot: Snapshot, origin: str) -> tuple[str, ...]:
     """The reflexive transitive consumer closure of ``origin``, in name order.
 
-    Traversal crosses every declared dependency edge regardless of status;
-    which members actually invalidate is decided by the caller (D-3)."""
+    Traversal crosses every declared dependency edge of ACTIVE records
+    regardless of their status; which members actually invalidate is decided
+    by the caller (D-3). Superseded records are history and inert (D-9): their
+    dependency edges no longer connect anything, so an amendment upstream of a
+    superseded version must not reach the CURRENT version through it."""
     consumers: dict[str, list[str]] = {}
     for unit in snapshot.units:
+        if unit.status is UnitStatus.SUPERSEDED:
+            continue
         for dep in unit.depends_on:
             consumers.setdefault(dep, []).append(unit.name)
     reached = {origin}
@@ -1129,7 +1141,8 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
 
 
 def _with_unit(units: tuple[Unit, ...], name: str, changed: Unit) -> tuple[Unit, ...]:
-    return tuple(changed if unit.name == name else unit for unit in units)
+    del name
+    return tuple(changed if unit.ref() == changed.ref() else unit for unit in units)
 
 
 def _with_deviation(

@@ -39,7 +39,9 @@ _TEMP_WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 # Level-2 bounded decoding (docs/threat-model.md): a planted multi-gigabyte
 # artifact is refused before allocation, not after.
 DEFAULT_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
-GENERATED_FILES = frozenset({"map.json", "vouch-context.md"})
+GENERATED_FILES = frozenset(
+    {"map.json", "migration-report.md", "vouch-context.md"}
+)
 
 
 class Store:

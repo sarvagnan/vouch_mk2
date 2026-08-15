@@ -19,7 +19,7 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
 - [`docs/claim-boundary.md`](docs/claim-boundary.md) — what mk2 proves mechanically
   vs. what is permanently `NOT_CHECKED`.
 
-## Code (Phases 0–8)
+## Code (Phases 0–9)
 
 - `src/vouch_mk2/ir/` — Policy IR schema (frozen dataclasses, structural
   validation), the 0.6.2 lifecycle transcription, and the mk2 tables `decide()`
@@ -36,13 +36,16 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
   chains, anchors, bundles, formal certificates) and exclusion-glob bundle
   inventories.
 - `src/vouch_mk2/formal/` — the model checker: the relation is emitted by
-  executing `decide()` over the core-v1 universe; nine hand-authored invariants
-  with private mutation witnesses; recomputed content-addressed certificates.
+  executing `decide()` over the empty `core-v1` and seeded-history `history-v1`
+  universes; ten hand-authored invariants with private mutation witnesses;
+  recomputed content-addressed certificates bind both relations.
 - `src/vouch_mk2/projections/` — canonical system map, binding next actions,
   status facts, and deterministic agent-context generation.
 - `src/vouch_mk2/cli.py` — thin transports: `vouch-mk2 check`, `vouch-mk2 formal
   [--record]`, `vouch-mk2 generate`, `vouch-mk2 next`, `vouch-mk2 status`, and
   `vouch-mk2 emit-context`.
+- `src/vouch_mk2/migrate.py` — strict Vouch 0.6 decoder, D-8 field mapper,
+  standing-check dry run, complete loss report, and approve-only fresh-store write.
 
 ## Transports (Phase 8)
 
@@ -63,6 +66,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check   # D-1: strict types
 uv run lint-imports    # D-1: Policy IR purity contract
-uv run pytest          # 511 tests: matrices, property BFS, fault rig, formal, transports
-uv run vouch-mk2 formal  # invariants + witness discrimination over core-v1
+uv run pytest          # 544 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run vouch-mk2 formal  # invariants over core-v1 + history-v1; witness discrimination
 ```

@@ -253,3 +253,80 @@ entry is mk2's recorded discrepancy for its own semantics.
   being stable across builds; CI verifies it on the runner, but a zlib/zlib-ng version
   change could alter compressed bytes for identical sources. Revisit (`ZIP_STORED` at
   ~3x size) if a real reproducibility break is ever observed.
+
+## D-8 — vouch-migrate: field mapping from the 0.6 ledger, and what is lossy
+
+**Status:** decided 2026-08-15 (Phase 9).
+
+- **Input** is a 0.6 `ledger.yaml.json` (top-level `{"ledger": {...}}`); the mk2
+  runtime never reads it — only the separate `vouch-migrate` tool does, and mk2 stays
+  free of `_migrate_v0x` accretion (plan §4 Phase 9).
+- **Units:** `name`, `contract_version → version`, `status` (same 11-value vocabulary),
+  `depends_on`, `acceptance_pack_version`. **Dropped by design:** `blocked_on` (mk2
+  derives blocking from deviation records — D-3; the migrator VERIFIES the stored array
+  equals the derived set and reports each divergence as a warning), `class`,
+  `criticality`, `approval_required`, `definition_path`, `artifact_digest`,
+  `gate_results` (unit-definition/map concerns outside the mk2 core snapshot; recorded
+  in the migration report, not silently lost).
+- **Deviations:** `id`, `type`, `unit` (`NAME@VERSION` string → typed `UnitRef`; a bare
+  name is REFUSED — 0.6 kit-3 already refuses ambiguous histories), `status`,
+  `amendment_version`, `impact_set` split into unit names and `release:`-prefixed ids
+  (→ `release_impact_set`, D-3's typed field). Dropped: `description`, `frozen_artifact`.
+- **Releases:** operational archetype maps in full (`id`, `state`, `includes`,
+  criteria fields → `LaunchCriteria`, `closure_record` → `ClosureRecord` with
+  `roster[].{name,status}` → `roster_snapshot`, `bundle_inventory_digest`). **Qualified
+  releases are refused** unless `--drop-qualified` is given, in which case each is
+  reported and omitted — Q is a plan §1 non-goal and mk2 cannot represent it honestly.
+  Dropped: `criteria_digest` (mk2 recomputes), map digests / `frozen_at` /
+  `map_generator_identity` (0.6 map machinery), the `retroactive` closure flag (reported).
+  A 0.6 `invalidated` release maps as-is (same state).
+- **Project block:** `anchor.mode` comes from `.vouch/config.json` if present (else
+  `none`) → snapshot `anchor_mode` (D-4). Everything else (`claim_version`, tier,
+  independence model, runner/orchestration identities, `methodology_events`,
+  `next_actions`) is outside the mk2 core snapshot: `next_actions` are re-derived
+  (never migrated), the rest are carried in the migration report only.
+- **Evidence chains are not migrated** (0.6's chain format is not mk2's
+  content-addressed objects); the report says so per unit. Formal certificates likewise.
+- **Procedure:** parse strictly (unknown ledger fields are warnings, listed) → build a
+  candidate `Snapshot` → run the mk2 decoder round-trip, `run_checks`, and the standing
+  checks on it → print a diff (before/after summary + every warning) → write NOTHING
+  unless `--approve`, in which case a fresh store is initialized and the candidate
+  committed as revision 1. Re-running against an already-migrated target is refused.
+- **DoD target:** the 0.6 repo has no store of its own; "round-trip the 0.6 vouch repo's
+  own ledger" means the kit fixture (`verification-kit/fixture/ledger.yaml.json`) plus
+  the 8-case negative corpus (`corpus-ledger/01`–`08`; the directory's ninth entry is
+  its README), vendored into `tests/data/`. Corpus cases
+  that are illegal in 0.6 must be refused by the migrator, not repaired.
+
+## D-9 — Superseded unit history may share a name; one ACTIVE record per name
+
+**Status:** decided 2026-08-15 (surfaced by Phase 9; user decision).
+
+- **The situation.** Amendment adjudication mints a new contract version: `NAME@1.0.0`
+  is superseded and `NAME@1.1.0` becomes current. 0.6 keeps BOTH records — that is why
+  its deviations bind `NAME@VERSION` (kit-3 made bindings version-exact precisely
+  because a bare name becomes ambiguous once history exists), and why 0.6's fixture
+  ledger contains a superseded `legacy-score-export@1.0.0` with a closed deviation
+  still bound to it. mk2 Phases 1–8 modeled supersession as a terminal status on ONE
+  record and enforced "one record per name" (codec, `Snapshot.unit`, fold), which was
+  correct only because no mk2 command yet mints versions.
+- **Decision.** Adopt the truthful model: a snapshot may hold several records for one
+  name provided **at most one is non-superseded**. Name-keyed lookups
+  (`Snapshot.unit(name)`, `Publish(name)`, gates keyed by name) mean *the current
+  record*, falling back to the newest superseded record only when no active one
+  exists; exact bindings (`Snapshot.unit_ref(NAME@VERSION)` — deviations, rosters,
+  evidence heads) resolve history precisely; the fold replaces by exact ref so a
+  superseded twin is never overwritten. Opening a deviation against a superseded
+  version is refused (no edge from `superseded`), so history is inspectable but inert.
+- **Invariant, enforced three ways:** "at most one non-superseded record per name" is
+  refused by the codec at ingress, FAILed by a standing check at rest, and (this
+  epic) checked as formal invariant M10 with a private witness.
+- **Rejected:** dropping superseded duplicates at migration. It would leave mk2 unable
+  to represent the ordinary outcome of its own amendment protocol, and would dangle
+  every version-exact binding to history — the exact ambiguity kit-3 was built to end.
+- **Reachability caveat, stated plainly:** no `decide()` command mints a new version
+  yet, so a two-version state is currently reachable ONLY through migration. The
+  property tests and the formal universe therefore SEED such a state (they cannot
+  reach it), and that seeding is labelled as such. When amendment-driven
+  re-versioning arrives (a `ReVersion` command is the natural next step), the seeded
+  state becomes reachable and the seed is retired.

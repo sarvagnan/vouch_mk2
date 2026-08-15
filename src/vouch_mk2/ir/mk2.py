@@ -110,6 +110,7 @@ CLAIM_CLOSURE_RECORD = "claim.closure-record"
 CHECK_REGISTRY_COMPLETE = "check.registry-complete"
 CHECK_DEPENDENCIES_EXIST = "check.dependencies-exist"
 CHECK_DEPENDENCY_GRAPH_ACYCLIC = "check.dependency-graph-acyclic"
+CHECK_ONE_ACTIVE_RECORD_PER_NAME = "check.one-active-record-per-name"
 CHECK_DEVIATION_BINDINGS_RESOLVE = "check.deviation-bindings-resolve"
 CHECK_BLOCKED_STATUS_COHERENT = "check.blocked-status-coherent"
 CHECK_PUBLISHED_UNITS_GATED = "check.published-units-gated"
@@ -501,6 +502,11 @@ _OBLIGATIONS = (
         obligation_id=CHECK_DEPENDENCY_GRAPH_ACYCLIC,
         scope=ObligationScope.STANDING_CHECK,
         description="The unit dependency graph contains no cycle.",
+    ),
+    Obligation(
+        obligation_id=CHECK_ONE_ACTIVE_RECORD_PER_NAME,
+        scope=ObligationScope.STANDING_CHECK,
+        description="Every unit name has at most one non-superseded record.",
     ),
     Obligation(
         obligation_id=CHECK_DEVIATION_BINDINGS_RESOLVE,

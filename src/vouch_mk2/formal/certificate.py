@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CHECKER_VERSION = "formal-checker-v1"
+CHECKER_VERSION = "formal-checker-v2"
+
+type CertifiedUniverse = tuple[str, str, int, int]
+type CertifiedInvariant = tuple[str, str, bool]
 
 
 @dataclass(frozen=True, slots=True)
 class FormalCertificate:
-    universe_name: str
     checker_version: str
     tables_digest: str
-    relation_digest: str
-    state_count: int
-    transition_count: int
-    invariants: tuple[tuple[str, bool], ...]
+    universes: tuple[CertifiedUniverse, ...]
+    invariants: tuple[CertifiedInvariant, ...]
     witnesses: tuple[tuple[str, str, bool], ...]

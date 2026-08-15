@@ -197,8 +197,25 @@ class Snapshot:
     formal_certificate_digest: str = ""
 
     def unit(self, name: str) -> Unit | None:
+        """The CURRENT record for ``name`` (D-9): the one non-superseded record
+        if any; otherwise the superseded record with the greatest version
+        string — a defined, tuple-order-independent choice (the codec accepts
+        either order), used only for diagnostics since every lifecycle command
+        refuses a superseded record anyway."""
+        historical: Unit | None = None
         for unit in self.units:
-            if unit.name == name:
+            if unit.name != name:
+                continue
+            if unit.status is not UnitStatus.SUPERSEDED:
+                return unit
+            if historical is None or unit.version > historical.version:
+                historical = unit
+        return historical
+
+    def unit_ref(self, ref: UnitRef) -> Unit | None:
+        """Resolve an exact historical or current ``NAME@VERSION`` binding."""
+        for unit in self.units:
+            if unit.ref() == ref:
                 return unit
         return None
 

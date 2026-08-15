@@ -257,18 +257,33 @@ def build_certificate(run: FormalRun) -> tuple[FormalCertificate, bytes]:
     tables_digest = digest_of(
         ArtifactKind.FORMAL_TABLES, encode_formal_tables(run.tables)
     )
-    relation_digest = digest_of(
-        ArtifactKind.FORMAL_RELATION, encode_formal_relation(run.relation)
-    )
     certificate = FormalCertificate(
-        universe_name=run.universe_name,
         checker_version=CHECKER_VERSION,
         tables_digest=tables_digest,
-        relation_digest=relation_digest,
-        state_count=run.state_count,
-        transition_count=run.transition_count,
+        universes=tuple(
+            sorted(
+                (
+                    universe.universe_name,
+                    digest_of(
+                        ArtifactKind.FORMAL_RELATION,
+                        encode_formal_relation(universe.relation),
+                    ),
+                    universe.state_count,
+                    universe.transition_count,
+                )
+                for universe in run.universes
+            )
+        ),
         invariants=tuple(
-            sorted((verdict.invariant_id, verdict.held) for verdict in run.invariants)
+            sorted(
+                (
+                    universe.universe_name,
+                    verdict.invariant_id,
+                    verdict.held,
+                )
+                for universe in run.universes
+                for verdict in universe.invariants
+            )
         ),
         witnesses=tuple(
             sorted(
@@ -305,37 +320,49 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
 
     fresh = run_formal()
     expected, _data = build_certificate(fresh)
-    if certificate.universe_name != expected.universe_name:
-        return _formal_failure("universe_name mismatch")
     if certificate.checker_version != expected.checker_version:
         return _formal_failure("checker_version mismatch")
     if certificate.tables_digest != expected.tables_digest:
         return _formal_failure("tables_digest mismatch")
-    if certificate.relation_digest != expected.relation_digest:
-        return _formal_failure("relation_digest mismatch")
-    if (
-        certificate.state_count != expected.state_count
-        or certificate.transition_count != expected.transition_count
-    ):
-        return _formal_failure("relation counts mismatch")
+    if certificate.universes != expected.universes:
+        recorded_universes = {row[0]: row for row in certificate.universes}
+        expected_universes = {row[0]: row for row in expected.universes}
+        divergent = sorted(
+            name
+            for name in set(recorded_universes) | set(expected_universes)
+            if recorded_universes.get(name) != expected_universes.get(name)
+        )
+        return _formal_failure(
+            f"formal universe relation mismatch: {divergent!r} disagree with recomputation"
+        )
     if certificate.invariants != expected.invariants:
-        recorded = dict(certificate.invariants)
-        recomputed = dict(expected.invariants)
+        recorded = {
+            (universe_name, invariant_id): held
+            for universe_name, invariant_id, held in certificate.invariants
+        }
+        recomputed = {
+            (universe_name, invariant_id): held
+            for universe_name, invariant_id, held in expected.invariants
+        }
         divergent = tuple(
             sorted(
-                invariant_id
-                for invariant_id in set(recorded) | set(recomputed)
-                if recorded.get(invariant_id) is not recomputed.get(invariant_id)
+                key
+                for key in set(recorded) | set(recomputed)
+                if recorded.get(key) is not recomputed.get(key)
             )
         )
         return _formal_failure(
             f"invariant verdict mismatch: {divergent!r} disagree with recomputation"
         )
     failed_invariant = next(
-        (invariant_id for invariant_id, held in certificate.invariants if not held),
-        "",
+        (
+            (universe_name, invariant_id)
+            for universe_name, invariant_id, held in certificate.invariants
+            if not held
+        ),
+        None,
     )
-    if failed_invariant:
+    if failed_invariant is not None:
         return _formal_failure(f"invariant {failed_invariant!r} did not hold")
     if certificate.witnesses != expected.witnesses:
         return _formal_failure("witness verdict mismatch")
@@ -442,7 +469,10 @@ def record_formal_certificate(store: Store, run: FormalRun | None = None) -> str
         run = run_formal()
     if not passed(run):
         failed_invariants = tuple(
-            verdict.invariant_id for verdict in run.invariants if not verdict.held
+            (universe.universe_name, verdict.invariant_id)
+            for universe in run.universes
+            for verdict in universe.invariants
+            if not verdict.held
         )
         failed_witnesses = tuple(
             verdict.witness_id

@@ -9,15 +9,25 @@ import sys
 from collections.abc import Sequence
 
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
+from vouch_mk2.core import AnchorMode
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
 from vouch_mk2.init import InitError, init_project
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.lock import build_lock, lock_digest, running_lock_bytes
+from vouch_mk2.migrate import (
+    MigrationRefused,
+    _read_config_anchor,
+    apply_migration,
+    plan_migration,
+    read_ledger,
+    render_diff,
+    validate_candidate,
+)
 from vouch_mk2.mcp import run_stdio
 from vouch_mk2.projections import next_actions, status_facts
-from vouch_mk2.store import Store, StoreError, decode_system_map
+from vouch_mk2.store import DecodeError, Store, StoreError, decode_system_map
 from vouch_mk2.verify import (
     emit_context,
     emit_system_map,
@@ -37,6 +47,11 @@ class _Arguments(argparse.Namespace):
     project: str
     lock_path: str | None
     edit_target: str | None
+    ledger: str
+    anchor_mode: str | None
+    config: str | None
+    drop_qualified: bool
+    approve: bool
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -138,6 +153,36 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="edited file or directory; absent reads tool_input.file_path from stdin JSON",
     )
+    migrate = commands.add_parser(
+        "migrate", help="plan or approve a strict Vouch 0.6 ledger migration"
+    )
+    migrate.add_argument("--ledger", required=True, help="0.6 ledger JSON path")
+    migrate.add_argument(
+        "--anchor-mode",
+        choices=("none", "ci"),
+        default=None,
+        help="mk2 anchor mode (overrides --config)",
+    )
+    migrate.add_argument(
+        "--config",
+        default=None,
+        help="optional 0.6 config.json carrying anchor.mode",
+    )
+    migrate.add_argument(
+        "--drop-qualified",
+        action="store_true",
+        help="report and omit unrepresentable qualified releases",
+    )
+    migrate.add_argument(
+        "--approve",
+        action="store_true",
+        help="write the validated candidate to a fresh target/.vouch",
+    )
+    migrate.add_argument(
+        "--target",
+        default=None,
+        help="existing target project directory (required with --approve)",
+    )
     return parser
 
 
@@ -178,13 +223,15 @@ def _present_json(report: CheckReport) -> None:
 
 
 def _present_formal(run: FormalRun) -> None:
-    print(f"states: {run.state_count}")
-    print(f"transitions: {run.transition_count}")
-    print("invariants")
-    for verdict in run.invariants:
-        print(f"{'PASS' if verdict.held else 'FAIL':<5} {verdict.invariant_id}")
-        for violation in verdict.violations:
-            print(f"  {violation}")
+    for universe in run.universes:
+        print(f"universe: {universe.universe_name}")
+        print(f"states: {universe.state_count}")
+        print(f"transitions: {universe.transition_count}")
+        print("invariants")
+        for verdict in universe.invariants:
+            print(f"{'PASS' if verdict.held else 'FAIL':<5} {verdict.invariant_id}")
+            for violation in verdict.violations:
+                print(f"  {violation}")
     print("witnesses")
     for verdict in run.witnesses:
         status = "DISCRIMINATED" if verdict.discriminated else "NOT-DISCRIMINATED"
@@ -229,6 +276,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         project="",
         lock_path=None,
         edit_target=None,
+        ledger="",
+        anchor_mode=None,
+        config=None,
+        drop_qualified=False,
+        approve=False,
     )
     parsed = _parser().parse_args(argv, namespace=namespace)
     if not isinstance(parsed, _Arguments):
@@ -302,6 +354,54 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (HookError, StoreError, OSError) as error:
             print(f"vouch: hook error: {error}")
         return 0
+
+    if parsed.command == "migrate":
+        try:
+            ledger_data = read_regular_nofollow(parsed.ledger, "0.6 ledger")
+            if ledger_data is None:
+                raise StoreError(f"{parsed.ledger}: 0.6 ledger does not exist")
+            document = read_ledger(ledger_data)
+            if parsed.anchor_mode is not None:
+                anchor_mode = AnchorMode(parsed.anchor_mode)
+            elif parsed.config is not None:
+                config_data = read_regular_nofollow(parsed.config, "0.6 config")
+                if config_data is None:
+                    raise StoreError(f"{parsed.config}: 0.6 config does not exist")
+                anchor_mode = _read_config_anchor(config_data)
+            else:
+                anchor_mode = AnchorMode.NONE
+            plan = plan_migration(
+                document,
+                anchor_mode,
+                drop_qualified=parsed.drop_qualified,
+            )
+            validation = validate_candidate(plan.candidate)
+        except DecodeError as error:
+            print(f"vouch-mk2: migration decode error: {error}", file=sys.stderr)
+            return 1
+        except StoreError as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+
+        print(render_diff(plan, validation), end="")
+        failed = any(row.verdict is Verdict.FAIL for row in validation)
+        if plan.refusals:
+            return 1
+        if not parsed.approve:
+            return 1 if failed else 0
+        if parsed.target is None:
+            print("vouch-mk2: migrate --approve requires --target", file=sys.stderr)
+            return 2
+        try:
+            report_path = apply_migration(plan, parsed.target, None)
+        except MigrationRefused as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 1
+        except StoreError as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+        print(report_path)
+        return 1 if failed else 0
 
     if parsed.command == "formal":
         if parsed.record and not parsed.root:

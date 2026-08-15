@@ -30,8 +30,8 @@ def test_documented_check_ids_are_declared_ir_obligations() -> None:
 
 def test_documented_formal_ids_exist_in_catalogs() -> None:
     text = _read((ROOT / "DECISIONS.md", ROOT / "README.md"))
-    documented_invariants = set(re.findall(r"\bM[1-9]\.[a-z-]+", text))
-    documented_witnesses = set(re.findall(r"\bW[1-9]\.[a-z-]+", text))
+    documented_invariants = set(re.findall(r"\bM[1-9][0-9]*\.[a-z-]+", text))
+    documented_witnesses = set(re.findall(r"\bW[1-9][0-9]*\.[a-z-]+", text))
     assert documented_invariants <= {
         invariant.invariant_id for invariant in INVARIANTS
     }

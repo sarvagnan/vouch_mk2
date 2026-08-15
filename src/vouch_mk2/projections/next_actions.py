@@ -122,7 +122,7 @@ def _release_completion_gates_pass(snapshot: Snapshot, release_id: str) -> bool:
     if release is None or release.criteria is None:
         return False
     for ref in release.includes:
-        unit = snapshot.unit(ref.name)
+        unit = snapshot.unit_ref(ref)
         if (
             unit is None
             or unit.version != ref.version

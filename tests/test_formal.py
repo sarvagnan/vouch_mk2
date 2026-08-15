@@ -8,7 +8,14 @@ import pytest
 
 import vouch_mk2.verify as verify_module
 from vouch_mk2.core import Accepted, RecordFormalCertificate, Snapshot, apply, decide
-from vouch_mk2.formal import CORE_V1, FormalRun, passed, run_formal, state_fingerprint
+from vouch_mk2.formal import (
+    CORE_V1,
+    HISTORY_V1,
+    FormalRun,
+    passed,
+    run_formal,
+    state_fingerprint,
+)
 from vouch_mk2.formal.invariants import INVARIANTS
 from vouch_mk2.formal.witnesses import (
     WITNESSES,
@@ -41,23 +48,57 @@ def formal_run() -> FormalRun:
 def test_core_v1_closes_exhaustively_with_stable_counts(
     formal_run: FormalRun,
 ) -> None:
-    assert formal_run.universe_name == CORE_V1.name == "core-v1"
-    assert formal_run.state_count == 96_266
-    assert formal_run.transition_count == 540_210
-    assert len(set(formal_run.relation.states)) == formal_run.state_count
-    assert len(set(formal_run.relation.transitions)) == formal_run.transition_count
+    core = formal_run.universe(CORE_V1.name)
+    assert core.universe_name == CORE_V1.name == "core-v1"
+    assert core.state_count == 96_266
+    assert core.transition_count == 525_474
+    assert len(set(core.relation.states)) == core.state_count
+    assert len(set(core.relation.transitions)) == core.transition_count
     assert passed(formal_run)
-    assert all(verdict.held for verdict in formal_run.invariants)
+    assert all(verdict.held for verdict in core.invariants)
     assert all(verdict.discriminated for verdict in formal_run.witnesses)
 
 
+def test_history_v1_closes_exhaustively_with_stable_counts(
+    formal_run: FormalRun,
+) -> None:
+    history = formal_run.universe(HISTORY_V1.name)
+    assert history.universe_name == HISTORY_V1.name == "history-v1"
+    assert history.state_count == 6_816 > 0
+    assert history.transition_count == 17_554 > 0
+    assert len(set(history.relation.states)) == history.state_count
+    assert len(set(history.relation.transitions)) == history.transition_count
+    assert all(verdict.held for verdict in history.invariants)
+
+
+def test_m10_holds_in_both_universes_and_w10_discriminates(
+    formal_run: FormalRun,
+) -> None:
+    for universe in formal_run.universes:
+        m10 = next(
+            verdict
+            for verdict in universe.invariants
+            if verdict.invariant_id == "M10.one-active-record-per-name"
+        )
+        assert m10.held
+        assert not m10.violations
+    w10 = next(
+        verdict
+        for verdict in formal_run.witnesses
+        if verdict.witness_id == "W10.second-active-record"
+    )
+    assert w10.invariant_id == "M10.one-active-record-per-name"
+    assert w10.discriminated
+
+
 def test_core_v1_has_no_truthful_terminal_states(formal_run: FormalRun) -> None:
+    relation = formal_run.universe(CORE_V1.name).relation
     sources_with_real_exits = {
         source
-        for source, _command, target in formal_run.relation.transitions
+        for source, _command, target in relation.transitions
         if source != target
     }
-    assert sources_with_real_exits == set(formal_run.relation.states)
+    assert sources_with_real_exits == set(relation.states)
 
 
 def test_state_fingerprint_ignores_only_revision() -> None:
@@ -71,9 +112,10 @@ def test_state_fingerprint_ignores_only_revision() -> None:
 def test_every_invariant_has_one_private_discriminating_witness(
     formal_run: FormalRun,
 ) -> None:
-    assert {verdict.invariant_id for verdict in formal_run.invariants} == {
-        invariant.invariant_id for invariant in INVARIANTS
-    }
+    for universe in formal_run.universes:
+        assert {verdict.invariant_id for verdict in universe.invariants} == {
+            invariant.invariant_id for invariant in INVARIANTS
+        }
     assert {verdict.invariant_id for verdict in formal_run.witnesses} == {
         invariant.invariant_id for invariant in INVARIANTS
     }
@@ -103,9 +145,23 @@ def test_formal_artifact_encodings_are_stable_and_certificate_is_strict(
     assert encode_formal_tables(formal_run.tables) == encode_formal_tables(
         formal_run.tables
     )
-    assert encode_formal_relation(formal_run.relation) == encode_formal_relation(
-        formal_run.relation
-    )
+    for universe in formal_run.universes:
+        assert encode_formal_relation(
+            universe.relation
+        ) == encode_formal_relation(universe.relation)
+    assert {row[0] for row in certificate.universes} == {
+        CORE_V1.name,
+        HISTORY_V1.name,
+    }
+    assert {
+        row[0]: row[2:] for row in certificate.universes
+    } == {
+        universe.universe_name: (
+            universe.state_count,
+            universe.transition_count,
+        )
+        for universe in formal_run.universes
+    }
 
     document = json.loads(data)
     assert isinstance(document, dict)
@@ -138,13 +194,43 @@ def test_recorded_certificate_recomputes_and_stale_certificate_fails(
         )
         assert passed_result.verdict is Verdict.PASS
 
+        tampered_universes = tuple(
+            (
+                name,
+                ("0" * 64 if name == HISTORY_V1.name else relation_digest),
+                state_count,
+                transition_count,
+            )
+            for name, relation_digest, state_count, transition_count in (
+                certificate.universes
+            )
+        )
+        tampered_data = encode_formal_certificate(
+            replace(certificate, universes=tampered_universes)
+        )
+        tampered_digest = store.put_object(
+            ArtifactKind.FORMAL_CERTIFICATE, tampered_data
+        )
+        decision = decide(snapshot, RecordFormalCertificate(tampered_digest))
+        assert isinstance(decision, Accepted)
+        tampered_snapshot = apply(snapshot, decision.events)
+        store.commit(tampered_snapshot)
+        tampered_result = next(
+            result
+            for result in run_artifact_checks(store, tampered_snapshot)
+            if result.check_id == mk2.CHECK_FORMAL_CERTIFICATE
+        )
+        assert tampered_result.verdict is Verdict.FAIL
+        assert tampered_result.detail.startswith("formal universe relation mismatch: [")
+        assert "disagree with recomputation" in tampered_result.detail
+
         stale_data = encode_formal_certificate(
             replace(certificate, checker_version="stale-checker")
         )
         stale_digest = store.put_object(ArtifactKind.FORMAL_CERTIFICATE, stale_data)
-        decision = decide(snapshot, RecordFormalCertificate(stale_digest))
+        decision = decide(tampered_snapshot, RecordFormalCertificate(stale_digest))
         assert isinstance(decision, Accepted)
-        store.commit(apply(snapshot, decision.events))
+        store.commit(apply(tampered_snapshot, decision.events))
         stale_result = next(
             result
             for result in run_artifact_checks(store, store.read_snapshot())

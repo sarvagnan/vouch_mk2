@@ -93,22 +93,11 @@ def _dependency_cycle(
 
 
 def check_dependency_graph_acyclic(snapshot: Snapshot) -> CheckResult:
-    # Detect duplicate names locally rather than silently collapsing them into
-    # a last-wins dict: this check must never go vacuous if a second ingress
-    # ever bypasses the codec's duplicate refusal.
-    names: set[str] = set()
-    duplicates: set[str] = set()
-    for unit in snapshot.units:
-        if unit.name in names:
-            duplicates.add(unit.name)
-        names.add(unit.name)
-    if duplicates:
-        return CheckResult(
-            check_id=mk2.CHECK_DEPENDENCY_GRAPH_ACYCLIC,
-            verdict=Verdict.FAIL,
-            detail=f"duplicate unit names: {tuple(sorted(duplicates))!r}",
-        )
-    graph = {unit.name: unit.depends_on for unit in snapshot.units}
+    graph = {
+        unit.name: unit.depends_on
+        for unit in snapshot.units
+        if unit.status is not UnitStatus.SUPERSEDED
+    }
     cycle = _dependency_cycle(graph)
     return CheckResult(
         check_id=mk2.CHECK_DEPENDENCY_GRAPH_ACYCLIC,
@@ -117,25 +106,37 @@ def check_dependency_graph_acyclic(snapshot: Snapshot) -> CheckResult:
     )
 
 
+def check_one_active_record_per_name(snapshot: Snapshot) -> CheckResult:
+    names: set[str] = set()
+    duplicates: set[str] = set()
+    for unit in snapshot.units:
+        if unit.status is UnitStatus.SUPERSEDED:
+            continue
+        if unit.name in names:
+            duplicates.add(unit.name)
+        names.add(unit.name)
+    return CheckResult(
+        check_id=mk2.CHECK_ONE_ACTIVE_RECORD_PER_NAME,
+        verdict=Verdict.PASS if not duplicates else Verdict.FAIL,
+        detail=(
+            ""
+            if not duplicates
+            else f"duplicate unit names (active): {tuple(sorted(duplicates))!r}"
+        ),
+    )
+
+
 def check_deviation_bindings_resolve(snapshot: Snapshot) -> CheckResult:
     dangling: list[str] = []
-    stale: list[str] = []
     for deviation in snapshot.deviations:
-        unit = snapshot.unit(deviation.unit.name)
+        unit = snapshot.unit_ref(deviation.unit)
         if unit is None:
             dangling.append(
                 f"{deviation.deviation_id}:{deviation.unit.label()}"
             )
-        elif unit.version != deviation.unit.version:
-            stale.append(
-                f"{deviation.deviation_id}:{deviation.unit.label()}"
-                f" (current {unit.ref().label()})"
-            )
     parts: list[str] = []
     if dangling:
         parts.append(f"dangling bindings: {tuple(sorted(dangling))!r}")
-    if stale:
-        parts.append(f"stale bindings: {tuple(sorted(stale))!r}")
     return CheckResult(
         check_id=mk2.CHECK_DEVIATION_BINDINGS_RESOLVE,
         verdict=Verdict.PASS if not parts else Verdict.FAIL,
@@ -303,15 +304,10 @@ def check_release_rosters_resolve(snapshot: Snapshot) -> CheckResult:
         if release.state.value not in audited:
             continue
         for ref in release.includes:
-            unit = snapshot.unit(ref.name)
+            unit = snapshot.unit_ref(ref)
             if unit is None:
                 offenders.append(
                     f"release {release.release_id!r}: {ref.label()} is missing"
-                )
-            elif unit.version != ref.version:
-                offenders.append(
-                    f"release {release.release_id!r}: {ref.label()} is stale "
-                    f"(current {unit.ref().label()})"
                 )
     return CheckResult(
         check_id=mk2.CHECK_RELEASE_ROSTERS_RESOLVE,

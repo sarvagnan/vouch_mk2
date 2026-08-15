@@ -99,16 +99,21 @@ def _report_object(report: CheckReport) -> dict[str, object]:
 
 def _formal_object(run: FormalRun) -> dict[str, object]:
     return {
-        "universe_name": run.universe_name,
-        "state_count": run.state_count,
-        "transition_count": run.transition_count,
-        "invariants": [
+        "universes": [
             {
-                "invariant_id": verdict.invariant_id,
-                "held": verdict.held,
-                "violations": list(verdict.violations),
+                "universe_name": universe.universe_name,
+                "state_count": universe.state_count,
+                "transition_count": universe.transition_count,
+                "invariants": [
+                    {
+                        "invariant_id": verdict.invariant_id,
+                        "held": verdict.held,
+                        "violations": list(verdict.violations),
+                    }
+                    for verdict in universe.invariants
+                ],
             }
-            for verdict in run.invariants
+            for universe in run.universes
         ],
         "witnesses": [
             {
@@ -365,4 +370,3 @@ def run_stdio(root: str) -> None:
 
 
 __all__ = ["run_stdio", "serve"]
-

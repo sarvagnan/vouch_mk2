@@ -204,14 +204,13 @@ def encode_formal_certificate(certificate: FormalCertificate) -> bytes:
         {
             "checker_version": certificate.checker_version,
             "invariants": [
-                [invariant_id, held]
-                for invariant_id, held in sorted(certificate.invariants)
+                [universe_name, invariant_id, held]
+                for universe_name, invariant_id, held in sorted(
+                    certificate.invariants
+                )
             ],
-            "relation_digest": certificate.relation_digest,
-            "state_count": certificate.state_count,
             "tables_digest": certificate.tables_digest,
-            "transition_count": certificate.transition_count,
-            "universe_name": certificate.universe_name,
+            "universes": [list(universe) for universe in sorted(certificate.universes)],
             "witnesses": [
                 [witness_id, invariant_id, discriminated]
                 for witness_id, invariant_id, discriminated in sorted(
@@ -469,12 +468,9 @@ _INVENTORY_ENTRY_FIELDS = frozenset({"path", "digest"})
 _BUNDLE_INVENTORY_FIELDS = frozenset({"entries", "exclusions"})
 _FORMAL_CERTIFICATE_FIELDS = frozenset(
     {
-        "universe_name",
         "checker_version",
         "tables_digest",
-        "relation_digest",
-        "state_count",
-        "transition_count",
+        "universes",
         "invariants",
         "witnesses",
     }
@@ -800,22 +796,37 @@ def decode_formal_certificate(data: bytes) -> FormalCertificate:
         "",
         _FORMAL_CERTIFICATE_FIELDS,
     )
-    state_count = _integer(obj["state_count"], "state_count")
-    transition_count = _integer(obj["transition_count"], "transition_count")
-    if state_count < 0:
-        raise DecodeError("state_count: must be non-negative")
-    if transition_count < 0:
-        raise DecodeError("transition_count: must be non-negative")
-    invariants: list[tuple[str, bool]] = []
+    universes: list[tuple[str, str, int, int]] = []
+    for index, raw in enumerate(_array(obj["universes"], "universes")):
+        path = f"universes[{index}]"
+        row = _array(raw, path)
+        if len(row) != 4:
+            raise DecodeError(f"{path}: expected four-item array")
+        state_count = _integer(row[2], f"{path}[2]")
+        transition_count = _integer(row[3], f"{path}[3]")
+        if state_count < 0:
+            raise DecodeError(f"{path}[2]: must be non-negative")
+        if transition_count < 0:
+            raise DecodeError(f"{path}[3]: must be non-negative")
+        universes.append(
+            (
+                _string(row[0], f"{path}[0]"),
+                _digest(row[1], f"{path}[1]"),
+                state_count,
+                transition_count,
+            )
+        )
+    invariants: list[tuple[str, str, bool]] = []
     for index, raw in enumerate(_array(obj["invariants"], "invariants")):
         path = f"invariants[{index}]"
-        pair = _array(raw, path)
-        if len(pair) != 2:
-            raise DecodeError(f"{path}: expected two-item array")
+        triple = _array(raw, path)
+        if len(triple) != 3:
+            raise DecodeError(f"{path}: expected three-item array")
         invariants.append(
             (
-                _string(pair[0], f"{path}[0]"),
-                _boolean(pair[1], f"{path}[1]"),
+                _string(triple[0], f"{path}[0]"),
+                _string(triple[1], f"{path}[1]"),
+                _boolean(triple[2], f"{path}[2]"),
             )
         )
     witnesses: list[tuple[str, str, bool]] = []
@@ -832,12 +843,9 @@ def decode_formal_certificate(data: bytes) -> FormalCertificate:
             )
         )
     certificate = FormalCertificate(
-        universe_name=_string(obj["universe_name"], "universe_name"),
         checker_version=_string(obj["checker_version"], "checker_version"),
         tables_digest=_digest(obj["tables_digest"], "tables_digest"),
-        relation_digest=_digest(obj["relation_digest"], "relation_digest"),
-        state_count=state_count,
-        transition_count=transition_count,
+        universes=tuple(universes),
         invariants=tuple(invariants),
         witnesses=tuple(witnesses),
     )
@@ -860,11 +868,22 @@ def decode_snapshot(data: bytes) -> Snapshot:
         _decode_unit(item, f"units[{index}]")
         for index, item in enumerate(_array(obj["units"], "units"))
     )
-    seen_units: set[str] = set()
+    seen_refs: set[tuple[str, str]] = set()
+    active_names: set[str] = set()
     for index, unit in enumerate(units):
-        if unit.name in seen_units:
-            raise DecodeError(f"units[{index}].name: duplicate unit name {unit.name!r}")
-        seen_units.add(unit.name)
+        key = (unit.name, unit.version)
+        if key in seen_refs:
+            raise DecodeError(
+                f"units[{index}].name: duplicate unit binding "
+                f"{unit.ref().label()!r}"
+            )
+        seen_refs.add(key)
+        if unit.status is not UnitStatus.SUPERSEDED:
+            if unit.name in active_names:
+                raise DecodeError(
+                    f"units[{index}].name: duplicate active unit name {unit.name!r}"
+                )
+            active_names.add(unit.name)
 
     deviations = tuple(
         _decode_deviation(item, f"deviations[{index}]")
@@ -1123,7 +1142,19 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
             _array(obj["next_actions"], "map.next_actions")
         )
     )
-    _require_unique(tuple(unit.name for unit in units), "map.units", "unit name")
+    # D-9: superseded history may share a name; the map mirrors the snapshot's
+    # own uniqueness rules — exact NAME@VERSION unique, and at most one ACTIVE
+    # record per name.
+    _require_unique(
+        tuple(f"{unit.name}@{unit.version}" for unit in units),
+        "map.units",
+        "unit binding",
+    )
+    _require_unique(
+        tuple(unit.name for unit in units if unit.status != UnitStatus.SUPERSEDED.value),
+        "map.units",
+        "active unit name",
+    )
     _require_unique(
         tuple(deviation.deviation_id for deviation in deviations),
         "map.deviations",

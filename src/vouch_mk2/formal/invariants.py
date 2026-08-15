@@ -35,7 +35,10 @@ def _no_direct_republication(relation: Relation) -> tuple[str, ...]:
         before = representatives[source]
         after = representatives[target]
         for unit in before.units:
-            changed = after.unit(unit.name)
+            # Track the SAME record across the transition by exact ref (D-9):
+            # a re-version that supersedes invalidated u@v1 and publishes u@v2
+            # is not u@v1 being republished.
+            changed = after.unit_ref(unit.ref())
             if (
                 changed is not None
                 and unit.status is UnitStatus.INVALIDATED
@@ -79,7 +82,7 @@ def _succeeded_entry_valid(relation: Relation) -> tuple[str, ...]:
                 continue
             bad: list[str] = []
             for ref in prior.includes:
-                unit = before.unit(ref.name)
+                unit = before.unit_ref(ref)
                 if unit is None:
                     bad.append(f"{ref.name}: missing")
                 elif (
@@ -302,6 +305,39 @@ def _anchor_monotonic(relation: Relation) -> tuple[str, ...]:
     return tuple(violations)
 
 
+def _one_active_record_per_name(relation: Relation) -> tuple[str, ...]:
+    """mk2 M10, defined by DECISIONS.md D-9."""
+    representatives = _representatives(relation)
+    violations: list[str] = []
+    for fingerprint, snapshot in relation.representatives:
+        active_by_name: dict[str, int] = {}
+        for unit in snapshot.units:
+            if unit.status is UnitStatus.SUPERSEDED:
+                continue
+            active_by_name[unit.name] = active_by_name.get(unit.name, 0) + 1
+        duplicates = tuple(
+            sorted(name for name, count in active_by_name.items() if count > 1)
+        )
+        if duplicates:
+            violations.append(
+                f"{fingerprint}: multiple active records for names {duplicates!r}"
+            )
+
+    for source, command, target in relation.transitions:
+        before = representatives[source]
+        after = representatives[target]
+        for historical in before.units:
+            if historical.status is not UnitStatus.SUPERSEDED:
+                continue
+            current = after.unit_ref(historical.ref())
+            if current != historical:
+                violations.append(
+                    f"{command}: superseded record {historical.ref().label()!r} "
+                    "changed or disappeared"
+                )
+    return tuple(violations)
+
+
 INVARIANTS: tuple[Invariant, ...] = (
     Invariant(
         "M1.no-direct-republication",
@@ -347,5 +383,10 @@ INVARIANTS: tuple[Invariant, ...] = (
         "M9.anchor-monotonic",
         "mk2 D-4: evidence anchors advance monotonically to a chain head.",
         _anchor_monotonic,
+    ),
+    Invariant(
+        "M10.one-active-record-per-name",
+        "mk2 D-9: at most one active record exists per name and history is inert.",
+        _one_active_record_per_name,
     ),
 )

@@ -266,7 +266,7 @@ def test_cli_formal_reports_closed_relation_and_discriminators(
     assert main(["formal", "--record", "--root", str(root)]) == 0
     output = capsys.readouterr().out
     assert "states: 96266" in output
-    assert "transitions: 540210" in output
+    assert "transitions: 525474" in output
     assert "PASS  M1.no-direct-republication" in output
     assert "PASS  M9.anchor-monotonic" in output
     assert "DISCRIMINATED     W1.direct-republication" in output
