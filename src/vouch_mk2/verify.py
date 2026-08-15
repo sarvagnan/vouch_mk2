@@ -6,6 +6,9 @@ This CI/verify layer loads the claimed bytes and proves their content addressing
 
 from __future__ import annotations
 
+import os
+import secrets
+import stat
 from dataclasses import dataclass
 from typing import assert_never
 
@@ -26,6 +29,7 @@ from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
+from vouch_mk2.projections import agent_context, system_map
 from vouch_mk2.store import (
     ArtifactKind,
     Store,
@@ -33,11 +37,14 @@ from vouch_mk2.store import (
     decode_bundle_inventory,
     decode_evidence_event,
     decode_formal_certificate,
+    decode_system_map,
     digest_of,
     encode_evidence_event,
     encode_formal_certificate,
     encode_formal_relation,
     encode_formal_tables,
+    encode_snapshot,
+    encode_system_map,
 )
 
 
@@ -347,6 +354,31 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
     return CheckResult(mk2.CHECK_FORMAL_CERTIFICATE, Verdict.PASS, "")
 
 
+def _check_map_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
+    committed = store.read_generated("map.json")
+    if committed is None:
+        return CheckResult(mk2.CHECK_MAP_FRESHNESS, Verdict.PASS, "")
+    expected = encode_system_map(
+        system_map(snapshot),
+        digest_of(ArtifactKind.STATE, encode_snapshot(snapshot)),
+    )
+    if committed == expected:
+        return CheckResult(mk2.CHECK_MAP_FRESHNESS, Verdict.PASS, "")
+    try:
+        decode_system_map(committed)
+    except StoreError as error:
+        return CheckResult(
+            mk2.CHECK_MAP_FRESHNESS,
+            Verdict.FAIL,
+            f"map.json is undecodable: {error}",
+        )
+    return CheckResult(
+        mk2.CHECK_MAP_FRESHNESS,
+        Verdict.FAIL,
+        "map.json is stale: regenerate with `vouch-mk2 generate`",
+    )
+
+
 def run_artifact_checks(store: Store, snapshot: Snapshot) -> tuple[CheckResult, ...]:
     """Run all IR-declared artifact checks, reusing one parent walk per head."""
     walks = tuple(_walk_chain(store, head) for head in snapshot.evidence_heads)
@@ -357,10 +389,93 @@ def run_artifact_checks(store: Store, snapshot: Snapshot) -> tuple[CheckResult, 
                 _check_evidence_anchors(snapshot, walks),
                 _check_bundle_inventories(store, snapshot),
                 _check_formal_certificate(store, snapshot),
+                _check_map_freshness(store, snapshot),
             ),
             key=lambda result: result.check_id,
         )
     )
+
+
+def emit_system_map(store: Store) -> bytes:
+    """Read one snapshot, emit its canonical map, and return the written bytes."""
+    snapshot = store.read_snapshot()
+    data = encode_system_map(
+        system_map(snapshot),
+        digest_of(ArtifactKind.STATE, encode_snapshot(snapshot)),
+    )
+    store.write_generated("map.json", data)
+    return data
+
+
+def _read_target_nofollow(path: str) -> bytes | None:
+    """Read a caller-supplied target without following symlinks.
+
+    A symlinked target (dangling or not) is refused: writing "the target" would
+    otherwise create or overwrite the link's referent — a path the caller never
+    named. None means the target is genuinely absent."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise StoreError(f"{path}: cannot inspect context target: {error}") from error
+    if stat.S_ISLNK(info.st_mode):
+        raise StoreError(f"{path}: symlinked context target refused")
+    if not stat.S_ISREG(info.st_mode):
+        raise StoreError(f"{path}: context target is not a regular file")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        raise StoreError(f"{path}: cannot read context target: {error}") from error
+    try:
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            return stream.read()
+    finally:
+        os.close(fd)
+
+
+def _write_chosen_path(path: str, data: bytes) -> None:
+    """Write via a same-directory temp + os.replace so a partial file is never
+    visible under the destination name, and the destination is never opened
+    for writing through a link (replace rebinds the name)."""
+    directory = os.path.dirname(path) or "."
+    temp = os.path.join(directory, f".{os.path.basename(path)}.{secrets.token_hex(8)}.tmp")
+    try:
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    except OSError as error:
+        raise StoreError(f"{path}: cannot write generated context: {error}") from error
+    try:
+        try:
+            with os.fdopen(fd, "wb", closefd=False) as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temp, path)
+    except OSError as error:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        raise StoreError(f"{path}: cannot write generated context: {error}") from error
+
+
+def emit_context(store: Store, target: str | None) -> str:
+    """Emit store context and safely suggest changes to an optional caller path.
+
+    D-6 sidecar pattern: an existing target whose bytes differ is NEVER touched;
+    the emission goes to ``<target>.vouch-suggested``. Symlinked targets are
+    refused rather than followed."""
+    snapshot = store.read_snapshot()
+    data = agent_context(snapshot).encode("utf-8")
+    store.write_generated("vouch-context.md", data)
+    if target is None:
+        return store.generated_path("vouch-context.md")
+    current = _read_target_nofollow(target)
+    destination = target if current is None or current == data else target + ".vouch-suggested"
+    _write_chosen_path(destination, data)
+    return destination
 
 
 def record_evidence(store: Store, event: EvidenceEvent) -> str:

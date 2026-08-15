@@ -39,6 +39,7 @@ _TEMP_WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 # Level-2 bounded decoding (docs/threat-model.md): a planted multi-gigabyte
 # artifact is refused before allocation, not after.
 DEFAULT_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+GENERATED_FILES = frozenset({"map.json", "vouch-context.md"})
 
 
 class Store:
@@ -55,8 +56,9 @@ class Store:
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
     ) -> None:
         self._require_platform_capabilities()
+        self._root_path = os.path.abspath(root)
         try:
-            self._root_fd = os.open(os.path.abspath(root), _ROOT_FLAGS)
+            self._root_fd = os.open(self._root_path, _ROOT_FLAGS)
         except OSError as error:
             raise StoreError(f"root: cannot open store directory: {error}") from error
         self._on_step = on_step
@@ -191,7 +193,10 @@ class Store:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
             for name in os.listdir(self._root_fd):
-                if name.startswith(".state-") and name.endswith(".tmp"):
+                if (
+                    name.startswith(".state-")
+                    or name.startswith(".generated-")
+                ) and name.endswith(".tmp"):
                     self._unlink_if_present(name, self._root_fd)
             objects_fd = self._open_objects_directory()
             try:
@@ -262,6 +267,67 @@ class Store:
         return decode_snapshot(
             self._read_file(self._root_fd, "state.json", "state.json")
         )
+
+    @staticmethod
+    def _validate_generated_name(name: str) -> None:
+        if name not in GENERATED_FILES:
+            raise StoreError(f"generated file {name!r} is not allowlisted")
+
+    def generated_path(self, name: str) -> str:
+        """Return the caller-visible absolute path of one allowlisted output."""
+        self._validate_generated_name(name)
+        return os.path.join(self._root_path, name)
+
+    def read_generated(self, name: str) -> bytes | None:
+        """Read one optional allowlisted generated file, refusing symlinks."""
+        self._validate_generated_name(name)
+        try:
+            return self._read_file(self._root_fd, name, name)
+        except IntegrityError as error:
+            if self._is_missing(error):
+                return None
+            raise
+
+    def write_generated(self, name: str, data: bytes) -> None:
+        """Atomically replace one allowlisted generated file."""
+        self._validate_generated_name(name)
+        temp_name = f".generated-{secrets.token_hex(16)}.tmp"
+        temp_exists = False
+        try:
+            try:
+                temp_fd = os.open(
+                    temp_name,
+                    _TEMP_WRITE_FLAGS,
+                    0o600,
+                    dir_fd=self._root_fd,
+                )
+            except OSError as error:
+                raise StoreError(
+                    f"{temp_name}: cannot create generated-file temp: {error}"
+                ) from error
+            temp_exists = True
+            try:
+                self._write_all(temp_fd, data)
+                os.fsync(temp_fd)
+            finally:
+                os.close(temp_fd)
+            try:
+                os.replace(
+                    temp_name,
+                    name,
+                    src_dir_fd=self._root_fd,
+                    dst_dir_fd=self._root_fd,
+                )
+            except (TypeError, NotImplementedError) as error:
+                raise StoreError(
+                    "platform: descriptor-relative replace is unavailable; "
+                    "refusing a path-based fallback"
+                ) from error
+            temp_exists = False
+            os.fsync(self._root_fd)
+        finally:
+            if temp_exists:
+                self._unlink_if_present(temp_name, self._root_fd)
 
     @staticmethod
     def _validate_digest(digest: str) -> None:

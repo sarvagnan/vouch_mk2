@@ -127,6 +127,7 @@ CHECK_EVIDENCE_CHAINS = "check.evidence-chains"
 CHECK_EVIDENCE_ANCHORS = "check.evidence-anchors"
 CHECK_BUNDLE_INVENTORIES = "check.bundle-inventories"
 CHECK_FORMAL_CERTIFICATE = "check.formal-certificate"
+CHECK_MAP_FRESHNESS = "check.map-freshness"
 
 # Permanently NOT_CHECKED organizational claims (docs/claim-boundary.md).
 ORG_ACCEPTANCE_OWNERSHIP = "org.acceptance-ownership"
@@ -575,6 +576,11 @@ _OBLIGATIONS = (
         description=(
             "A recorded formal certificate matches a fresh exhaustive run."
         ),
+    ),
+    Obligation(
+        obligation_id=CHECK_MAP_FRESHNESS,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description="A committed system map exactly matches the authoritative snapshot.",
     ),
     Obligation(
         obligation_id=ORG_ACCEPTANCE_OWNERSHIP,

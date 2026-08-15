@@ -174,7 +174,7 @@ def test_core_enums_conform_to_ir() -> None:
     )
 
 
-def test_artifact_obligations_are_exactly_four_and_never_gates() -> None:
+def test_artifact_obligations_are_exactly_five_and_never_gates() -> None:
     artifact_ids = {
         obligation.obligation_id
         for obligation in MK2.obligations
@@ -185,6 +185,7 @@ def test_artifact_obligations_are_exactly_four_and_never_gates() -> None:
         "check.evidence-anchors",
         "check.bundle-inventories",
         "check.formal-certificate",
+        "check.map-freshness",
     }
     bound = {
         gate

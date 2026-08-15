@@ -161,6 +161,32 @@ deviations", so an operational hold must be expressed as a typed deviation (usua
   witness verdicts; `vouch-mk2 check` re-runs the exploration and compares — a
   recorded certificate that no longer matches the source is a FAIL, not a stale pass.
 
+## D-6 — Projections: pure, allowlisted on disk, freshness-checked, docs bound
+
+**Status:** decided 2026-08-14 (Phase 7).
+
+- **Projections are pure functions of the snapshot and never transaction
+  participants** (plan §1). The `projections` package joins both purity contracts;
+  emission to disk is transport work in the store/CLI layer.
+- **Generated files live in the store root under a closed allowlist** (`map.json`,
+  `vouch-context.md`), written atomically with the store's descriptor-relative
+  discipline. No caller-supplied generated-file paths exist — the 0.6 scaffold
+  ownership-manifest machinery is unnecessary when the name set is closed.
+- **Freshness is an artifact check, opt-in by presence.** A committed `map.json` is
+  regenerated into memory and byte-compared on every `vouch-mk2 check`; a mismatch
+  is a FAIL naming the file, never a repaired or rewritten commit. An absent map is
+  PASS (generating is opt-in until the first-release DoD requires it). Next actions
+  and status facts ride inside the map document, so their freshness is the map's.
+- **Agent-context emission keeps 0.6's suggestion-sidecar pattern** (it worked): the
+  generated context targets a caller path only via `--target`; an existing,
+  differing target is never overwritten — the emission goes to
+  `<target>.vouch-suggested` instead.
+- **mk2's docs bind their cited mechanical facts via tests** (0.6's `doc_binding.py`
+  lesson, applied from the start): check ids, invariant/witness ids, command labels,
+  and stated counts appearing in README/DECISIONS/docs must exist in (or equal) the
+  artifacts they cite, enforced by a doc-binding test — a document stating a fact the
+  code no longer backs fails CI.
+
 The Phase 0 transcription (`ir/vouch_06.py`) keeps the prose-faithful reading, since
 0.6's own precedence rule gives prose authority absent a recorded discrepancy; this
 entry is mk2's recorded discrepancy for its own semantics.

@@ -172,6 +172,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_EVIDENCE_ANCHORS,
         mk2.CHECK_BUNDLE_INVENTORIES,
         mk2.CHECK_FORMAL_CERTIFICATE,
+        mk2.CHECK_MAP_FRESHNESS,
     ):
         assert check_id in text
     assert main(["check", "--ci", "--json", "--root", str(root)]) == 0
@@ -183,7 +184,52 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_EVIDENCE_ANCHORS,
         mk2.CHECK_BUNDLE_INVENTORIES,
         mk2.CHECK_FORMAL_CERTIFICATE,
+        mk2.CHECK_MAP_FRESHNESS,
     } <= ids
+
+
+def test_cli_projection_commands_and_generate_then_check(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    root = tmp_path / "store"
+    init_store(root)
+
+    assert main(["generate", "--root", str(root)]) == 0
+    generated = capsys.readouterr().out
+    assert "map.json written (source state " in generated
+    assert (root / "map.json").is_file()
+
+    assert main(["check", "--ci", "--root", str(root)]) == 0
+    assert mk2.CHECK_MAP_FRESHNESS in capsys.readouterr().out
+
+    assert main(["next", "--root", str(root)]) == 0
+    assert capsys.readouterr().out == "no next actions\n"
+
+    assert main(["status", "--root", str(root)]) == 0
+    status = capsys.readouterr().out
+    assert "unit_counts: \n" in status
+    assert "next_action_count: 0\n" in status
+
+    assert main(["emit-context", "--root", str(root)]) == 0
+    written = Path(capsys.readouterr().out.strip())
+    assert written == root / "vouch-context.md"
+    assert written.is_file()
+
+
+def test_cli_emit_context_uses_suggestion_sidecar(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
+    root = tmp_path / "store"
+    target = tmp_path / "AGENTS.md"
+    init_store(root)
+    target.write_text("human context\n", encoding="utf-8")
+    assert main(
+        ["emit-context", "--root", str(root), "--target", str(target)]
+    ) == 0
+    written = Path(capsys.readouterr().out.strip())
+    assert written == Path(str(target) + ".vouch-suggested")
+    assert target.read_text(encoding="utf-8") == "human context\n"
+    assert written.is_file()
 
 
 def test_cli_stagnant_ci_anchor_is_not_checked_and_exits_one(

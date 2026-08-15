@@ -35,6 +35,14 @@ from vouch_mk2.core.model import (
 )
 from vouch_mk2.formal.certificate import FormalCertificate
 from vouch_mk2.formal.explore import EmittedTables, Relation
+from vouch_mk2.projections.next_actions import NextAction
+from vouch_mk2.projections.status_facts import StatusFacts
+from vouch_mk2.projections.system_map import (
+    SystemMap,
+    SystemMapDeviation,
+    SystemMapRelease,
+    SystemMapUnit,
+)
 from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
@@ -214,6 +222,127 @@ def encode_formal_certificate(certificate: FormalCertificate) -> bytes:
     )
 
 
+def _criteria_object(criteria: LaunchCriteria | None) -> object:
+    if criteria is None:
+        return None
+    return {
+        "go_no_go_authority": criteria.go_no_go_authority,
+        "launch_criteria": list(criteria.launch_criteria),
+        "rollback_triggers": list(criteria.rollback_triggers),
+        "verification_window": criteria.verification_window,
+    }
+
+
+def _closure_object(closure: ClosureRecord | None) -> object:
+    if closure is None:
+        return None
+    return {
+        "no_completion_claim": closure.no_completion_claim,
+        "observations": list(closure.observations),
+        "roster_snapshot": [list(row) for row in closure.roster_snapshot],
+        "trigger": closure.trigger,
+        "trigger_kind": closure.trigger_kind.value,
+    }
+
+
+def _count_objects(rows: tuple[tuple[str, int], ...]) -> list[object]:
+    return [[status, count] for status, count in rows]
+
+
+def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
+    """Encode a complete map and the exact state digest it projects."""
+    if len(source_state_digest) != 64 or any(
+        character not in "0123456789abcdef" for character in source_state_digest
+    ):
+        raise StoreError(
+            "source_state_digest: expected 64 lowercase hexadecimal characters"
+        )
+    document = {
+        "map_format": 1,
+        "source_state_digest": source_state_digest,
+        "map": {
+            "anchor_mode": map.anchor_mode,
+            "deviations": [
+                {
+                    "amendment_version": deviation.amendment_version,
+                    "deviation_id": deviation.deviation_id,
+                    "deviation_type": deviation.deviation_type,
+                    "impact_set": list(deviation.impact_set),
+                    "release_impact_set": list(deviation.release_impact_set),
+                    "status": deviation.status,
+                    "unit": {
+                        "name": deviation.unit.name,
+                        "version": deviation.unit.version,
+                    },
+                }
+                for deviation in map.deviations
+            ],
+            "evidence_heads": [
+                {
+                    "anchored": head.anchored,
+                    "head": head.head,
+                    "head_sequence": head.head_sequence,
+                    "unit_name": head.unit_name,
+                }
+                for head in map.evidence_heads
+            ],
+            "formal_certificate_digest": map.formal_certificate_digest,
+            "next_actions": [
+                {
+                    "command": action.command,
+                    "reason": action.reason,
+                    "subject_id": action.subject_id,
+                    "subject_kind": action.subject_kind,
+                }
+                for action in map.next_actions
+            ],
+            "producer_edges": [list(edge) for edge in map.producer_edges],
+            "releases": [
+                {
+                    "archetype": release.archetype,
+                    "bundle_inventory_digest": release.bundle_inventory_digest,
+                    "closure": _closure_object(release.closure),
+                    "criteria": _criteria_object(release.criteria),
+                    "includes": [
+                        {"name": ref.name, "version": ref.version}
+                        for ref in release.includes
+                    ],
+                    "release_id": release.release_id,
+                    "state": release.state,
+                }
+                for release in map.releases
+            ],
+            "revision": map.revision,
+            "status_facts": {
+                "anchor_mode": map.status_facts.anchor_mode,
+                "anchored_current": map.status_facts.anchored_current,
+                "deviation_counts": _count_objects(
+                    map.status_facts.deviation_counts
+                ),
+                "evidence_chains": map.status_facts.evidence_chains,
+                "formal_certificate_recorded": (
+                    map.status_facts.formal_certificate_recorded
+                ),
+                "next_action_count": map.status_facts.next_action_count,
+                "release_counts": _count_objects(map.status_facts.release_counts),
+                "unit_counts": _count_objects(map.status_facts.unit_counts),
+            },
+            "units": [
+                {
+                    "acceptance_pack_version": unit.acceptance_pack_version,
+                    "blocking_deviation_ids": list(unit.blocking_deviation_ids),
+                    "depends_on": list(unit.depends_on),
+                    "name": unit.name,
+                    "status": unit.status,
+                    "version": unit.version,
+                }
+                for unit in map.units
+            ],
+        },
+    }
+    return _canonical_json(document)
+
+
 def _child(path: str, field: str) -> str:
     return field if path == "" else f"{path}.{field}"
 
@@ -359,6 +488,48 @@ _SNAPSHOT_FIELDS = frozenset(
         "evidence_heads",
         "anchor_mode",
         "formal_certificate_digest",
+    }
+)
+_SYSTEM_MAP_DOCUMENT_FIELDS = frozenset(
+    {"map_format", "source_state_digest", "map"}
+)
+_SYSTEM_MAP_FIELDS = frozenset(
+    {
+        "revision",
+        "units",
+        "producer_edges",
+        "deviations",
+        "releases",
+        "evidence_heads",
+        "anchor_mode",
+        "formal_certificate_digest",
+        "next_actions",
+        "status_facts",
+    }
+)
+_SYSTEM_MAP_UNIT_FIELDS = frozenset(
+    {
+        "name",
+        "version",
+        "status",
+        "depends_on",
+        "acceptance_pack_version",
+        "blocking_deviation_ids",
+    }
+)
+_NEXT_ACTION_FIELDS = frozenset(
+    {"subject_kind", "subject_id", "command", "reason"}
+)
+_STATUS_FACTS_FIELDS = frozenset(
+    {
+        "unit_counts",
+        "deviation_counts",
+        "release_counts",
+        "evidence_chains",
+        "anchored_current",
+        "anchor_mode",
+        "formal_certificate_recorded",
+        "next_action_count",
     }
 )
 
@@ -751,3 +922,243 @@ def decode_snapshot(data: bytes) -> Snapshot:
             allow_empty=True,
         ),
     )
+
+
+def _decode_count_rows(
+    value: object,
+    path: str,
+    enum_type: Callable[
+        [str], UnitStatus | DeviationStatus | ReleaseState
+    ],
+) -> tuple[tuple[str, int], ...]:
+    rows: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(_array(value, path)):
+        row_path = f"{path}[{index}]"
+        pair = _array(raw, row_path)
+        if len(pair) != 2:
+            raise DecodeError(f"{row_path}: expected two-item array")
+        enum_value = _enum_value(pair[0], f"{row_path}[0]", enum_type)
+        status = enum_value.value
+        if status in seen:
+            raise DecodeError(f"{row_path}[0]: duplicate status {status!r}")
+        count = _integer(pair[1], f"{row_path}[1]")
+        if count < 1:
+            raise DecodeError(f"{row_path}[1]: count must be positive")
+        seen.add(status)
+        rows.append((status, count))
+    return tuple(rows)
+
+
+def _decode_system_map_unit(value: object, path: str) -> SystemMapUnit:
+    obj = _fields(value, path, _SYSTEM_MAP_UNIT_FIELDS)
+    return SystemMapUnit(
+        name=_string(obj["name"], f"{path}.name"),
+        version=_string(obj["version"], f"{path}.version"),
+        status=_enum_value(obj["status"], f"{path}.status", UnitStatus).value,
+        depends_on=_strings(obj["depends_on"], f"{path}.depends_on"),
+        acceptance_pack_version=_string(
+            obj["acceptance_pack_version"], f"{path}.acceptance_pack_version"
+        ),
+        blocking_deviation_ids=_strings(
+            obj["blocking_deviation_ids"], f"{path}.blocking_deviation_ids"
+        ),
+    )
+
+
+def _decode_system_map_deviation(
+    value: object, path: str
+) -> SystemMapDeviation:
+    obj = _fields(value, path, _DEVIATION_FIELDS)
+    return SystemMapDeviation(
+        deviation_id=_string(obj["deviation_id"], f"{path}.deviation_id"),
+        deviation_type=_enum_value(
+            obj["deviation_type"], f"{path}.deviation_type", DeviationType
+        ).value,
+        unit=_decode_unit_ref(obj["unit"], f"{path}.unit"),
+        status=_enum_value(
+            obj["status"], f"{path}.status", DeviationStatus
+        ).value,
+        amendment_version=_string(
+            obj["amendment_version"], f"{path}.amendment_version"
+        ),
+        impact_set=_strings(obj["impact_set"], f"{path}.impact_set"),
+        release_impact_set=_strings(
+            obj["release_impact_set"], f"{path}.release_impact_set"
+        ),
+    )
+
+
+def _decode_system_map_release(value: object, path: str) -> SystemMapRelease:
+    obj = _fields(value, path, _RELEASE_FIELDS)
+    includes_path = f"{path}.includes"
+    return SystemMapRelease(
+        release_id=_string(obj["release_id"], f"{path}.release_id"),
+        archetype=_enum_value(
+            obj["archetype"], f"{path}.archetype", ReleaseArchetype
+        ).value,
+        state=_enum_value(obj["state"], f"{path}.state", ReleaseState).value,
+        includes=tuple(
+            _decode_unit_ref(item, f"{includes_path}[{index}]")
+            for index, item in enumerate(_array(obj["includes"], includes_path))
+        ),
+        criteria=_decode_criteria(obj["criteria"], f"{path}.criteria"),
+        closure=_decode_closure(obj["closure"], f"{path}.closure"),
+        bundle_inventory_digest=_digest(
+            obj["bundle_inventory_digest"],
+            f"{path}.bundle_inventory_digest",
+            allow_empty=True,
+        ),
+    )
+
+
+def _decode_next_action(value: object, path: str) -> NextAction:
+    obj = _fields(value, path, _NEXT_ACTION_FIELDS)
+    return NextAction(
+        subject_kind=_string(obj["subject_kind"], f"{path}.subject_kind"),
+        subject_id=_string(obj["subject_id"], f"{path}.subject_id"),
+        command=_string(obj["command"], f"{path}.command"),
+        reason=_string(obj["reason"], f"{path}.reason"),
+    )
+
+
+def _non_negative(value: object, path: str) -> int:
+    number = _integer(value, path)
+    if number < 0:
+        raise DecodeError(f"{path}: must be non-negative")
+    return number
+
+
+def _decode_status_facts(value: object, path: str) -> StatusFacts:
+    obj = _fields(value, path, _STATUS_FACTS_FIELDS)
+    return StatusFacts(
+        unit_counts=_decode_count_rows(
+            obj["unit_counts"], f"{path}.unit_counts", UnitStatus
+        ),
+        deviation_counts=_decode_count_rows(
+            obj["deviation_counts"], f"{path}.deviation_counts", DeviationStatus
+        ),
+        release_counts=_decode_count_rows(
+            obj["release_counts"], f"{path}.release_counts", ReleaseState
+        ),
+        evidence_chains=_non_negative(
+            obj["evidence_chains"], f"{path}.evidence_chains"
+        ),
+        anchored_current=_non_negative(
+            obj["anchored_current"], f"{path}.anchored_current"
+        ),
+        anchor_mode=_enum_value(
+            obj["anchor_mode"], f"{path}.anchor_mode", AnchorMode
+        ).value,
+        formal_certificate_recorded=_boolean(
+            obj["formal_certificate_recorded"],
+            f"{path}.formal_certificate_recorded",
+        ),
+        next_action_count=_non_negative(
+            obj["next_action_count"], f"{path}.next_action_count"
+        ),
+    )
+
+
+def _decode_producer_edges(value: object, path: str) -> tuple[tuple[str, str], ...]:
+    edges: list[tuple[str, str]] = []
+    for index, raw in enumerate(_array(value, path)):
+        edge_path = f"{path}[{index}]"
+        pair = _array(raw, edge_path)
+        if len(pair) != 2:
+            raise DecodeError(f"{edge_path}: expected two-item array")
+        edges.append(
+            (
+                _string(pair[0], f"{edge_path}[0]"),
+                _string(pair[1], f"{edge_path}[1]"),
+            )
+        )
+    return tuple(edges)
+
+
+def _require_unique(values: tuple[str, ...], path: str, label: str) -> None:
+    seen: set[str] = set()
+    for index, value in enumerate(values):
+        if value in seen:
+            raise DecodeError(f"{path}[{index}]: duplicate {label} {value!r}")
+        seen.add(value)
+
+
+def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
+    """Strictly decode the one canonical system-map document format."""
+    document = _fields(
+        _decode_json(data, "system map"), "", _SYSTEM_MAP_DOCUMENT_FIELDS
+    )
+    map_format = _integer(document["map_format"], "map_format")
+    if map_format != 1:
+        raise DecodeError("map_format: expected 1")
+    source_state_digest = _digest(
+        document["source_state_digest"], "source_state_digest"
+    )
+    obj = _fields(document["map"], "map", _SYSTEM_MAP_FIELDS)
+    revision = _non_negative(obj["revision"], "map.revision")
+    units = tuple(
+        _decode_system_map_unit(item, f"map.units[{index}]")
+        for index, item in enumerate(_array(obj["units"], "map.units"))
+    )
+    deviations = tuple(
+        _decode_system_map_deviation(item, f"map.deviations[{index}]")
+        for index, item in enumerate(
+            _array(obj["deviations"], "map.deviations")
+        )
+    )
+    releases = tuple(
+        _decode_system_map_release(item, f"map.releases[{index}]")
+        for index, item in enumerate(_array(obj["releases"], "map.releases"))
+    )
+    evidence_heads = tuple(
+        _decode_evidence_head(item, f"map.evidence_heads[{index}]")
+        for index, item in enumerate(
+            _array(obj["evidence_heads"], "map.evidence_heads")
+        )
+    )
+    actions = tuple(
+        _decode_next_action(item, f"map.next_actions[{index}]")
+        for index, item in enumerate(
+            _array(obj["next_actions"], "map.next_actions")
+        )
+    )
+    _require_unique(tuple(unit.name for unit in units), "map.units", "unit name")
+    _require_unique(
+        tuple(deviation.deviation_id for deviation in deviations),
+        "map.deviations",
+        "deviation id",
+    )
+    _require_unique(
+        tuple(release.release_id for release in releases),
+        "map.releases",
+        "release id",
+    )
+    _require_unique(
+        tuple(head.unit_name for head in evidence_heads),
+        "map.evidence_heads",
+        "unit name",
+    )
+    map = SystemMap(
+        revision=revision,
+        units=units,
+        producer_edges=_decode_producer_edges(
+            obj["producer_edges"], "map.producer_edges"
+        ),
+        deviations=deviations,
+        releases=releases,
+        evidence_heads=evidence_heads,
+        anchor_mode=_enum_value(
+            obj["anchor_mode"], "map.anchor_mode", AnchorMode
+        ).value,
+        formal_certificate_digest=_digest(
+            obj["formal_certificate_digest"],
+            "map.formal_certificate_digest",
+            allow_empty=True,
+        ),
+        next_actions=actions,
+        status_facts=_decode_status_facts(obj["status_facts"], "map.status_facts"),
+    )
+    if encode_system_map(map, source_state_digest) != data:
+        raise DecodeError("$: non-canonical system map encoding")
+    return map, source_state_digest

@@ -10,8 +10,14 @@ from collections.abc import Sequence
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.ir.schema import Verdict
-from vouch_mk2.store import Store, StoreError
-from vouch_mk2.verify import record_formal_certificate, run_artifact_checks
+from vouch_mk2.projections import next_actions, status_facts
+from vouch_mk2.store import Store, StoreError, decode_system_map
+from vouch_mk2.verify import (
+    emit_context,
+    emit_system_map,
+    record_formal_certificate,
+    run_artifact_checks,
+)
 
 
 class _Arguments(argparse.Namespace):
@@ -20,6 +26,7 @@ class _Arguments(argparse.Namespace):
     json_output: bool
     ci: bool
     record: bool
+    target: str | None
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -56,6 +63,30 @@ def _parser() -> argparse.ArgumentParser:
         "--record",
         action="store_true",
         help="record the passing formal certificate in the store",
+    )
+    for name, help_text in (
+        ("generate", "generate the canonical system map"),
+        ("next", "show binding next actions"),
+        ("status", "show aggregate snapshot status facts"),
+    ):
+        command = commands.add_parser(name, help=help_text)
+        command.add_argument(
+            "--root",
+            default=".",
+            help="store root directory (default: current directory)",
+        )
+    context = commands.add_parser(
+        "emit-context", help="emit deterministic agent context"
+    )
+    context.add_argument(
+        "--root",
+        default=".",
+        help="store root directory (default: current directory)",
+    )
+    context.add_argument(
+        "--target",
+        default=None,
+        help="optional caller-chosen context target path",
     )
     return parser
 
@@ -112,9 +143,18 @@ def _present_formal(run: FormalRun) -> None:
         )
 
 
+def _format_counts(rows: tuple[tuple[str, int], ...]) -> str:
+    return ",".join(f"{status}={count}" for status, count in rows)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     namespace = _Arguments(
-        command="", root=".", json_output=False, ci=False, record=False
+        command="",
+        root=".",
+        json_output=False,
+        ci=False,
+        record=False,
+        target=None,
     )
     parsed = _parser().parse_args(argv, namespace=namespace)
     if not isinstance(parsed, _Arguments):
@@ -135,6 +175,56 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 2
             print(f"formal certificate: {digest}")
         return 0 if passed(run) else 1
+
+    if parsed.command == "generate":
+        try:
+            with Store.open(parsed.root) as store:
+                data = emit_system_map(store)
+            _map, source_digest = decode_system_map(data)
+        except StoreError as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+        print(f"map.json written (source state {source_digest})")
+        return 0
+
+    if parsed.command == "emit-context":
+        try:
+            with Store.open(parsed.root) as store:
+                written = emit_context(store, parsed.target)
+        except StoreError as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+        print(written)
+        return 0
+
+    if parsed.command in ("next", "status"):
+        try:
+            with Store.open(parsed.root) as store:
+                snapshot = store.read_snapshot()
+        except StoreError as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+        actions = next_actions(snapshot)
+        if parsed.command == "next":
+            if not actions:
+                print("no next actions")
+            for action in actions:
+                print(
+                    f"{action.command}  "
+                    f"{action.subject_kind}/{action.subject_id}  {action.reason}"
+                )
+            return 0
+        facts = status_facts(snapshot, actions)
+        print(f"unit_counts: {_format_counts(facts.unit_counts)}")
+        print(f"deviation_counts: {_format_counts(facts.deviation_counts)}")
+        print(f"release_counts: {_format_counts(facts.release_counts)}")
+        print(f"evidence_chains: {facts.evidence_chains}")
+        print(f"anchored_current: {facts.anchored_current}")
+        print(f"anchor_mode: {facts.anchor_mode}")
+        recorded = "true" if facts.formal_certificate_recorded else "false"
+        print(f"formal_certificate_recorded: {recorded}")
+        print(f"next_action_count: {facts.next_action_count}")
+        return 0
 
     try:
         with Store.open(parsed.root) as store:

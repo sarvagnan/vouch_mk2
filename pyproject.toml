@@ -28,7 +28,7 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "Policy IR and decision core are pure — no I/O-capable imports"
 type = "forbidden"
-source_modules = ["vouch_mk2.ir", "vouch_mk2.core", "vouch_mk2.checks", "vouch_mk2.formal"]
+source_modules = ["vouch_mk2.ir", "vouch_mk2.core", "vouch_mk2.checks", "vouch_mk2.formal", "vouch_mk2.projections"]
 forbidden_modules = [
     "hashlib",
     "os",
@@ -47,7 +47,7 @@ forbidden_modules = [
 [[tool.importlinter.contracts]]
 name = "Store is the only I/O owner"
 type = "forbidden"
-source_modules = ["vouch_mk2.ir", "vouch_mk2.core", "vouch_mk2.checks", "vouch_mk2.formal"]
+source_modules = ["vouch_mk2.ir", "vouch_mk2.core", "vouch_mk2.checks", "vouch_mk2.formal", "vouch_mk2.projections"]
 forbidden_modules = ["vouch_mk2.store"]
 
 [tool.pytest.ini_options]
