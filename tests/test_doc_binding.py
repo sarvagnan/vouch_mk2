@@ -92,3 +92,35 @@ def test_documented_decision_references_have_headings() -> None:
     decisions = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
     headings = set(re.findall(r"^## (D-\d+)\b", decisions, re.MULTILINE))
     assert references <= headings
+
+
+def test_defect_closure_evidence_citations_and_inventory_are_bound() -> None:
+    document = ROOT / "docs" / "defect-closure.md"
+    text = document.read_text(encoding="utf-8")
+
+    expected_ids = {f"D{number:03d}" for number in range(1, 71)}
+    occurrences = re.findall(r"\bD\d{3}\b", text)
+    assert set(occurrences) == expected_ids
+    assert len(occurrences) == len(expected_ids), (
+        "every source defect id must occur exactly once"
+    )
+
+    test_citations = re.findall(
+        r"`(tests/[A-Za-z0-9_./-]+\.py)::([A-Za-z_][A-Za-z0-9_]*)`",
+        text,
+    )
+    assert test_citations, "the closure map must cite regression tests"
+    for relative, name in test_citations:
+        path = ROOT / relative
+        assert path.is_file(), f"missing cited test file: {relative}"
+        source = path.read_text(encoding="utf-8")
+        assert re.search(rf"^def {re.escape(name)}\s*\(", source, re.MULTILINE), (
+            f"missing cited test function: {relative}::{name}"
+        )
+
+    source_citations = set(
+        re.findall(r"`(src/[A-Za-z0-9_./-]+)`", text)
+    )
+    assert source_citations, "unrepresentability notes must cite source mechanisms"
+    for relative in source_citations:
+        assert (ROOT / relative).exists(), f"missing cited source path: {relative}"
