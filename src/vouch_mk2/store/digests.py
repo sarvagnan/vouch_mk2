@@ -19,6 +19,7 @@ class ArtifactKind(Enum):
     FORMAL_TABLES = "formal-tables"
     FORMAL_RELATION = "formal-relation"
     FILE = "file"
+    LOCK = "lock"
 
 
 def digest_of(kind: ArtifactKind, payload: bytes) -> str:

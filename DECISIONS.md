@@ -190,3 +190,66 @@ deviations", so an operational hold must be expressed as a typed deviation (usua
 The Phase 0 transcription (`ir/vouch_06.py`) keeps the prose-faithful reading, since
 0.6's own precedence rule gives prose authority absent a recorded discrepancy; this
 entry is mk2's recorded discrepancy for its own semantics.
+
+## D-7 — Transports: what the lock binds, what init owns, what MCP exposes
+
+**Status:** decided 2026-08-14 (Phase 8).
+
+- **`vouch.lock` is a reproducible zipapp of `src/vouch_mk2` and nothing else.** Built
+  with fixed zip entry order, zeroed timestamps, and no compiled bytecode, so two builds
+  of the same tree are byte-identical; its identity is one digest
+  (`digest_of(ArtifactKind.LOCK, bytes)`). The lock carries a `--self-check` that
+  recomputes and prints its own digest. Vendoring the lock moves no trust boundary
+  (D-2): a hostile lock editor is threat level 3 and stays there.
+- **`vouch-mk2 init` writes exactly four things** into a target project:
+  `.vouch/` (a fresh store), `vouch.lock`, `.vouch/config.json` (the lock digest and
+  the store path — nothing policy-bearing; anchor mode lives in the snapshot per D-4),
+  and `.github/workflows/vouch.yml` (runs `python vouch.lock check --ci`). Nothing else,
+  ever — no CLAUDE.md, no adapters, no skills. An existing, differing file at any of
+  those paths is never overwritten: init writes `<path>.vouch-suggested` (the D-6
+  sidecar rule) and reports it. Rejected: 0.6's ownership manifest — unnecessary when
+  the owned set is closed and sidecars handle collisions.
+- **MCP is read/verify-only, permanently, stateless, structured.** Tools: `check`
+  (returns the CheckReport as data — never parsed text), `formal` (pure run summary),
+  `next`, `status`, `map` (projections). No mutation tool will ever be added (0.6
+  STATUS.md "deliberately not built"). One store handle per request; no caching across
+  requests. Speaks the current MCP protocol only via a minimal stdlib JSON-RPC-over-stdio
+  server — no SDK dependency (D-1 stdlib-only for the shipped artifact).
+- **Hooks are documented fragments, warn-only, root-resolved from the edit target.** A
+  hook receives the path being edited, walks up from THAT path (never cwd — the 0.6
+  `be7ea9a` lesson) to the nearest `.vouch/`, runs `check`, and prints the composed
+  verdict as advice. It never blocks and never mutates. Shipped as `hooks/` text
+  fragments the user pastes into their client's settings, plus one `vouch-mk2 hook`
+  subcommand that does the resolution so the fragment stays a one-liner.
+
+**D-7 amendments (Phase 8 adversarial review, 2026-08-15):**
+
+- **MCP root is pinned at server start** (`vouch-mk2 mcp --root R`); tools take no
+  `root` argument. Every other transport gets its root from a human's CLI invocation,
+  but MCP tool arguments are chosen by a model — i.e. by repository content under
+  threat-model level 2 — so a caller-supplied root made every directory on disk
+  client-reachable and turned the read-only tools into a store-mutating primitive
+  (the orphan-temp sweep runs under an exclusive lock on open). Read/verify transports
+  (MCP, hook) now open stores `read_only=True`: no sweep, no exclusive lock, commit
+  refused — "read-only" and "never blocks" are mechanisms, not conventions.
+- **The hook's root walk stops at the first repository boundary** (a `.git`) crossed
+  without a store. A `.vouch` planted higher (`$HOME`, `/tmp`) must never be picked up
+  for an edit inside a project that has none.
+- **`init` proves every precondition before its first write**, and refuses any owned
+  path whose components include a symlink or non-directory (`os.makedirs` follows
+  symlinked components — a repo shipping `.github -> /elsewhere` had made init write
+  outside the project root while reporting an in-root write). A refusal never leaves a
+  half-initialized project.
+- **The lock digest is compared, not merely printed.** `self-check --expect <digest|@config.json>`
+  exits 1 on mismatch; the generated project workflow pins `vouch.lock` against the
+  digest `init` recorded in `.vouch/config.json`, and mk2's own CI builds twice,
+  `cmp`s, and pins against the build digest. `self-check` attests the archive the
+  executing module was imported from (`__file__`), with `sys.argv[0]` only as a
+  fallback — argv is caller-controlled and can name a decoy.
+- **The lock binds every shipped package file, not only `*.py`** (data files, `py.typed`),
+  and refuses symlinked package files/directories, so two different trees cannot share
+  a digest; only bytecode caches and dotfile droppings are excluded by name.
+- **Known residual, recorded:** byte-identical rebuilds rest on zlib deflate output
+  being stable across builds; CI verifies it on the runner, but a zlib/zlib-ng version
+  change could alter compressed bytes for identical sources. Revisit (`ZIP_STORED` at
+  ~3x size) if a real reproducibility break is ever observed.

@@ -64,6 +64,7 @@ class Store:
         self._on_step = on_step
         self._max_artifact_bytes = max_artifact_bytes
         self._closed = False
+        self._read_only = False
 
     @staticmethod
     def _require_platform_capabilities() -> None:
@@ -111,9 +112,18 @@ class Store:
         root: str,
         on_step: Callable[[str], None] | None = None,
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
+        *,
+        read_only: bool = False,
     ) -> Store:
-        """Open an existing store with one root directory capability."""
+        """Open an existing store with one root directory capability.
+
+        ``read_only=True`` is the contract for read/verify transports (MCP,
+        hooks): the layout is checked but the orphan-temp sweep — a write under
+        an exclusive lock — is skipped, and any lock probe is NON-BLOCKING so a
+        store held by a concurrent writer yields ``StoreBusy`` instead of a hang.
+        Commit is refused on a read-only handle."""
         store = cls(root, on_step=on_step, max_artifact_bytes=max_artifact_bytes)
+        store._read_only = read_only
         try:
             store._check_layout()
         except BaseException:
@@ -182,7 +192,8 @@ class Store:
         self._assert_not_symlink(".lock", self._root_fd, ".lock")
         objects_fd = self._open_objects_directory()
         os.close(objects_fd)
-        self._sweep_orphan_temps()
+        if not self._read_only:
+            self._sweep_orphan_temps()
 
     def _sweep_orphan_temps(self) -> None:
         """Reclaim temp files orphaned by a killed process.
@@ -484,6 +495,8 @@ class Store:
         objects: Sequence[tuple[ArtifactKind, bytes]] = (),
     ) -> None:
         """CAS-commit objects first, then atomically replace authoritative state."""
+        if self._read_only:
+            raise StoreError("commit refused: store handle is read-only")
         lock_fd = self._open_lock()
         locked = False
         try:

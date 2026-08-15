@@ -6,9 +6,6 @@ This CI/verify layer loads the claimed bytes and proves their content addressing
 
 from __future__ import annotations
 
-import os
-import secrets
-import stat
 from dataclasses import dataclass
 from typing import assert_never
 
@@ -29,6 +26,7 @@ from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
+from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.projections import agent_context, system_map
 from vouch_mk2.store import (
     ArtifactKind,
@@ -407,60 +405,6 @@ def emit_system_map(store: Store) -> bytes:
     return data
 
 
-def _read_target_nofollow(path: str) -> bytes | None:
-    """Read a caller-supplied target without following symlinks.
-
-    A symlinked target (dangling or not) is refused: writing "the target" would
-    otherwise create or overwrite the link's referent — a path the caller never
-    named. None means the target is genuinely absent."""
-    try:
-        info = os.lstat(path)
-    except FileNotFoundError:
-        return None
-    except OSError as error:
-        raise StoreError(f"{path}: cannot inspect context target: {error}") from error
-    if stat.S_ISLNK(info.st_mode):
-        raise StoreError(f"{path}: symlinked context target refused")
-    if not stat.S_ISREG(info.st_mode):
-        raise StoreError(f"{path}: context target is not a regular file")
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except OSError as error:
-        raise StoreError(f"{path}: cannot read context target: {error}") from error
-    try:
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            return stream.read()
-    finally:
-        os.close(fd)
-
-
-def _write_chosen_path(path: str, data: bytes) -> None:
-    """Write via a same-directory temp + os.replace so a partial file is never
-    visible under the destination name, and the destination is never opened
-    for writing through a link (replace rebinds the name)."""
-    directory = os.path.dirname(path) or "."
-    temp = os.path.join(directory, f".{os.path.basename(path)}.{secrets.token_hex(8)}.tmp")
-    try:
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
-    except OSError as error:
-        raise StoreError(f"{path}: cannot write generated context: {error}") from error
-    try:
-        try:
-            with os.fdopen(fd, "wb", closefd=False) as stream:
-                stream.write(data)
-                stream.flush()
-                os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(temp, path)
-    except OSError as error:
-        try:
-            os.unlink(temp)
-        except OSError:
-            pass
-        raise StoreError(f"{path}: cannot write generated context: {error}") from error
-
-
 def emit_context(store: Store, target: str | None) -> str:
     """Emit store context and safely suggest changes to an optional caller path.
 
@@ -472,9 +416,9 @@ def emit_context(store: Store, target: str | None) -> str:
     store.write_generated("vouch-context.md", data)
     if target is None:
         return store.generated_path("vouch-context.md")
-    current = _read_target_nofollow(target)
+    current = read_regular_nofollow(target, "context target")
     destination = target if current is None or current == data else target + ".vouch-suggested"
-    _write_chosen_path(destination, data)
+    write_atomic(destination, data, 0o644, "generated context")
     return destination
 
 

@@ -19,7 +19,7 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
 - [`docs/claim-boundary.md`](docs/claim-boundary.md) — what mk2 proves mechanically
   vs. what is permanently `NOT_CHECKED`.
 
-## Code (Phases 0–7)
+## Code (Phases 0–8)
 
 - `src/vouch_mk2/ir/` — Policy IR schema (frozen dataclasses, structural
   validation), the 0.6.2 lifecycle transcription, and the mk2 tables `decide()`
@@ -44,6 +44,17 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
   [--record]`, `vouch-mk2 generate`, `vouch-mk2 next`, `vouch-mk2 status`, and
   `vouch-mk2 emit-context`.
 
+## Transports (Phase 8)
+
+- `vouch-mk2 build-lock` creates the reproducible, offline `vouch.lock` zipapp;
+  `vouch-mk2 self-check` prints the digest of the lock being executed.
+- `vouch-mk2 init` writes only the fresh store, digest-bound lock configuration,
+  vendored lock, and CI workflow defined by D-7.
+- `vouch-mk2 mcp` serves the permanent read/verify-only MCP surface over
+  line-delimited JSON-RPC stdio.
+- `vouch-mk2 hook` powers the user-wired, warn-only fragments in `hooks/`; CI,
+  not the hook, remains the hard enforcement layer.
+
 ## Gates
 
 Run what CI runs (`.github/workflows/ci.yml`):
@@ -52,6 +63,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check   # D-1: strict types
 uv run lint-imports    # D-1: Policy IR purity contract
-uv run pytest          # 474 tests: matrices, property BFS, fault rig, formal
+uv run pytest          # 511 tests: matrices, property BFS, fault rig, formal, transports
 uv run vouch-mk2 formal  # invariants + witness discrimination over core-v1
 ```

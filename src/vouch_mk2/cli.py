@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
+from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
+from vouch_mk2.init import InitError, init_project
 from vouch_mk2.ir.schema import Verdict
+from vouch_mk2.io import read_regular_nofollow, write_atomic
+from vouch_mk2.lock import build_lock, lock_digest, running_lock_bytes
+from vouch_mk2.mcp import run_stdio
 from vouch_mk2.projections import next_actions, status_facts
 from vouch_mk2.store import Store, StoreError, decode_system_map
 from vouch_mk2.verify import (
@@ -27,6 +33,10 @@ class _Arguments(argparse.Namespace):
     ci: bool
     record: bool
     target: str | None
+    output: str
+    project: str
+    lock_path: str | None
+    edit_target: str | None
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -88,6 +98,46 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="optional caller-chosen context target path",
     )
+    build = commands.add_parser(
+        "build-lock", help="build the reproducible vouch.lock zipapp"
+    )
+    build.add_argument("--output", required=True, help="lock output path")
+    self_check = commands.add_parser(
+        "self-check",
+        help="print the digest of the running vouch.lock; --expect pins it",
+    )
+    self_check.add_argument(
+        "--expect",
+        default=None,
+        help=(
+            "a 64-hex digest, or @PATH to a config.json carrying lock_digest; "
+            "exit 1 unless the running lock's digest matches"
+        ),
+    )
+    init = commands.add_parser(
+        "init", help="initialize the closed D-7 project file set"
+    )
+    init.add_argument("--project", required=True, help="target project directory")
+    init.add_argument(
+        "--lock",
+        dest="lock_path",
+        default=None,
+        help="existing lock to vendor instead of building/copying the running code",
+    )
+    mcp = commands.add_parser(
+        "mcp", help="serve read-only MCP over line-delimited stdio for ONE store"
+    )
+    mcp.add_argument(
+        "--root",
+        required=True,
+        help="the store root this server is pinned to (tools take no root)",
+    )
+    hook = commands.add_parser("hook", help="run a warn-only check for an edit target")
+    hook.add_argument(
+        "--edit-target",
+        default=None,
+        help="edited file or directory; absent reads tool_input.file_path from stdin JSON",
+    )
     return parser
 
 
@@ -147,6 +197,26 @@ def _format_counts(rows: tuple[tuple[str, int], ...]) -> str:
     return ",".join(f"{status}={count}" for status, count in rows)
 
 
+def _expected_lock_digest(spec: str) -> str | None:
+    """Resolve ``--expect``: a literal 64-hex digest, or ``@PATH`` naming a
+    config.json whose ``lock_digest`` is read (strictly: object, string, 64-hex)."""
+    if spec.startswith("@"):
+        payload = read_regular_nofollow(spec[1:], "lock config")
+        if payload is None:
+            return None
+        try:
+            decoded: object = json.loads(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        if not isinstance(decoded, dict):
+            return None
+        value = decoded.get("lock_digest")
+        spec = value if isinstance(value, str) else ""
+    if len(spec) == 64 and all(c in "0123456789abcdef" for c in spec):
+        return spec
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     namespace = _Arguments(
         command="",
@@ -155,10 +225,83 @@ def main(argv: Sequence[str] | None = None) -> int:
         ci=False,
         record=False,
         target=None,
+        output="",
+        project="",
+        lock_path=None,
+        edit_target=None,
     )
     parsed = _parser().parse_args(argv, namespace=namespace)
     if not isinstance(parsed, _Arguments):
         raise TypeError("argparse returned an unexpected namespace type")
+
+    if parsed.command == "build-lock":
+        try:
+            source_root = os.path.dirname(os.path.dirname(__file__))
+            payload = build_lock(source_root)
+            write_atomic(parsed.output, payload, 0o755, "vouch.lock")
+        except StoreError as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+        print(f"vouch.lock {lock_digest(payload)}")
+        return 0
+
+    if parsed.command == "self-check":
+        try:
+            payload = running_lock_bytes()
+        except StoreError as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+        if payload is None:
+            print("not running from a lock")
+            return 1
+        actual = lock_digest(payload)
+        print(actual)
+        if parsed.expect is None:
+            return 0
+        expected = _expected_lock_digest(parsed.expect)
+        if expected is None:
+            print("vouch-mk2: --expect must be a 64-hex digest or @config.json", file=sys.stderr)
+            return 2
+        if actual != expected:
+            print(f"vouch-mk2: lock digest mismatch: expected {expected}", file=sys.stderr)
+            return 1
+        return 0
+
+    if parsed.command == "init":
+        try:
+            if parsed.lock_path is not None:
+                payload = read_regular_nofollow(parsed.lock_path, "lock input")
+                if payload is None:
+                    raise InitError(f"{parsed.lock_path}: lock input does not exist")
+            else:
+                payload = running_lock_bytes()
+                if payload is None:
+                    source_root = os.path.dirname(os.path.dirname(__file__))
+                    payload = build_lock(source_root)
+            report = init_project(parsed.project, payload)
+        except (InitError, StoreError) as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+        for result in report:
+            print(f"{result.status.value} {result.path}")
+        return 0
+
+    if parsed.command == "mcp":
+        run_stdio(parsed.root)
+        return 0
+
+    if parsed.command == "hook":
+        try:
+            edit_target = parsed.edit_target
+            if edit_target is None:
+                edit_target = edit_target_from_json(sys.stdin.read())
+            if not edit_target:
+                print("vouch: no edit target; skipping")
+                return 0
+            print(hook_message(edit_target))
+        except (HookError, StoreError, OSError) as error:
+            print(f"vouch: hook error: {error}")
+        return 0
 
     if parsed.command == "formal":
         if parsed.record and not parsed.root:

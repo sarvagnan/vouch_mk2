@@ -33,3 +33,14 @@ jobs:
         run: uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
       - name: Formal checking
         run: uv run vouch-mk2 formal
+      - name: Build reproducible lock (twice — byte-identical)
+        shell: bash
+        run: |
+          uv run vouch-mk2 build-lock --output "$RUNNER_TEMP/vouch.lock" | tee "$RUNNER_TEMP/lock-digest.txt"
+          uv run vouch-mk2 build-lock --output "$RUNNER_TEMP/vouch2.lock" > /dev/null
+          cmp "$RUNNER_TEMP/vouch.lock" "$RUNNER_TEMP/vouch2.lock"
+      - name: Self-check lock against the build digest
+        shell: bash
+        run: python "$RUNNER_TEMP/vouch.lock" self-check --expect "$(awk '{print $2}' "$RUNNER_TEMP/lock-digest.txt")"
+      - name: Check scratch store from lock
+        run: python "$RUNNER_TEMP/vouch.lock" check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"

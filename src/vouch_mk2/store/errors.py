@@ -19,3 +19,7 @@ class IntegrityError(StoreError):
 
 class CasConflict(StoreError):
     """A commit's expected predecessor revision was not current."""
+
+
+class StoreBusy(StoreError):
+    """The store's commit lock is held by another process (non-blocking probe)."""
