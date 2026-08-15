@@ -44,3 +44,22 @@ jobs:
         run: python "$RUNNER_TEMP/vouch.lock" self-check --expect "$(awk '{print $2}' "$RUNNER_TEMP/lock-digest.txt")"
       - name: Check scratch store from lock
         run: python "$RUNNER_TEMP/vouch.lock" check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
+      - name: Dogfood — check mk2's OWN committed store from the lock (D-10)
+        # Zero mechanical NOT_CHECKED, every organizational claim visibly
+        # NOT_CHECKED, on this repository itself. The certificate is recomputed
+        # and map freshness is audited: a stale dogfood store fails CI.
+        shell: bash
+        run: |
+          python "$RUNNER_TEMP/vouch.lock" check --ci --root .vouch | tee "$RUNNER_TEMP/dogfood.txt"
+          ! grep -E '^NOT-CHECKED +check\.' "$RUNNER_TEMP/dogfood.txt"
+      - name: DoD walkthrough from the vendored lock with NO network
+        # unshare -n gives the step an empty network namespace: any attempt to
+        # reach the network fails at socket level. The walkthrough drives the
+        # whole lifecycle through the lock as a subprocess with PYTHONPATH="".
+        shell: bash
+        run: |
+          sudo unshare -n -- env PATH="$PATH" python3 -c "import urllib.request,sys
+try:
+    urllib.request.urlopen('http://example.com', timeout=3); sys.exit('network reachable — sandbox ineffective')
+except Exception: print('network denied: ok')"
+          sudo unshare -n -- env PATH="$PATH" python3 scripts/walkthrough.py --lock "$RUNNER_TEMP/vouch.lock"

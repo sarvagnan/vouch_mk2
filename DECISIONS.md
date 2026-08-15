@@ -330,3 +330,26 @@ entry is mk2's recorded discrepancy for its own semantics.
   reach it), and that seeding is labelled as such. When amendment-driven
   re-versioning arrives (a `ReVersion` command is the natural next step), the seeded
   state becomes reachable and the seed is retired.
+
+## D-10 — Dogfooding: mk2's own store carries mk2's own formal certificate
+
+**Status:** decided 2026-08-15 (DoD §7).
+
+- The plan's DoD says `vouch check --ci` must pass "on the mk2 repo itself" with zero
+  mechanical `NOT_CHECKED` and every organizational claim visibly `NOT_CHECKED`. mk2
+  does not (yet) model its own modules as units, and inventing a fake unit lifecycle to
+  make the sentence true would be exactly the vacuous self-certification this rebuild
+  exists to end. The honest dogfood is the one artifact mk2 genuinely produces about
+  itself: its **formal certificate** — recomputable evidence over its own `decide()`.
+- Therefore the repo commits a real store at `.vouch/` whose snapshot records mk2's own
+  formal certificate (`vouch-mk2 formal --record`) and its own generated system map, and
+  CI runs `check --ci` against it **from the vendored lock**, not from `uv`. Every
+  mechanical row is then a true statement about this repository (registry completeness,
+  certificate recompute, map freshness, empty-but-audited chains and bundles), and the
+  five organizational rows are printed `NOT_CHECKED` verbatim.
+- The store's `state.json`, objects, `map.json`, and `vouch-context.md` are committed
+  and re-verified on every push; the certificate must be re-recorded whenever
+  `formal/` changes (the checker version bumps), and map freshness FAILS if the
+  snapshot changes without regeneration — the dogfood is a live gate, not a fixture.
+- Modelling mk2's own modules as units (a true self-hosted lifecycle) is deferred; it
+  returns only if a real deployment forces it (plan §1 gate).

@@ -12,3 +12,6 @@ dist/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# The dogfood store (D-10) IS committed; only its runtime lock file is not.
+.vouch/.lock

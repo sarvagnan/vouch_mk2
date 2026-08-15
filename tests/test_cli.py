@@ -283,3 +283,20 @@ def test_cli_formal_record_requires_explicit_root(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "requires --root" in captured.err
+
+
+def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[str]) -> None:
+    # D-10: mk2's own committed store must pass check --ci with zero mechanical
+    # NOT_CHECKED and all five organizational rows visibly NOT_CHECKED.
+    root = Path(__file__).resolve().parents[1] / ".vouch"
+    assert (root / "state.json").exists(), "the dogfood store must be committed"
+    assert main(["check", "--ci", "--root", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert out.rstrip().endswith("composed: PASS")
+    mechanical_not_checked = [
+        line for line in out.splitlines()
+        if line.startswith("NOT-CHECKED") and line.split()[1].startswith("check.")
+    ]
+    assert mechanical_not_checked == []
+    org_rows = [line for line in out.splitlines() if line.startswith("NOT-CHECKED") and "org." in line]
+    assert len(org_rows) == 5
