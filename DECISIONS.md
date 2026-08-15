@@ -351,5 +351,11 @@ entry is mk2's recorded discrepancy for its own semantics.
   and re-verified on every push; the certificate must be re-recorded whenever
   `formal/` changes (the checker version bumps), and map freshness FAILS if the
   snapshot changes without regeneration — the dogfood is a live gate, not a fixture.
-- Modelling mk2's own modules as units (a true self-hosted lifecycle) is deferred; it
-  returns only if a real deployment forces it (plan §1 gate).
+- Modelling mk2's own modules as units was deferred here, but two versions must be kept
+  apart. RETROACTIVE self-hosting (declaring existing modules units with packs never
+  frozen and red evidence never recorded) is rejected outright: fabricated history, the
+  post-hoc-plausible-chain problem anchoring exists to prevent. PROSPECTIVE self-hosting
+  (running mk2's method on mk2's own next increments, packs frozen before
+  implementation, evidence recorded live) is a genuine option that D-10 did NOT settle;
+  it is proposed as **D-11** (bead `vouch_mk2-dvz`, user decision pending) with D045 as
+  the pilot unit.
