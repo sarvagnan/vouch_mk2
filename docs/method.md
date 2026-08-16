@@ -60,7 +60,8 @@ write `<unit>.DEVIATION.md`, implement the rest; do not touch `.vouch/`, README 
 gates that must be green; write `<unit>.DONE.md`; `bd close <bead>`.
 
 Write the brief with a QUOTED heredoc delimiter (`<<'EOF'`) — an unquoted one lets the shell eat
-backticked phrases (unit #4 lost two words that way; not fatal, but avoidable).
+backticked phrases (units #4 and #7 lost words that way). When the brief needs the bead id, use a
+placeholder (`__BEAD__`) in the quoted heredoc and `sed -i '' "s/__BEAD__/$ID/"` afterwards.
 
 Launch with `< /dev/null` — without it Codex may wait on stdin ("Reading additional input
 from stdin…") and exit with no report; that is a dead launch, not a timeout, and the one case
