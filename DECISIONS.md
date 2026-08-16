@@ -484,3 +484,40 @@ covered or waived.
 - **Rejected:** a tier in `.vouch/config.json` (0.6's shape — the D045 defect itself);
   and enforcing the full 13-row matrix mechanically (would require faking checks mk2
   cannot perform — the vacuous-coverage class).
+
+## D-13 — The state format is versioned from format 1; upgrades are explicit, recorded, and invent no state
+
+**Status:** decided 2026-08-16 (unit `state-format@1`, bead bd4.2).
+
+- **The problem.** The codec declared the state format "pre-1.0 and DISPOSABLE": every field
+  addition made every existing store undecodable, and the store owner hand re-encoded the
+  dogfood store twice during unit #2. That is acceptable for the tool's own store and
+  disqualifying for a user's. The codec's own docstring said stability "begins at the first
+  usable release" — this is that line.
+- **Decision.**
+  - `state.json` carries `state_format: int`. `CURRENT_STATE_FORMAT = 1` names the layout as
+    of unit #2 (tier + published_once) plus the field itself. Strict decode accepts exactly
+    the current format; a missing field is format 0 ("pre-versioned"), an older format is
+    refused with a message naming `vouch-mk2 upgrade`, a newer format is refused as "written
+    by a newer vouch" — never silently read either way.
+  - `vouch-mk2 upgrade --root R [--dry-run]` is the ONE path from format N to the current
+    format: pure upgraders `UPGRADERS[N]: dict → dict` (one per bump, contiguous keys
+    0..CURRENT-1) applied in order to the raw document, then strict decode of the result
+    (an upgrader that produces an undecodable document fails closed, original bytes kept),
+    written atomically under the writer lock, then projections regenerated. `revision` is
+    unchanged — a format upgrade is not a lifecycle event.
+  - **No invented state**: an upgrader's defaults are the pre-field semantics — `tier` absent
+    → `lightweight` (0.6's own meaning of "no tier"), `published_once` absent → derived from
+    status (published/release-bound/superseded → true), `state_format` absent → 0. Any real
+    value is a later explicit recorded command (`set-tier`), as unit #2 did by hand.
+  - The upgrader for 0→1 accepts the *union* of pre-versioned shapes the tool ever wrote
+    (unit-#1 era: no tier/no published_once; unit-#2 era: tier, no published_once), each kept
+    as a fixture. From format 1 on, **changing the canonical layout without bumping the
+    format is a test failure** (a golden of format 1's canonical bytes), and every bump ships
+    its upgrader + fixture.
+  - Read paths (`check`, `status`, MCP read-only) refuse a stale format with the same clear
+    message, exit 2, no traceback; `init` and `migrate` write the current format.
+- **Rejected:** decoder-side compatibility defaults ("read old files by filling in the new
+  field") — a silent default on read is the fail-open class the ingress work closed; and
+  recording the upgrade as a snapshot event — it would make the upgrade itself require a
+  decode of the old format by the new core.
