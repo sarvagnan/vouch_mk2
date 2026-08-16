@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_operator_docs.py -q","kind":"red","outcome":"tests-failed","parent":"GENESIS","recorded_at":"2026-08-16T13:44:39+00:00","sequence":1,"unit":{"name":"operator-docs","version":"1"}}
