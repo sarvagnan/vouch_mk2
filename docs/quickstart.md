@@ -30,7 +30,7 @@ python3 vouch.lock self-check --expect @.vouch/config.json
 
 Every command from here on is `python3 vouch.lock <verb> --root .vouch …`. `--help` on any verb
 lists its options and `docs/commands.md` reproduces them; one exception is `record-evidence`,
-which additionally takes `-- <argv…>` after its options (its help does not show that tail yet).
+which additionally takes `-- <argv…>` after its options.
 
 ## 2. Specify a unit and freeze its acceptance pack
 
@@ -205,14 +205,18 @@ python3 vouch.lock prepare-release --root .vouch --release-id r1 --includes gree
 python3 vouch.lock set-criteria --root .vouch --release-id r1 \
   --launch-criteria "smoke test green" --verification-window 24h \
   --rollback-trigger "error rate > 1%" --go-no-go-authority release-owner
+```
+
+```sh
+inventory_digest="$(python3 vouch.lock bundle-inventory --root .vouch --tree . --exclude '.bin/**' --exclude '.vouch/**' | awk '{print $NF}')"
+python3 vouch.lock bind-bundle --root .vouch --release-id r1 --inventory-digest "$inventory_digest"
+```
+
+```sh
 python3 vouch.lock start-deploy --root .vouch --release-id r1
 python3 vouch.lock start-verification --root .vouch --release-id r1
 python3 vouch.lock complete --root .vouch --release-id r1
 ```
-
-(A release may also bind a content-addressed *bundle inventory* with `bind-bundle
---inventory-digest`; creating and placing that object currently requires the Python API — a
-CLI verb for it is tracked as follow-up work.)
 
 ## 8. Check, generate, and read the report
 

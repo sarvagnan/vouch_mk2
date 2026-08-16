@@ -16,7 +16,7 @@ from enum import Enum
 from typing import Any, Callable, cast, get_args, get_origin, get_type_hints
 
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
-from vouch_mk2.bundle import build_pack_inventory
+from vouch_mk2.bundle import build_inventory, build_pack_inventory
 from vouch_mk2.core import (
     Accepted,
     AnchorMode,
@@ -53,7 +53,7 @@ from vouch_mk2.migrate import (
     validate_candidate,
 )
 from vouch_mk2.mcp import run_stdio
-from vouch_mk2.projections import next_actions, status_facts
+from vouch_mk2.projections import NextAction, next_actions, status_facts
 from vouch_mk2.store import (
     CURRENT_STATE_FORMAT,
     DecodeError,
@@ -96,6 +96,8 @@ class _Arguments(argparse.Namespace):
     was_published: list[str]
     never_published: list[str]
     command_argv: list[str]
+    tree: str
+    exclude: list[str]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -152,6 +154,34 @@ def _parser() -> argparse.ArgumentParser:
             default=".",
             help="store root directory (default: current directory)",
         )
+        if name == "next":
+            command.add_argument(
+                "--json",
+                dest="json_output",
+                action="store_true",
+                help="emit structured invocations instead of text",
+            )
+    bundle_inventory = commands.add_parser(
+        "bundle-inventory",
+        help="build and place a content-addressed bundle inventory",
+    )
+    bundle_inventory.add_argument("--root", required=True, help="store root directory")
+    bundle_inventory.add_argument(
+        "--tree", required=True, help="directory tree to inventory"
+    )
+    bundle_inventory.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="exclude a path pattern (repeatable)",
+    )
+    bundle_inventory.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="emit one JSON result instead of text",
+    )
     upgrade = commands.add_parser(
         "upgrade", help="upgrade state.json to the current state format"
     )
@@ -436,6 +466,13 @@ def _add_lifecycle_parsers(commands: Any) -> None:
             )
             continue
         if command_type is command_module.RecordEvidence:
+            parser.usage = (
+                "%(prog)s [-h] --root ROOT [--json] --unit NAME@VERSION "
+                "--kind {red,green,refactor} -- <argv...>"
+            )
+            parser.epilog = (
+                "the recorded outcome is the exit status of a process this verb spawned."
+            )
             parser.add_argument("--unit", type=_unit_ref, required=True, metavar="NAME@VERSION")
             parser.add_argument(
                 "--kind",
@@ -785,6 +822,147 @@ LIFECYCLE_VERBS: dict[str, _LifecycleHandler] = {
 }
 
 
+_SUBJECT_FIELDS = {
+    "unit": "name",
+    "deviation": "deviation_id",
+    "release": "release_id",
+    "evidence": "unit_name",
+}
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Invocation:
+    argv: tuple[str, ...]
+    placeholders: tuple[str, ...]
+    placeholder_indexes: frozenset[int]
+
+
+# Fields whose specialized parser replaces the reflected flag with a different
+# required CLI input. Kept next to the renderer so a new special case cannot
+# drift silently: tests/test_lifecycle_cli_regressions.py parses every rendered
+# invocation with the real parser.
+_SPECIALIZED_REQUIRED: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
+    ("bind-pack", "pack_digest"): (("--pack-file", "<PACK_FILE>"),),
+}
+
+
+def _required_field_arguments(
+    field: dataclasses.Field[Any], annotation: object, command: str = ""
+) -> tuple[tuple[str, str], ...]:
+    specialized = _SPECIALIZED_REQUIRED.get((command, field.name))
+    if specialized is not None:
+        return specialized
+    if annotation is LaunchCriteria:
+        return (
+            ("--launch-criteria", "<LAUNCH_CRITERIA>"),
+            ("--verification-window", "<VERIFICATION_WINDOW>"),
+            ("--rollback-trigger", "<ROLLBACK_TRIGGER>"),
+            ("--go-no-go-authority", "<GO_NO_GO_AUTHORITY>"),
+        )
+    return (
+        (
+            "--" + field.name.replace("_", "-"),
+            f"<{field.name.upper()}>",
+        ),
+    )
+
+
+def _structured_invocation(action: NextAction, root: str) -> _Invocation:
+    command_type = _LIFECYCLE_COMMANDS.get(action.command)
+    if command_type is None:
+        raise ValueError(f"next action names unknown command {action.command!r}")
+    subject_field = _SUBJECT_FIELDS.get(action.subject_kind)
+    if subject_field is None:
+        raise ValueError(
+            f"next action has unknown subject kind {action.subject_kind!r}"
+        )
+    fields = dataclasses.fields(command_type)
+    if subject_field not in {field.name for field in fields}:
+        raise ValueError(
+            f"next action subject {action.subject_kind!r} does not bind "
+            f"{action.command!r}"
+        )
+
+    subject_flag = "--" + subject_field.replace("_", "-")
+    argv = [
+        "vouch-mk2",
+        action.command,
+        "--root",
+        root,
+        subject_flag,
+        action.subject_id,
+    ]
+    placeholders: list[str] = []
+    placeholder_indexes: set[int] = set()
+    annotations = get_type_hints(command_type)
+    for field in fields:
+        required = (
+            field.default is dataclasses.MISSING
+            and field.default_factory is dataclasses.MISSING
+        )
+        if field.name == subject_field or not required:
+            continue
+        for flag, placeholder in _required_field_arguments(
+            field, annotations[field.name], action.command
+        ):
+            argv.extend((flag, placeholder))
+            placeholders.append(flag)
+            placeholder_indexes.add(len(argv) - 1)
+    return _Invocation(
+        argv=tuple(argv),
+        placeholders=tuple(placeholders),
+        placeholder_indexes=frozenset(placeholder_indexes),
+    )
+
+
+def invocation_for(action: NextAction, root: str) -> str:
+    """Render one complete, shell-safe next-action invocation."""
+    invocation = _structured_invocation(action, root)
+    command = " ".join(
+        token if index in invocation.placeholder_indexes else shlex.quote(token)
+        for index, token in enumerate(invocation.argv)
+    )
+    return f"{command}  # {action.reason}"
+
+
+def _next_action_object(action: NextAction, root: str) -> dict[str, object]:
+    invocation = _structured_invocation(action, root)
+    return {
+        "command": action.command,
+        "subject_kind": action.subject_kind,
+        "subject_id": action.subject_id,
+        "reason": action.reason,
+        "argv": list(invocation.argv),
+        "placeholders": list(invocation.placeholders),
+    }
+
+
+def _bundle_inventory_handler(namespace: argparse.Namespace) -> int:
+    from vouch_mk2.store import ArtifactKind, encode_bundle_inventory
+
+    try:
+        inventory = build_inventory(
+            namespace.tree, tuple(cast(list[str], namespace.exclude))
+        )
+        data = encode_bundle_inventory(inventory)
+        with Store.open(namespace.root) as store:
+            with store.write_locked():
+                digest = store.put_object(ArtifactKind.BUNDLE_INVENTORY, data)
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    if namespace.json_output:
+        print(
+            json.dumps(
+                {"accepted": True, "inventory_digest": digest},
+                sort_keys=True,
+            )
+        )
+    else:
+        print(f"bundle inventory {digest}")
+    return 0
+
+
 def _format_counts(rows: tuple[tuple[str, int], ...]) -> str:
     return ",".join(f"{status}={count}" for status, count in rows)
 
@@ -867,6 +1045,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         was_published=[],
         never_published=[],
         command_argv=[],
+        tree="",
+        exclude=[],
     )
     parsed = parser.parse_args(arguments, namespace=namespace)
     if not isinstance(parsed, _Arguments):
@@ -877,6 +1057,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     lifecycle_handler = LIFECYCLE_VERBS.get(parsed.command)
     if lifecycle_handler is not None:
         return lifecycle_handler(parsed)
+
+    if parsed.command == "bundle-inventory":
+        return _bundle_inventory_handler(parsed)
 
     if parsed.command == "build-lock":
         try:
@@ -1086,24 +1269,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         actions = next_actions(snapshot)
         if parsed.command == "next":
+            if parsed.json_output:
+                print(
+                    json.dumps(
+                        {
+                            "actions": [
+                                _next_action_object(action, parsed.root)
+                                for action in actions
+                            ]
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 0
             if not actions:
                 print("no next actions")
             for action in actions:
-                subject_flag = {
-                    "unit": "--name",
-                    "deviation": "--deviation-id",
-                    "release": "--release-id",
-                    "evidence": "--unit-name",
-                }[action.subject_kind]
-                command_argv = [
-                    "vouch-mk2",
-                    action.command,
-                    "--root",
-                    parsed.root,
-                    subject_flag,
-                    action.subject_id,
-                ]
-                print(f"{shlex.join(command_argv)}  # {action.reason}")
+                print(invocation_for(action, parsed.root))
             return 0
         facts = status_facts(snapshot, actions)
         print(f"unit_counts: {_format_counts(facts.unit_counts)}")

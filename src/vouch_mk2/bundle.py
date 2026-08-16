@@ -51,6 +51,30 @@ def _pattern_segments(pattern: str) -> tuple[str, ...]:
     return segments
 
 
+def _segment_matches(value: str, pattern: str) -> bool:
+    """Match ``*`` within one path segment without adding other glob syntax."""
+    if "*" not in pattern:
+        return value == pattern
+    parts = pattern.split("*")
+    position = 0
+    if parts[0]:
+        if not value.startswith(parts[0]):
+            return False
+        position = len(parts[0])
+    for part in parts[1:-1]:
+        if not part:
+            continue
+        found = value.find(part, position)
+        if found < 0:
+            return False
+        position = found + len(part)
+    suffix = parts[-1]
+    return not suffix or (
+        value.endswith(suffix)
+        and len(value) - len(suffix) >= position
+    )
+
+
 def _matches(
     path: tuple[str, ...], pattern: tuple[str, ...], *, descendants_only: bool
 ) -> bool:
@@ -76,7 +100,7 @@ def _matches(
                 )
             elif path_index == len(path):
                 found = False
-            elif segment == "*" or segment == path[path_index]:
+            elif _segment_matches(path[path_index], segment):
                 found = visit(path_index + 1, pattern_index + 1)
             else:
                 found = False
@@ -87,7 +111,7 @@ def _matches(
 
 
 def matches_exclusion(path: RelPath, pattern: str) -> bool:
-    """Match whole path segments using literals, ``*``, and ``**``.
+    """Match path segments using literals, segment-local ``*``, and ``**``.
 
     The historical D-pruning examples are normative: ``a/*/**`` excludes
     descendants of an immediate child (``a/x/y``) but not the child (``a/x``);

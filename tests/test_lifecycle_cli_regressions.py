@@ -639,7 +639,59 @@ def test_next_shell_line_round_trips_exact_root_and_subject_argv(
         str(root),
         "--name",
         "unit with space",
+        "--pack-version",
+        "<PACK_VERSION>",
     ]
+
+
+def test_next_json_on_a_complete_snapshot_is_one_empty_document(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "store"
+    _init_store(root)
+    assert main(["next", "--root", str(root), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"actions": []}
+
+
+def test_next_placeholders_stay_readable_while_bound_values_are_shell_safe() -> None:
+    from vouch_mk2.cli import invocation_for
+    from vouch_mk2.projections import NextAction
+
+    action = NextAction(
+        subject_kind="unit",
+        subject_id="unit with space",
+        command="freeze",
+        reason="freeze it",
+    )
+    command, marker, reason = invocation_for(action, "/tmp/root with space").partition(
+        "  # "
+    )
+    assert marker and reason == "freeze it"
+    assert "--pack-version <PACK_VERSION>" in command
+    assert shlex.split(command) == [
+        "vouch-mk2",
+        "freeze",
+        "--root",
+        "/tmp/root with space",
+        "--name",
+        "unit with space",
+        "--pack-version",
+        "<PACK_VERSION>",
+    ]
+
+
+def test_record_evidence_help_states_the_exact_spawned_process_claim(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        main(["record-evidence", "--help"])
+    assert raised.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.lower().split())
+    assert "-- <argv...>" in help_text
+    assert (
+        "the recorded outcome is the exit status of a process this verb spawned"
+        in help_text
+    )
 
 
 def test_set_criteria_requires_all_four_launch_criteria_flags(
@@ -681,3 +733,37 @@ def test_docs_state_exact_evidence_claim_and_lock_policy() -> None:
     assert "not a claim" in claim_boundary
     assert "Writers\nwait on a blocking exclusive lock" in claim_boundary
     assert "Read-only handles never acquire that lock" in claim_boundary
+
+
+def test_every_reflected_invocation_parses_with_the_real_parser_once_placeholders_are_filled() -> None:
+    # Review of cli-completeness@1: bind-pack rendered `--pack-digest`, which its specialized
+    # parser does not accept. Every subject-bearing reflected verb's rendered invocation must
+    # parse once its placeholders are substituted with plausible values.
+    import dataclasses
+    import shlex
+
+    from vouch_mk2.cli import LIFECYCLE_VERBS, _parser, invocation_for
+    from vouch_mk2.core import commands as command_module
+    from vouch_mk2.projections import NextAction
+
+    subject_kind_for = {"name": "unit", "unit_name": "evidence", "release_id": "release", "deviation_id": "deviation"}
+    parser = _parser()
+    fillers = {"<PACK_VERSION>": "p1", "<PACK_FILE>": "tests/x.py", "<AMENDMENT_VERSION>": "p2", "<TRIGGER>": "t",
+               "<LAUNCH_CRITERIA>": "c", "<VERIFICATION_WINDOW>": "1h", "<ROLLBACK_TRIGGER>": "r", "<GO_NO_GO_AUTHORITY>": "a",
+               "<INVENTORY_DIGEST>": "a" * 64, "<CERTIFICATE_DIGEST>": "b" * 64, "<TIER>": "standard", "<MODE>": "ci",
+               "<DEVIATION_TYPE>": "pack-defect", "<UNIT>": "u@1", "<VERSION>": "1", "<INCLUDES>": "u", "<OBSERVATIONS>": "o",
+               "<DEPENDS_ON>": "d"}
+    checked = 0
+    for cls in vars(command_module).values():
+        if not (dataclasses.is_dataclass(cls) and hasattr(cls, "ir_command")) or cls.ir_command not in LIFECYCLE_VERBS:
+            continue
+        names = {f.name for f in dataclasses.fields(cls)}
+        subject_field = next((f for f in ("name", "unit_name", "release_id", "deviation_id") if f in names), None)
+        if subject_field is None:
+            continue
+        line = invocation_for(NextAction(subject_kind_for[subject_field], "core", cls.ir_command, "why"), "/tmp/r").split("  # ")[0]
+        argv = [fillers.get(token, token) for token in shlex.split(line)]
+        assert argv[0] == "vouch-mk2"
+        parser.parse_args(argv[1:])  # raises SystemExit(2) on an unknown/missing option
+        checked += 1
+    assert checked >= 20

@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_cli_completeness.py -q","kind":"green","outcome":"tests-passed","parent":"8a0973a0e3ad3095db72d9e0648e009270feed2e4555dc5516aa2248e1c96335","recorded_at":"2026-08-16T20:26:44+00:00","sequence":3,"unit":{"name":"cli-completeness","version":"1"}}

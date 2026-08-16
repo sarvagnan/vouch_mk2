@@ -45,6 +45,12 @@ def test_mixed_double_star_is_refused() -> None:
         matches_exclusion(RelPath.parse("a/x"), "a**b")
 
 
+def test_single_star_matches_within_one_path_segment() -> None:
+    assert matches_exclusion(RelPath.parse("notes.txt"), "*.txt")
+    assert matches_exclusion(RelPath.parse("build/app.min.js"), "build/*.js")
+    assert not matches_exclusion(RelPath.parse("build/nested/app.js"), "build/*.js")
+
+
 def test_build_inventory_truly_prunes_before_fifo_inspection(tmp_path: Path) -> None:
     root = tmp_path / "tree"
     excluded = root / "x"

@@ -40,11 +40,12 @@ options:
 ## next
 
 ```text
-usage: vouch-mk2 next [-h] [--root ROOT]
+usage: vouch-mk2 next [-h] [--root ROOT] [--json]
 
 options:
   -h, --help   show this help message and exit
   --root ROOT  store root directory (default: current directory)
+  --json       emit structured invocations instead of text
 ```
 
 ## status
@@ -55,6 +56,19 @@ usage: vouch-mk2 status [-h] [--root ROOT]
 options:
   -h, --help   show this help message and exit
   --root ROOT  store root directory (default: current directory)
+```
+
+## bundle-inventory
+
+```text
+usage: vouch-mk2 bundle-inventory [-h] --root ROOT --tree TREE [--exclude PATTERN] [--json]
+
+options:
+  -h, --help         show this help message and exit
+  --root ROOT        store root directory
+  --tree TREE        directory tree to inventory
+  --exclude PATTERN  exclude a path pattern (repeatable)
+  --json             emit one JSON result instead of text
 ```
 
 ## upgrade
@@ -360,8 +374,7 @@ options:
 ## record-evidence
 
 ```text
-usage: vouch-mk2 record-evidence [-h] --root ROOT [--json] --unit NAME@VERSION
-                                 --kind {red,green,refactor}
+usage: vouch-mk2 record-evidence [-h] --root ROOT [--json] --unit NAME@VERSION --kind {red,green,refactor} -- <argv...>
 
 options:
   -h, --help            show this help message and exit
@@ -369,6 +382,8 @@ options:
   --json                emit one JSON result instead of text
   --unit NAME@VERSION
   --kind {red,green,refactor}
+
+the recorded outcome is the exit status of a process this verb spawned.
 ```
 
 ## record-formal-certificate
