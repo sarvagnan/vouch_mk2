@@ -44,6 +44,10 @@ files. Their orphan-temp cleanup is opportunistic and skipped when a writer hold
 the lock. The MCP transport remains read-only; these verbs do not add a remote
 mutation path.
 
+Every `state.json` declares an integer `state_format`, and strict reads accept
+exactly the current format. Older stores require the explicit, lock-protected
+`vouch-mk2 upgrade` path; newer stores are refused as written by a newer Vouch.
+
 For `record-evidence`, the exact mk2 claim is: "the recorded outcome is the exit
 status of a process this verb spawned, at the time it spawned it". The child
 inherits the caller's environment and working directory. This is not a claim that

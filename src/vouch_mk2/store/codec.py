@@ -1,9 +1,8 @@
 """Canonical Snapshot serialization and its single strict JSON ingress.
 
-The state format is pre-1.0 and DISPOSABLE: fields are added without migration
-and older state.json files become undecodable by design. The one supported
-migration path is Phase 9's ``vouch-migrate`` (from Vouch 0.6.x); mk2-to-mk2
-format stability begins at the first usable release, not before."""
+Every ``state.json`` declares an integer ``state_format``. Strict reads accept
+only :data:`CURRENT_STATE_FORMAT`; older formats require ``vouch-mk2 upgrade``
+and newer formats require a newer Vouch executable."""
 
 from __future__ import annotations
 
@@ -53,6 +52,9 @@ from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
 
+CURRENT_STATE_FORMAT = 1
+
+
 def _canonical_json(document: object) -> bytes:
     text = json.dumps(
         document,
@@ -61,6 +63,11 @@ def _canonical_json(document: object) -> bytes:
         separators=(",", ":"),
     )
     return text.encode("utf-8") + b"\n"
+
+
+def encode_document(document: object) -> bytes:
+    """Encode a raw state document with the codec's canonical JSON spelling."""
+    return _canonical_json(document)
 
 
 def encode_snapshot(snapshot: Snapshot) -> bytes:
@@ -85,6 +92,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
             for deviation in snapshot.deviations
         ],
         "revision": snapshot.revision,
+        "state_format": CURRENT_STATE_FORMAT,
         "evidence_heads": [
             {
                 "anchored": head.anchored,
@@ -503,6 +511,7 @@ _SNAPSHOT_FIELDS = frozenset(
         "anchor_mode",
         "tier",
         "formal_certificate_digest",
+        "state_format",
     }
 )
 _SYSTEM_MAP_DOCUMENT_FIELDS = frozenset(
@@ -766,6 +775,11 @@ def _decode_json(data: bytes, artifact: str) -> object:
         raise DecodeError(f"$: invalid JSON: {error}") from error
 
 
+def decode_raw_document(data: bytes) -> dict[str, object]:
+    """Decode only the raw JSON object needed by the explicit upgrade path."""
+    return _object(_decode_json(data, "state"), "")
+
+
 def decode_evidence_event(data: bytes) -> EvidenceEvent:
     obj = _fields(_decode_json(data, "evidence event"), "", _EVIDENCE_EVENT_FIELDS)
     sequence = _integer(obj["sequence"], "sequence")
@@ -902,7 +916,23 @@ def decode_snapshot(data: bytes) -> Snapshot:
     # Decode UTF-8 explicitly first: json.loads on bytes BOM-sniffs and would
     # accept UTF-16/32 documents, giving one snapshot many byte encodings at
     # the single ingress (a UTF-8 BOM is also refused, by the JSON parser).
-    obj = _fields(_decode_json(data, "state"), "", _SNAPSHOT_FIELDS)
+    raw = _object(_decode_json(data, "state"), "")
+    if "state_format" not in raw:
+        raise DecodeError(
+            "state_format: missing required field (format 0); "
+            "run `vouch-mk2 upgrade`"
+        )
+    state_format = _integer(raw["state_format"], "state_format")
+    if state_format < CURRENT_STATE_FORMAT:
+        raise DecodeError(
+            f"state_format: format {state_format} is older than supported "
+            f"format {CURRENT_STATE_FORMAT}; run `vouch-mk2 upgrade`"
+        )
+    if state_format > CURRENT_STATE_FORMAT:
+        raise DecodeError(
+            f"state_format: format {state_format} was written by a newer vouch"
+        )
+    obj = _fields(raw, "", _SNAPSHOT_FIELDS)
     revision = _integer(obj["revision"], "revision")
     if revision < 0:
         raise DecodeError("revision: must be non-negative")

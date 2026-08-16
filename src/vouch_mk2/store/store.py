@@ -419,9 +419,11 @@ class Store:
 
     def read_snapshot(self) -> Snapshot:
         """Read state.json once and strictly decode the authoritative snapshot."""
-        return decode_snapshot(
-            self._read_file(self._root_fd, "state.json", "state.json")
-        )
+        return decode_snapshot(self.read_state_bytes())
+
+    def read_state_bytes(self) -> bytes:
+        """Read raw state bytes without weakening ``read_snapshot`` decoding."""
+        return self._read_file(self._root_fd, "state.json", "state.json")
 
     @staticmethod
     def _validate_generated_name(name: str) -> None:
@@ -638,6 +640,43 @@ class Store:
                 "refusing a path-based fallback"
             ) from error
 
+    def replace_state_bytes(self, data: bytes) -> None:
+        """Atomically replace raw state bytes while the writer lock is held."""
+        self._require_writable("replace-state")
+        self._require_write_lock("replace-state")
+        self._require_within_artifact_bound(data, "state")
+        temp_name = f".state-{secrets.token_hex(16)}.tmp"
+        temp_exists = False
+        try:
+            try:
+                state_fd = os.open(
+                    temp_name,
+                    _TEMP_WRITE_FLAGS,
+                    0o600,
+                    dir_fd=self._root_fd,
+                )
+            except OSError as error:
+                raise StoreError(
+                    f"{temp_name}: cannot create temp: {error}"
+                ) from error
+            temp_exists = True
+            try:
+                self._write_all(state_fd, data)
+                self._step("state-temp-written")
+                os.fsync(state_fd)
+                self._step("state-temp-fsynced")
+            finally:
+                os.close(state_fd)
+
+            self._replace_state(temp_name)
+            temp_exists = False
+            self._step("state-replaced")
+            os.fsync(self._root_fd)
+            self._step("root-fsynced")
+        finally:
+            if temp_exists:
+                self._unlink_if_present(temp_name, self._root_fd)
+
     def commit(
         self,
         snapshot: Snapshot,
@@ -670,34 +709,4 @@ class Store:
             for kind, payload in objects:
                 self.put_object(kind, payload)
 
-            temp_name = f".state-{secrets.token_hex(16)}.tmp"
-            temp_exists = False
-            try:
-                try:
-                    state_fd = os.open(
-                        temp_name,
-                        _TEMP_WRITE_FLAGS,
-                        0o600,
-                        dir_fd=self._root_fd,
-                    )
-                except OSError as error:
-                    raise StoreError(
-                        f"{temp_name}: cannot create temp: {error}"
-                    ) from error
-                temp_exists = True
-                try:
-                    self._write_all(state_fd, data)
-                    self._step("state-temp-written")
-                    os.fsync(state_fd)
-                    self._step("state-temp-fsynced")
-                finally:
-                    os.close(state_fd)
-
-                self._replace_state(temp_name)
-                temp_exists = False
-                self._step("state-replaced")
-                os.fsync(self._root_fd)
-                self._step("root-fsynced")
-            finally:
-                if temp_exists:
-                    self._unlink_if_present(temp_name, self._root_fd)
+            self.replace_state_bytes(data)

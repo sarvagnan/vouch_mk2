@@ -53,7 +53,17 @@ from vouch_mk2.migrate import (
 )
 from vouch_mk2.mcp import run_stdio
 from vouch_mk2.projections import next_actions, status_facts
-from vouch_mk2.store import DecodeError, Store, StoreError, decode_system_map
+from vouch_mk2.store.codec import decode_raw_document
+from vouch_mk2.store import (
+    CURRENT_STATE_FORMAT,
+    DecodeError,
+    Store,
+    StoreError,
+    decode_snapshot,
+    decode_system_map,
+    encode_document,
+)
+from vouch_mk2.store.upgrade import upgrade_document
 from vouch_mk2.verify import (
     RefusedError,
     emit_context,
@@ -80,6 +90,7 @@ class _Arguments(argparse.Namespace):
     config: str | None
     drop_qualified: bool
     approve: bool
+    dry_run: bool
     command_argv: list[str]
 
 
@@ -129,6 +140,19 @@ def _parser() -> argparse.ArgumentParser:
             default=".",
             help="store root directory (default: current directory)",
         )
+    upgrade = commands.add_parser(
+        "upgrade", help="upgrade state.json to the current state format"
+    )
+    upgrade.add_argument(
+        "--root",
+        default=".",
+        help="store root directory (default: current directory)",
+    )
+    upgrade.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show required format steps without changing the store",
+    )
     context = commands.add_parser(
         "emit-context", help="emit deterministic agent context"
     )
@@ -650,6 +674,23 @@ def _format_counts(rows: tuple[tuple[str, int], ...]) -> str:
     return ",".join(f"{status}={count}" for status, count in rows)
 
 
+def _prepare_upgrade(raw: bytes) -> tuple[bytes, list[tuple[int, int]]]:
+    document = decode_raw_document(raw)
+    upgraded, steps = upgrade_document(document)
+    encoded = encode_document(upgraded)
+    decode_snapshot(encoded)
+    return encoded, steps
+
+
+def _present_upgrade(steps: list[tuple[int, int]]) -> None:
+    if not steps:
+        print(f"already at format {CURRENT_STATE_FORMAT}")
+        return
+    for from_format, to_format in steps:
+        print(f"{from_format} -> {to_format}")
+    print(f"state format: {CURRENT_STATE_FORMAT}")
+
+
 def _expected_lock_digest(spec: str) -> str | None:
     """Resolve ``--expect``: a literal 64-hex digest, or ``@PATH`` naming a
     config.json whose ``lock_digest`` is read (strictly: object, string, 64-hex)."""
@@ -707,6 +748,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config=None,
         drop_qualified=False,
         approve=False,
+        dry_run=False,
         command_argv=[],
     )
     parsed = parser.parse_args(arguments, namespace=namespace)
@@ -847,6 +889,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("vouch-mk2: formal --record requires --root", file=sys.stderr)
             return 2
         return _run_formal_command(parsed.root, record=parsed.record)
+
+    if parsed.command == "upgrade":
+        try:
+            if parsed.dry_run:
+                with Store.open(parsed.root, read_only=True) as store:
+                    _encoded, steps = _prepare_upgrade(store.read_state_bytes())
+            else:
+                with Store.open(parsed.root) as store:
+                    with store.write_locked():
+                        encoded, steps = _prepare_upgrade(store.read_state_bytes())
+                        if steps:
+                            store.replace_state_bytes(encoded)
+                            emit_system_map(store)
+                            emit_context(store, None)
+        except Exception as error:
+            print(f"vouch-mk2: upgrade failed: {error}", file=sys.stderr)
+            return 2
+        _present_upgrade(steps)
+        return 0
 
     if parsed.command == "generate":
         try:

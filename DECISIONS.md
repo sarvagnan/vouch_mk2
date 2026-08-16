@@ -521,3 +521,13 @@ covered or waived.
   field") — a silent default on read is the fail-open class the ingress work closed; and
   recording the upgrade as a snapshot event — it would make the upgrade itself require a
   decode of the old format by the new core.
+
+**D-13 correction (2026-08-16, unit `state-format@1` DEV-sf-02):** the bullet "`published_once`
+absent → derived from status (published/release-bound/superseded → true)" was wrong and
+contradicted D-13's own "no invented state" rule. `published_once` is a latch: only
+`published`/`release-bound` are unambiguous; every other status is reachable both with and
+without a prior publication. The upgrader therefore REFUSES ambiguous units unless the
+operator asserts each (`--was-published` / `--never-published`), and prints what it applied.
+The dogfood store's own upgrade (run before this correction) produced correct values by
+inspection: three published units → true, one in-progress unit that had never been published
+→ false; recorded here so that fact is not merely luck.

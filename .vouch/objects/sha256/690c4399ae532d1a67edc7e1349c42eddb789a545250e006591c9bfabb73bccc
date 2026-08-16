@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_state_format.py -q","kind":"green","outcome":"tests-passed","parent":"4c15907c34493c3f64d33eb5caea728357f7c495ec2beb6fb9f5f1e84d734708","recorded_at":"2026-08-16T12:42:03+00:00","sequence":2,"unit":{"name":"state-format","version":"1"}}

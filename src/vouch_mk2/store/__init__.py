@@ -1,6 +1,7 @@
 """Public surface of the capability-rooted snapshot store."""
 
 from vouch_mk2.store.codec import (
+    CURRENT_STATE_FORMAT,
     decode_bundle_inventory,
     decode_evidence_event,
     decode_formal_certificate,
@@ -8,6 +9,7 @@ from vouch_mk2.store.codec import (
     decode_system_map,
     encode_bundle_inventory,
     encode_evidence_event,
+    encode_document,
     encode_formal_certificate,
     encode_formal_relation,
     encode_formal_tables,
@@ -34,6 +36,7 @@ __all__ = [
     "COMMIT_STEPS",
     "DEFAULT_MAX_ARTIFACT_BYTES",
     "GENERATED_FILES",
+    "CURRENT_STATE_FORMAT",
     "ArtifactKind",
     "CasConflict",
     "DecodeError",
@@ -49,6 +52,7 @@ __all__ = [
     "decode_formal_certificate",
     "digest_of",
     "encode_snapshot",
+    "encode_document",
     "encode_system_map",
     "encode_bundle_inventory",
     "encode_evidence_event",

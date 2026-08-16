@@ -30,6 +30,9 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
 - `src/vouch_mk2/store/` — the only I/O: capability-rooted CAS store, the sole
   digest registry (domain-separated), and one strict canonical codec per
   artifact type.
+  Every `state.json` declares an integer `state_format`, and strict reads accept
+  exactly the current format. Older stores require `vouch-mk2 upgrade`; newer
+  stores require a newer Vouch executable and are never read speculatively.
 - `src/vouch_mk2/checks/` — verdict lattice, standing mechanical checks,
   organizational NOT_CHECKED rows, registry completeness as a FAILable result.
 - `src/vouch_mk2/verify.py` / `bundle.py` — I/O-side artifact checks (evidence
@@ -75,6 +78,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check   # D-1: strict types
 uv run lint-imports    # D-1: Policy IR purity contract
-uv run pytest          # 620 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest          # 646 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run vouch-mk2 formal  # invariants over core-v1 + history-v1; witness discrimination
 ```

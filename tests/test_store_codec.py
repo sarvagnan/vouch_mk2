@@ -28,6 +28,7 @@ from vouch_mk2.core.model import (
     UnitStatus,
 )
 from vouch_mk2.store import (
+    CURRENT_STATE_FORMAT,
     DecodeError,
     decode_bundle_inventory,
     decode_evidence_event,
@@ -98,6 +99,7 @@ def _baseline_document() -> dict[str, object]:
         "evidence_heads": [],
         "formal_certificate_digest": "",
         "revision": 1,
+        "state_format": CURRENT_STATE_FORMAT,
         "units": [
             {
                 "name": "alpha",

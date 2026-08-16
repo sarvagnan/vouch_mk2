@@ -52,3 +52,26 @@ R10 The codec docstring no longer says DISPOSABLE and describes `state_format` a
 - MCP read-only server: a stale store yields the same clear error text through the tool result.
 - Pyrefly strict; import-linter kept; every pre-existing test green (README count is the owner's).
 - Docs: README + `docs/claim-boundary.md` describe the format policy in two sentences.
+
+## Amendment pack/2 (DEV-sf-01, pack-defect, adjudicated amend)
+
+Raised by the mechanical review: the owner-pinned golden was `Snapshot(revision=0)`, which pins
+only the top-level layout; nested unit/deviation/release/criteria/closure/evidence layouts were
+unpinned. R3 now reads: the golden is the encoding of `_golden_snapshot()` in the pack test — a
+snapshot instantiating every record type, every enum family, tier/anchor/certificate — and must
+also decode back to it. Re-pinned by the owner from the format-1 encoder.
+
+## Amendment pack/3 (DEV-sf-02, contract defect in the owner's R5 and in D-13's text, adjudicated amend)
+
+Raised by the adversarial review: `published_once` is a LATCH set only by publication and never
+cleared; deriving it from current status invents state — `False` for a blocked/invalidated/
+re-verifying/specified unit that WAS published silently disarms `check.tier.evidence-required`
+and `check.tier.high-attestation` (reproduced: FAIL→PASS at tier high); `True` for a
+never-published superseded unit is a permanent false FAIL. R5 now reads: `published_once`
+absent → `True` for `published`/`release-bound`; for EVERY other status the legacy document
+does not carry the answer — `upgrade_document(doc, published_once=...)` REFUSES with
+`UpgradeRefused` naming each ambiguous `NAME@VERSION` unless the mapping asserts it (unknown
+refs in the mapping are refused too), and the verb takes `--was-published NAME@V` /
+`--never-published NAME@V` (repeatable), lists what is missing on refusal (also under
+`--dry-run`), and prints every assertion it applied. An unknown status is refused explicitly
+(not left for the codec). D-13 is corrected accordingly.

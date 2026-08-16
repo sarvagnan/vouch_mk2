@@ -75,11 +75,48 @@ def test_older_state_format_is_refused_naming_upgrade() -> None:
 # ---- the drift guard: layout changes must bump the format ----
 
 
+def _golden_snapshot() -> Snapshot:
+    """A snapshot instantiating EVERY record type and enum family the codec lays out.
+
+    pack/2 (DEV-sf-01): the format-1 golden must pin the nested layouts too — an empty
+    snapshot pinned only the top level, so a coordinated unit/deviation/release/evidence
+    layout change could ship unversioned.
+    """
+    from vouch_mk2.core.model import (
+        AnchorMode, ClosureRecord, ClosureTriggerKind, Deviation, DeviationStatus, DeviationType,
+        EvidenceHead, LaunchCriteria, Release, ReleaseArchetype, ReleaseState, Tier, Unit, UnitRef,
+    )
+
+    return Snapshot(
+        revision=7, tier=Tier.STANDARD, anchor_mode=AnchorMode.CI, formal_certificate_digest="c" * 64,
+        units=(
+            Unit("core", "v1", UnitStatus.PUBLISHED, (), "core-pack/2@0123456789abcdef", True),
+            Unit("core", "v0", UnitStatus.SUPERSEDED, (), "core-pack/1@fedcba9876543210", True),
+            Unit("ui", "v1", UnitStatus.BLOCKED, ("core",), "ui-pack/1@00ff00ff00ff00ff", False),
+            Unit("docs", "v1", UnitStatus.SPECIFIED, (), "", False),
+        ),
+        deviations=(
+            Deviation("DEV-1", DeviationType.PACK_DEFECT, UnitRef("ui", "v1"), DeviationStatus.OPEN, "", ("ui",), ()),
+            Deviation("DEV-0", DeviationType.CONTRACT_CONFLICT, UnitRef("core", "v1"), DeviationStatus.CLOSED, "core-pack/2", ("core", "ui"), ("r1",)),
+        ),
+        releases=(
+            Release(
+                "r1", ReleaseArchetype.OPERATIONAL, ReleaseState.INVALIDATED, (UnitRef("core", "v1"),),
+                LaunchCriteria(("healthy", "p99<200ms"), "24h", ("error-rate>1%",), "release-owner"),
+                ClosureRecord("rollout complete", ClosureTriggerKind.AMENDMENT, (("core", "v1", "published"),), False, ("obs-1",)),
+                "b" * 64,
+            ),
+        ),
+        evidence_heads=(EvidenceHead("core", "a" * 64, 4, "a" * 64), EvidenceHead("ui", "d" * 64, 1, "GENESIS")),
+    )
+
+
 def test_canonical_layout_of_format_1_matches_the_golden() -> None:
     # If this fails you changed the canonical layout: bump CURRENT_STATE_FORMAT, add an
-    # upgrader in vouch_mk2.store.upgrade, add a fixture, and re-pin this golden.
+    # upgrader in vouch_mk2.store.upgrade, add a fixture, and ask the owner to re-pin this golden.
     golden = (FIXTURES / "format1.golden.json").read_bytes()
-    assert encode_snapshot(Snapshot(revision=0)) == golden
+    assert encode_snapshot(_golden_snapshot()) == golden
+    assert decode_snapshot(golden) == _golden_snapshot()
 
 
 # ---- upgraders: pure, contiguous, no invented state ----
@@ -98,6 +135,9 @@ def test_upgraders_are_contiguous_and_pure_dict_functions() -> None:
 
 @pytest.mark.parametrize("fixture", LEGACY, ids=[f.stem for f in LEGACY])
 def test_format0_shapes_upgrade_to_the_current_format_without_invented_state(fixture: Path) -> None:
+    # pack/3 (DEV-sf-02): published_once is a LATCH. Only published/release-bound are
+    # unambiguous (-> True). Both fixtures contain only such units, so no assertions are
+    # needed here; the ambiguous case is the next test.
     from vouch_mk2.core.model import Tier
     from vouch_mk2.store.upgrade import upgrade_document
 
@@ -112,8 +152,51 @@ def test_format0_shapes_upgrade_to_the_current_format_without_invented_state(fix
         assert snapshot.tier.value == original["tier"]
     for unit in snapshot.units:
         raw = next(u for u in original["units"] if u["name"] == unit.name and u["version"] == unit.version)
-        expected = raw.get("published_once", unit.status in (UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND, UnitStatus.SUPERSEDED))
-        assert unit.published_once is expected
+        assert raw["status"] in ("published", "release-bound"), "fixture unexpectedly carries an ambiguous unit"
+        assert unit.published_once is raw.get("published_once", True)
+
+
+def test_format0_ambiguous_published_once_is_refused_unless_asserted() -> None:
+    # pack/3 (DEV-sf-02): a legacy unit whose status is not published/release-bound may or
+    # may not have been published (blocked/invalidated/re-verifying/specified are all reachable
+    # after publication; superseded is reachable without it). The upgrader must not guess:
+    # without an operator assertion it refuses, naming the units; with one it records it.
+    from vouch_mk2.store.upgrade import UpgradeRefused, upgrade_document
+
+    original = json.loads(LEGACY[1].read_bytes())
+    original["units"].append({"name": "maybe", "version": "1", "status": "blocked", "depends_on": [], "acceptance_pack_version": "p"})
+    original["units"].append({"name": "gone", "version": "1", "status": "superseded", "depends_on": [], "acceptance_pack_version": "p"})
+    with pytest.raises(UpgradeRefused) as raised:
+        upgrade_document(original)
+    assert "maybe@1" in str(raised.value) and "gone@1" in str(raised.value)
+    upgraded, _steps = upgrade_document(original, published_once={"maybe@1": True, "gone@1": False})
+    units = upgraded["units"]
+    assert isinstance(units, list)
+    by_ref = {(u["name"], u["version"]): u for u in units}
+    assert by_ref[("maybe", "1")]["published_once"] is True
+    assert by_ref[("gone", "1")]["published_once"] is False
+    with pytest.raises(UpgradeRefused, match="unknown"):
+        upgrade_document(original, published_once={"maybe@1": True, "gone@1": False, "nobody@9": True})
+
+
+def test_upgrade_verb_requires_assertions_for_ambiguous_units(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _legacy_store(tmp_path, LEGACY[1])
+    document = json.loads(Path(root, "state.json").read_bytes())
+    document["units"].append({"name": "maybe", "version": "1", "status": "blocked", "depends_on": [], "acceptance_pack_version": "p"})
+    Path(root, "state.json").write_bytes(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+    before = Path(root, "state.json").read_bytes()
+    assert main(["upgrade", "--root", root, "--dry-run"]) == 2
+    err = capsys.readouterr().err
+    assert "maybe@1" in err and "--was-published" in err and "--never-published" in err
+    assert main(["upgrade", "--root", root]) == 2
+    assert Path(root, "state.json").read_bytes() == before
+    capsys.readouterr()
+    assert main(["upgrade", "--root", root, "--never-published", "maybe@1"]) == 0
+    out = capsys.readouterr().out
+    assert "maybe@1" in out and "never-published" in out
+    with Store.open(root, read_only=True) as store:
+        unit = store.read_snapshot().unit("maybe")
+        assert unit is not None and unit.published_once is False
 
 
 # ---- the verb ----
