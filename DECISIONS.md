@@ -531,3 +531,42 @@ operator asserts each (`--was-published` / `--never-published`), and prints what
 The dogfood store's own upgrade (run before this correction) produced correct values by
 inspection: three published units → true, one in-progress unit that had never been published
 → false; recorded here so that fact is not merely luck.
+
+## D-14 — Acceptance packs are byte-bound: the pack's files are stored, digested, and re-verifiable
+
+**Status:** decided 2026-08-16 (unit `pack-binding@1`, bead bd4.6).
+
+- **The gap.** `freeze` records an opaque `pack_version` string. Vouch never reads or hashes
+  the pack, so "the goalposts cannot move" was a convention (unit #5's accuracy review, findings
+  1/7) — and the IR tier matrix already listed "acceptance pack digest bound at freeze" as
+  mechanical evidence for `acceptance-frozen-before-implementation`, which was an overclaim.
+- **Decision.**
+  - A **pack inventory** object (`ArtifactKind.ACCEPTANCE_PACK`, canonical JSON: `pack_format`,
+    entries of relative `path` + per-file `sha256` + `size`, sorted by path) is placed in the
+    CAS store atomically with the freeze commit. `Unit.acceptance_pack_digest` (64-hex, `""` =
+    unbound) names it. **State format 2**; upgrader 1→2 sets `""` — the truthful pre-field
+    fact: nothing was bound.
+  - `freeze --pack-version V --pack-file PATH…` (repeatable, paths relative to `--project`,
+    default cwd) builds and binds; `freeze` without files stays legal (label-only) at
+    `lightweight`. `bind-pack --name U --pack-file …` binds a unit's *current* pack version
+    after the fact (recorded event `AcceptancePackBound`; legal while the unit's pack version
+    is unbound; refused once bound — binding is write-once per pack version). `respecify`
+    clears the digest with the version. Amendment (`adjudicate-amend`) is unchanged: it names
+    the next version; the next `freeze` binds it.
+  - Two checks, tier-scoped through the D-12 machinery on the `acceptance-frozen-before-
+    implementation` control: `check.pack-bound` (mechanical, standing+artifact: every unit
+    with a pack version at `standard`+ must be bound and its object must decode; at
+    `lightweight` unbound is NOT_APPLICABLE "label-only pack") and `check.pack-files-match`
+    (artifact check, only when `check --project DIR` is given: every bound unit's files in the
+    working tree hash to the inventory; missing/changed → FAIL naming paths; without
+    `--project` → NOT_APPLICABLE "no project root"). The IR cell's coverage becomes honest:
+    PARTIAL, mechanical = pack bytes bound + re-verifiable, residual = frozen BEFORE
+    implementation is human-attested.
+  - mk2's own store (tier `standard`) must satisfy this: the owner binds the five published
+    units' current packs with `bind-pack` (their files are unchanged since each final freeze,
+    which `check --project .` will now prove every run), and the quickstart freezes with
+    `--pack-file`, so its sentence about goalposts becomes mechanism.
+- **Rejected:** hashing pack bytes into the `pack_version` string (unverifiable without the
+  bytes; the string stays a human label); making binding mandatory at `lightweight` (0.6's
+  lightweight tier is explicitly "ordering only"); a chronology claim ("frozen before
+  implementation") — Vouch still records order of *its own* events only.
