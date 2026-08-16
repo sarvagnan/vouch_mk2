@@ -570,3 +570,53 @@ inspection: three published units → true, one in-progress unit that had never 
   bytes; the string stays a human label); making binding mandatory at `lightweight` (0.6's
   lightweight tier is explicitly "ordering only"); a chronology claim ("frozen before
   implementation") — Vouch still records order of *its own* events only.
+
+**D-14 IR matrix binding (state format 2):** D-14 supersedes D-12's three original
+`acceptance-frozen-before-implementation` binding rows as follows. Lightweight permits a
+label-only pack and therefore claims no mechanical coverage; standard and high bind and
+re-verify the canonical pack inventory while leaving chronology human-attested.
+
+- acceptance-frozen-before-implementation/lightweight: level=required | coverage=none | mechanical=none | residual=frozen BEFORE implementation is human attested; the pack's EXECUTION is not verified — runner configuration (conftest.py, pytest.ini, pyproject testpaths) can deselect a bound test; bind those files too
+- acceptance-frozen-before-implementation/standard: level=required | coverage=partial | mechanical=check.pack-bound, check.pack-files-match | residual=frozen BEFORE implementation is human attested; the pack's EXECUTION is not verified — runner configuration (conftest.py, pytest.ini, pyproject testpaths) can deselect a bound test; bind those files too
+- acceptance-frozen-before-implementation/high: level=required | coverage=partial | mechanical=check.pack-bound, check.pack-files-match | residual=frozen BEFORE implementation is human attested; the pack's EXECUTION is not verified — runner configuration (conftest.py, pytest.ini, pyproject testpaths) can deselect a bound test; bind those files too
+
+**D-14 correction (2026-08-16, unit `pack-binding@1` DEV-pb-01 + adversarial review):**
+(i) `bind-pack` names the unit's ACTIVE record and is refused on superseded history (D-9/M10);
+(ii) `Unit.pack_history` remembers retired labels so `freeze` refuses `pack.version-reused` —
+"write-once per pack version" is now enforceable; (iii) late binding (after publication) stays
+legal at `standard` but is durably recorded (`Unit.pack_binding: "" | at-freeze | late`),
+listed by name in `check.pack-bound`'s detail and in status, and is FAIL at `high` — a green
+row can never hide that the bytes were bound after the code shipped (mk2's own four
+published units were bound late on 2026-08-16 and say so); (iv) what binding does NOT prove is
+stated in the IR residual and the docs: the pack's *execution* — a `conftest.py` can deselect
+a bound test — so the quickstart advises binding runner configuration too; (v) `check
+--project` defaults to the store's parent when the store is `<project>/.vouch`, and at
+`standard`+ its absence makes `check.pack-files-match` NOT_CHECKED, never a clean
+NOT_APPLICABLE; (vi) an empty inventory is refused everywhere; superseded units are out of
+both checks' scope; a pack path must appear verbatim in its directory listing (case).
+
+## D-15 — Human legibility of the governed system is the project's responsibility, not mk2's map (parked)
+
+**Status:** decided 2026-08-16 (user decision; parked, revisit only when a real deployment forces it).
+
+- **The narrowing.** 0.6 required a rich, human-legible system map per part (purpose, inputs,
+  outputs, failure modes, authority, effects) with legibility acceptance tests. mk2 carried over
+  *internal* legibility (one snapshot, pure freshness-checked projections, typed modules,
+  recorded decisions, executable docs) and a checked-in human-readable context
+  (`vouch-context.md`: revision, tier, binding state, next actions, the not-provable list) — but
+  mk2 units carry lifecycle facts only, its map is a *delivery* map not a *system* map, and there
+  is no legibility acceptance test. Until now this narrowing was undecided.
+- **Decision.** Park it. Descriptive fields (`purpose` etc.), a human system-map projection, and
+  legibility tests are NOT added now. System legibility is the responsibility of the users and
+  system designers as part of project design; mk2 remains a policy engine over what artifacts can
+  prove. Rationale: the ledger would start asserting facts about code that Vouch cannot verify
+  (the D068 stale-docs class through the front door); a third state format in a week; a standing
+  owner cost per unit; second-order asks (purpose per release/deviation) with no natural fence —
+  for a benefit not yet demanded by any real deployment.
+- **Revisit trigger:** a real project (bd4.4) whose users cannot answer "what is this unit for /
+  what depends on it / what blocks it" from `vouch-context.md` + `status` + the map. If that
+  happens, the minimal shape is recorded here: `purpose` only, immutable after publication, one
+  Markdown human map, presence tests + an honest organizational NOT_CHECKED row for legibility
+  itself; not 0.6's full field set.
+- The two `defect-closure.md` rows classified (c) for purpose rendering / DOM-order verification
+  stand, now with this decision as their rationale.
