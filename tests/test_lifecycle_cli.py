@@ -128,6 +128,7 @@ def test_refusal_prints_violation_codes_exits_2_and_leaves_store_untouched(tmp_p
 def test_refusal_json_carries_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _init(tmp_path)
     assert main(["specify", "--root", root, "--name", "core", "--version", "v1"]) == 0
+    capsys.readouterr()  # pack/2 (DEV-cli-01): drain the accepted command's R4 line first
     assert main(["publish", "--root", root, "--name", "core", "--json"]) == 2
     document = json.loads(capsys.readouterr().out)
     assert document["accepted"] is False
@@ -191,6 +192,21 @@ def test_record_evidence_refuses_an_incoherent_kind_and_records_nothing(tmp_path
     assert "coheren" in capsys.readouterr().err.lower()
     with Store.open(root) as store:
         assert store.read_snapshot().evidence_head("core") is None
+
+
+def test_record_evidence_json_mode_keeps_stdout_to_exactly_one_document(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # pack/3 (DEV-cli-02): in --json mode the child's stdout is routed to stderr so
+    # stdout carries exactly one JSON document; text mode inherits stdio unchanged.
+    root = _init(tmp_path)
+    for argv in (["specify", "--name", "core", "--version", "v1"], ["freeze", "--name", "core", "--pack-version", "p1"], ["mark-ready", "--name", "core"], ["start", "--name", "core"]):
+        assert main([argv[0], "--root", root, *argv[1:]]) == 0
+    capsys.readouterr()
+    chatty = [sys.executable, "-c", "print('CHILD-STDOUT'); raise SystemExit(1)"]
+    assert main(["record-evidence", "--root", root, "--unit", "core@v1", "--kind", "red", "--json", "--", *chatty]) == 0
+    captured = capsys.readouterr()
+    document = json.loads(captured.out)
+    assert document["accepted"] is True
+    assert "CHILD-STDOUT" in captured.err
 
 
 def test_record_evidence_has_no_typed_outcome_flag() -> None:

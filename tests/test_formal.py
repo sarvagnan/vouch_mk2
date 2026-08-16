@@ -277,9 +277,10 @@ def test_recorded_certificate_recomputes_and_stale_certificate_fails(
         tampered_data = encode_formal_certificate(
             replace(certificate, universes=tampered_universes)
         )
-        tampered_digest = store.put_object(
-            ArtifactKind.FORMAL_CERTIFICATE, tampered_data
-        )
+        with store.write_locked():
+            tampered_digest = store.put_object(
+                ArtifactKind.FORMAL_CERTIFICATE, tampered_data
+            )
         decision = decide(snapshot, RecordFormalCertificate(tampered_digest))
         assert isinstance(decision, Accepted)
         tampered_snapshot = apply(snapshot, decision.events)
@@ -296,7 +297,10 @@ def test_recorded_certificate_recomputes_and_stale_certificate_fails(
         stale_data = encode_formal_certificate(
             replace(certificate, checker_version="stale-checker")
         )
-        stale_digest = store.put_object(ArtifactKind.FORMAL_CERTIFICATE, stale_data)
+        with store.write_locked():
+            stale_digest = store.put_object(
+                ArtifactKind.FORMAL_CERTIFICATE, stale_data
+            )
         decision = decide(tampered_snapshot, RecordFormalCertificate(stale_digest))
         assert isinstance(decision, Accepted)
         store.commit(apply(tampered_snapshot, decision.events))

@@ -20,7 +20,6 @@ from vouch_mk2.store.errors import (
     DecodeError,
     IntegrityError,
     PathError,
-    StoreBusy,
     StoreError,
 )
 from vouch_mk2.store.paths import RelPath
@@ -42,7 +41,6 @@ __all__ = [
     "PathError",
     "RelPath",
     "Store",
-    "StoreBusy",
     "StoreError",
     "decode_snapshot",
     "decode_system_map",

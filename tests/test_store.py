@@ -28,14 +28,16 @@ def test_init_open_read_round_trip(tmp_path: Path) -> None:
 def test_put_get_object_round_trip(tmp_path: Path) -> None:
     payload = b"evidence bytes"
     with Store.init(str(tmp_path / "store")) as store:
-        digest = store.put_object(ArtifactKind.OBJECT, payload)
+        with store.write_locked():
+            digest = store.put_object(ArtifactKind.OBJECT, payload)
         assert store.get_object(ArtifactKind.OBJECT, digest) == payload
 
 
 def test_corrupted_object_is_refused(tmp_path: Path) -> None:
     root = tmp_path / "store"
     with Store.init(str(root)) as store:
-        digest = store.put_object(ArtifactKind.OBJECT, b"original")
+        with store.write_locked():
+            digest = store.put_object(ArtifactKind.OBJECT, b"original")
         (root / "objects" / "sha256" / digest).write_bytes(b"corrupt")
         with pytest.raises(IntegrityError):
             store.get_object(ArtifactKind.OBJECT, digest)
@@ -43,18 +45,21 @@ def test_corrupted_object_is_refused(tmp_path: Path) -> None:
 
 def test_reput_is_idempotent(tmp_path: Path) -> None:
     with Store.init(str(tmp_path / "store")) as store:
-        first = store.put_object(ArtifactKind.OBJECT, b"same")
-        second = store.put_object(ArtifactKind.OBJECT, b"same")
+        with store.write_locked():
+            first = store.put_object(ArtifactKind.OBJECT, b"same")
+            second = store.put_object(ArtifactKind.OBJECT, b"same")
         assert second == first
 
 
 def test_reput_detects_tampered_existing_object(tmp_path: Path) -> None:
     root = tmp_path / "store"
     with Store.init(str(root)) as store:
-        digest = store.put_object(ArtifactKind.OBJECT, b"same")
+        with store.write_locked():
+            digest = store.put_object(ArtifactKind.OBJECT, b"same")
         (root / "objects" / "sha256" / digest).write_bytes(b"tampered")
-        with pytest.raises(IntegrityError):
-            store.put_object(ArtifactKind.OBJECT, b"same")
+        with store.write_locked():
+            with pytest.raises(IntegrityError):
+                store.put_object(ArtifactKind.OBJECT, b"same")
 
 
 def test_cas_conflict_has_no_partial_state_effect(tmp_path: Path) -> None:
@@ -86,8 +91,9 @@ def test_oversized_artifact_is_refused_before_allocation(tmp_path: Path) -> None
 def test_write_bound_refuses_before_creating_temp_files(tmp_path: Path) -> None:
     root = tmp_path / "store"
     with Store.init(str(root), max_artifact_bytes=256) as store:
-        with pytest.raises(StoreError, match="bound"):
-            store.put_object(ArtifactKind.OBJECT, b"x" * 257)
+        with store.write_locked():
+            with pytest.raises(StoreError, match="bound"):
+                store.put_object(ArtifactKind.OBJECT, b"x" * 257)
         with pytest.raises(StoreError, match="bound"):
             store.write_generated("map.json", b"y" * 257)
     assert not tuple((root / "objects" / "sha256").iterdir())

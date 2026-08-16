@@ -86,6 +86,7 @@ from vouch_mk2.core.events import (
 )
 from vouch_mk2.core.invariants import (
     evidence_kind_outcome_coherent,
+    valid_command_line,
     valid_identifier,
     valid_unit_identifier,
 )
@@ -800,6 +801,11 @@ def _decide_record_evidence(
             "evidence.binding-stale",
             f"evidence binds {event.unit.label()!r}; current unit is {current!r}",
         )
+    if not valid_command_line(event.command_line):
+        return _refuse(
+            "evidence.command-line-invalid",
+            "evidence command line must be 1..4096 printable characters",
+        )
     if not _valid_digest(command.event_digest):
         return _refuse(
             "evidence.digest-invalid",
@@ -808,6 +814,7 @@ def _decide_record_evidence(
     if not evidence_kind_outcome_coherent(event.kind, event.outcome):
         return _refuse(
             "evidence.kind-outcome-mismatch",
+            "kind/outcome coherence violated: "
             f"kind {event.kind.value!r} contradicts outcome {event.outcome.value!r}",
         )
     head = snapshot.evidence_head(event.unit.name)

@@ -44,6 +44,8 @@ jobs:
         run: python "$RUNNER_TEMP/vouch.lock" self-check --expect "$(awk '{print $2}' "$RUNNER_TEMP/lock-digest.txt")"
       - name: Check scratch store from lock
         run: python "$RUNNER_TEMP/vouch.lock" check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
+      - name: Lifecycle evidence verb is vendored in the lock
+        run: python "$RUNNER_TEMP/vouch.lock" record-evidence --help
       - name: Dogfood — check mk2's OWN committed store from the lock (D-10)
         # Zero mechanical NOT_CHECKED, every organizational claim visibly
         # NOT_CHECKED, on this repository itself. The certificate is recomputed

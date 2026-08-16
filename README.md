@@ -41,9 +41,11 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
   recomputed content-addressed certificates bind both relations.
 - `src/vouch_mk2/projections/` — canonical system map, binding next actions,
   status facts, and deterministic agent-context generation.
-- `src/vouch_mk2/cli.py` — thin transports: `vouch-mk2 check`, `vouch-mk2 formal
-  [--record]`, `vouch-mk2 generate`, `vouch-mk2 next`, `vouch-mk2 status`, and
-  `vouch-mk2 emit-context`.
+- `src/vouch_mk2/cli.py` — thin transports: the command dataclasses are reflected
+  into lifecycle verbs such as `vouch-mk2 specify`, `vouch-mk2 freeze`, and
+  `vouch-mk2 record-evidence`; verification and projection verbs remain
+  `vouch-mk2 check`, `vouch-mk2 formal [--record]`, `vouch-mk2 generate`,
+  `vouch-mk2 next`, `vouch-mk2 status`, and `vouch-mk2 emit-context`.
 - `src/vouch_mk2/migrate.py` — strict Vouch 0.6 decoder, D-8 field mapper,
   standing-check dry run, complete loss report, and approve-only fresh-store write.
 
@@ -57,6 +59,13 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
   line-delimited JSON-RPC stdio.
 - `vouch-mk2 hook` powers the user-wired, warn-only fragments in `hooks/`; CI,
   not the hook, remains the hard enforcement layer.
+- Lifecycle mutations are CLI-only and require `--root`. Evidence is recorded by
+  `vouch-mk2 record-evidence --root ROOT --unit NAME@VERSION --kind red|green|refactor
+  -- <argv...>`. Its exact claim is that the recorded outcome is the exit status
+  of a process this verb spawned, at the time it spawned it. The child inherits
+  cwd and environment; mk2 does not claim the runner is honest. Store writers
+  wait on an exclusive lock, read-only handles never lock, and generated
+  projections lock only while replacing their output files.
 
 ## Gates
 
@@ -66,6 +75,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check   # D-1: strict types
 uv run lint-imports    # D-1: Policy IR purity contract
-uv run pytest          # 579 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest          # 620 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run vouch-mk2 formal  # invariants over core-v1 + history-v1; witness discrimination
 ```

@@ -67,3 +67,26 @@ R10 `scripts/record_pytest_evidence.py` is deleted; CI, docs, README and
   unit (bd4.3) — do not write it here.
 - Existing verbs (`check formal generate next status emit-context build-lock self-check init
   mcp hook migrate`) unchanged.
+
+## Amendment pack/2 (DEV-cli-01, pack-defect, adjudicated amend)
+
+`test_refusal_json_carries_codes` parsed accumulated `capsys` stdout as JSON after an accepted
+non-JSON `specify` (whose R4 line is required). Raised by the implementer. The test now drains
+capture before the JSON invocation. No requirement text changes.
+
+## Amendment pack/3 (DEV-cli-02, pack-defect, adjudicated amend)
+
+Raised by the mechanical review; two contradictions in the owner's text:
+- R6 vs R2/R4: "inherit stdio" makes `--json` unparseable for any child that writes stdout
+  (pytest does). R6 now reads: text mode inherits stdio unchanged; in `--json` mode the
+  child's stdout is routed to stderr and stdout carries exactly one JSON document
+  (`test_record_evidence_json_mode_keeps_stdout_to_exactly_one_document`).
+- R3 named two `LaunchCriteria` flags; the core model has four required fields. R3 now reads:
+  `LaunchCriteria` → `--launch-criteria` (repeatable), `--verification-window`,
+  `--go-no-go-authority`, `--rollback-trigger` — all required, none defaulted (the core
+  refuses an empty authority; the CLI must not invent ledger data).
+Also clarified from the adversarial review, without changing any requirement: the claim
+mk2 supports for `record-evidence` is exactly "the recorded outcome is the exit status of a
+process this verb spawned, at the time it spawned it" — not that the argv was a test runner
+or that it was honest; a signal-killed child (negative return code) produced no verdict and
+is refused rather than recorded.

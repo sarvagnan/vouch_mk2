@@ -7,7 +7,10 @@ import fcntl
 import os
 import secrets
 import stat
+import threading
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
+from typing import Iterator
 
 from vouch_mk2.core.invariants import validate_snapshot
 from vouch_mk2.core.model import Snapshot
@@ -69,6 +72,10 @@ class Store:
         self._max_artifact_bytes = max_artifact_bytes
         self._closed = False
         self._read_only = False
+        self._write_lock_fd: int | None = None
+        self._write_lock_owner: int | None = None
+        self._write_lock_depth = 0
+        self._write_lock_guard = threading.Condition(threading.Lock())
 
     @staticmethod
     def _require_platform_capabilities() -> None:
@@ -122,11 +129,11 @@ class Store:
     ) -> Store:
         """Open an existing store with one root directory capability.
 
-        ``read_only=True`` is the contract for read/verify transports (MCP,
-        hooks): the layout is checked but the orphan-temp sweep — a write under
-        an exclusive lock — is skipped, and any lock probe is NON-BLOCKING so a
-        store held by a concurrent writer yields ``StoreBusy`` instead of a hang.
-        Commit is refused on a read-only handle."""
+        Writable handles opportunistically sweep orphan temps only when they can
+        acquire ``LOCK_EX | LOCK_NB`` immediately. Actual writers use blocking
+        ``LOCK_EX`` and wait for the current writer. ``read_only=True`` handles
+        never create or acquire the lock, skip the sweep, and refuse every store
+        mutation."""
         store = cls(root, on_step=on_step, max_artifact_bytes=max_artifact_bytes)
         store._read_only = read_only
         try:
@@ -169,6 +176,22 @@ class Store:
                 f"{self._max_artifact_bytes}"
             )
 
+    def _require_writable(self, operation: str) -> None:
+        if self._read_only:
+            raise StoreError(f"{operation} refused: store handle is read-only")
+
+    def _require_write_lock(self, operation: str) -> None:
+        thread_id = threading.get_ident()
+        with self._write_lock_guard:
+            if (
+                self._write_lock_owner != thread_id
+                or self._write_lock_fd is None
+                or self._write_lock_depth < 1
+            ):
+                raise StoreError(
+                    f"{operation} refused: writer lock is not held by current thread"
+                )
+
     def _initialize_layout(self) -> None:
         state = encode_snapshot(Snapshot())
         self._require_within_artifact_bound(state, "initial state")
@@ -208,8 +231,11 @@ class Store:
 
     def _check_layout(self) -> None:
         self._assert_not_symlink("state.json", self._root_fd, "state.json")
-        self._ensure_lock_file()
-        self._assert_not_symlink(".lock", self._root_fd, ".lock")
+        if self._read_only:
+            self._check_optional_lock_file()
+        else:
+            self._ensure_lock_file()
+            self._assert_not_symlink(".lock", self._root_fd, ".lock")
         objects_fd = self._open_objects_directory()
         os.close(objects_fd)
         if not self._read_only:
@@ -218,11 +244,16 @@ class Store:
     def _sweep_orphan_temps(self) -> None:
         """Reclaim temp files orphaned by a killed process.
 
-        Runs under the commit lock so a live committer's unplaced temp is never
-        swept out from under it."""
+        A non-blocking lock probe makes this opportunistic garbage collection:
+        a live writer's temps are skipped, never swept or waited on."""
         lock_fd = self._open_lock()
+        locked = False
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return
+            locked = True
             for name in os.listdir(self._root_fd):
                 if (
                     name.startswith(".state-")
@@ -237,7 +268,8 @@ class Store:
             finally:
                 os.close(objects_fd)
         finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            if locked:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
 
     @staticmethod
@@ -283,6 +315,17 @@ class Store:
             os.close(fd)
         os.fsync(self._root_fd)
 
+    def _check_optional_lock_file(self) -> None:
+        """Validate an existing lock entry without creating or opening it."""
+        try:
+            info = os.stat(".lock", dir_fd=self._root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError as error:
+            raise IntegrityError(f".lock: cannot inspect: {error}") from error
+        if stat.S_ISLNK(info.st_mode):
+            raise IntegrityError(".lock: symlink refused")
+
     def _open_lock(self) -> int:
         try:
             return os.open(
@@ -292,6 +335,58 @@ class Store:
             )
         except OSError as error:
             raise IntegrityError(f".lock: cannot open: {error}") from error
+
+    @contextmanager
+    def write_locked(self) -> Iterator[None]:
+        """Hold the store's exclusive writer lock across a full mutation.
+
+        CLI transports use this boundary around read/decide/apply/commit so a
+        command is decided against the same head it commits.  The context is
+        re-entrant for helpers such as ``record_evidence`` which own their
+        decide/apply/commit sequence but may be called by an already-locked
+        transport.
+        """
+        self._require_writable("write lock")
+        thread_id = threading.get_ident()
+        outermost = False
+        with self._write_lock_guard:
+            if self._write_lock_owner == thread_id:
+                self._write_lock_depth += 1
+            else:
+                while self._write_lock_owner is not None:
+                    self._write_lock_guard.wait()
+                lock_fd = self._open_lock()
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                except BaseException:
+                    os.close(lock_fd)
+                    raise
+                self._write_lock_fd = lock_fd
+                self._write_lock_owner = thread_id
+                self._write_lock_depth = 1
+                outermost = True
+        try:
+            if outermost:
+                self._step("lock-acquired")
+            yield
+        finally:
+            released = False
+            with self._write_lock_guard:
+                if self._write_lock_owner != thread_id:
+                    raise RuntimeError("writer lock ownership changed unexpectedly")
+                self._write_lock_depth -= 1
+                if self._write_lock_depth == 0:
+                    lock_fd = self._write_lock_fd
+                    if lock_fd is None:
+                        raise RuntimeError("writer lock descriptor is missing")
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                    os.close(lock_fd)
+                    self._write_lock_fd = None
+                    self._write_lock_owner = None
+                    released = True
+                    self._write_lock_guard.notify_all()
+            if released:
+                self._step("lock-released")
 
     @staticmethod
     def _assert_not_symlink(name: str, directory_fd: int, path: str) -> None:
@@ -350,6 +445,7 @@ class Store:
 
     def write_generated(self, name: str, data: bytes) -> None:
         """Atomically replace one allowlisted generated file."""
+        self._require_writable("write-generated")
         self._validate_generated_name(name)
         self._require_within_artifact_bound(data, f"generated file {name!r}")
         temp_name = f".generated-{secrets.token_hex(16)}.tmp"
@@ -418,6 +514,8 @@ class Store:
 
     def put_object(self, kind: ArtifactKind, payload: bytes) -> str:
         """Durably place an immutable object, detecting corrupt prior content."""
+        self._require_writable("put-object")
+        self._require_write_lock("put-object")
         self._require_within_artifact_bound(payload, f"{kind.value} object")
         digest = digest_of(kind, payload)
         objects_fd = self._open_objects_directory()
@@ -546,8 +644,7 @@ class Store:
         objects: Sequence[tuple[ArtifactKind, bytes]] = (),
     ) -> None:
         """CAS-commit objects first, then atomically replace authoritative state."""
-        if self._read_only:
-            raise StoreError("commit refused: store handle is read-only")
+        self._require_writable("commit")
         violations = validate_snapshot(snapshot)
         if violations:
             raise StoreError(
@@ -561,13 +658,7 @@ class Store:
         self._require_within_artifact_bound(data, "state")
         for kind, payload in objects:
             self._require_within_artifact_bound(payload, f"{kind.value} object")
-        lock_fd = self._open_lock()
-        locked = False
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX)
-            locked = True
-            self._step("lock-acquired")
-
+        with self.write_locked():
             current = self.read_snapshot()
             expected = snapshot.revision - 1
             if current.revision != expected:
@@ -610,9 +701,3 @@ class Store:
             finally:
                 if temp_exists:
                     self._unlink_if_present(temp_name, self._root_fd)
-        finally:
-            if locked:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            os.close(lock_fd)
-            if locked:
-                self._step("lock-released")

@@ -294,8 +294,8 @@ def test_cli_formal_record_requires_explicit_root(
 
 def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: Path) -> None:
     # A store checked out from version control arrives WITHOUT .lock (it is
-    # gitignored as a runtime primitive). Opening must create it, not fail —
-    # this is exactly the shape CI sees for the committed dogfood store.
+    # gitignored as a runtime primitive). Read verbs must not create it — this
+    # is exactly the shape CI sees for the committed dogfood store.
     import shutil
 
     src = Path(__file__).resolve().parents[1] / ".vouch"
@@ -303,9 +303,8 @@ def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: 
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".lock"))
     assert not (dst / ".lock").exists()
     assert main(["check", "--ci", "--root", str(dst)]) == 0
-    assert (dst / ".lock").exists() and not (dst / ".lock").is_symlink()
+    assert not (dst / ".lock").exists()
     # A planted symlink at .lock is still refused, not followed.
-    (dst / ".lock").unlink()
     (dst / ".lock").symlink_to(dst / "state.json")
     assert main(["check", "--ci", "--root", str(dst)]) != 0
 

@@ -33,6 +33,7 @@ from vouch_mk2.core.commands import (
 from vouch_mk2.core.decide import Accepted, Decision, Refused, apply, decide
 from vouch_mk2.core.invariants import (
     evidence_kind_outcome_coherent,
+    valid_command_line,
     valid_identifier,
     valid_unit_identifier,
     validate_snapshot,
@@ -189,6 +190,7 @@ __all__ = [
     "blocking_deviations",
     "decide",
     "evidence_kind_outcome_coherent",
+    "valid_command_line",
     "valid_identifier",
     "valid_unit_identifier",
     "validate_snapshot",

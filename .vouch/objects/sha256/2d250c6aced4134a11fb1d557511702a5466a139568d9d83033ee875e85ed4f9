@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_lifecycle_cli.py -q","kind":"red","outcome":"tests-failed","parent":"b369b86c0e0ce66528b8b671e2157548503542175945e19f66cc8a22220a25d0","recorded_at":"2026-08-16T11:15:41+00:00","sequence":3,"unit":{"name":"lifecycle-cli","version":"1"}}

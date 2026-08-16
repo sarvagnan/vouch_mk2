@@ -34,6 +34,22 @@ evaluator that ran, or the run fails.
 | Registry completeness | a check declared in the IR without an evaluator fails CI on the mk2 repo itself | 1 |
 | Formal invariants over the bounded model | checker consumes the same transition relation the runtime executes; independently authored invariants with private mutation witnesses; `unknown`/timeout is never a pass | 1 |
 
+Lifecycle writes use the reflected CLI verbs (`vouch-mk2 specify`,
+`vouch-mk2 record-evidence`, and the rest of the typed command set). Each opens
+one store and holds its writer lock across `decide` → `apply` → commit,
+including `record-formal-certificate` through the revision it reports. Writers
+wait on a blocking exclusive lock. Read-only handles never acquire that lock;
+generated projections read without it and hold it only while replacing generated
+files. Their orphan-temp cleanup is opportunistic and skipped when a writer holds
+the lock. The MCP transport remains read-only; these verbs do not add a remote
+mutation path.
+
+For `record-evidence`, the exact mk2 claim is: "the recorded outcome is the exit
+status of a process this verb spawned, at the time it spawned it". The child
+inherits the caller's environment and working directory. This is not a claim that
+the argv names a test runner, that the runner is honest, or that its exit status
+truthfully represents a test suite.
+
 ## Permanently `NOT_CHECKED` (organizational)
 
 These are exclusions, not omissions. Reports on a Vouch-governed project state them.

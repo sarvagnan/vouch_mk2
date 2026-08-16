@@ -3,13 +3,38 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import datetime
 import json
 import os
+import re
+import shlex
+import subprocess
 import sys
 from collections.abc import Sequence
+from enum import Enum
+from typing import Any, Callable, cast, get_args, get_origin, get_type_hints
 
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
-from vouch_mk2.core import AnchorMode
+from vouch_mk2.core import (
+    Accepted,
+    AnchorMode,
+    Command,
+    EvidenceEvent,
+    EvidenceRecorded,
+    EvidenceKind,
+    EvidenceOutcome,
+    FormalCertificateRecorded,
+    LaunchCriteria,
+    RecordEvidence,
+    RecordFormalCertificate,
+    Refused,
+    Snapshot,
+    UnitRef,
+    apply,
+    decide,
+)
+from vouch_mk2.core import commands as command_module
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
 from vouch_mk2.init import InitError, init_project
@@ -30,8 +55,10 @@ from vouch_mk2.mcp import run_stdio
 from vouch_mk2.projections import next_actions, status_facts
 from vouch_mk2.store import DecodeError, Store, StoreError, decode_system_map
 from vouch_mk2.verify import (
+    RefusedError,
     emit_context,
     emit_system_map,
+    record_evidence,
     record_formal_certificate,
     run_artifact_checks,
 )
@@ -53,6 +80,7 @@ class _Arguments(argparse.Namespace):
     config: str | None
     drop_qualified: bool
     approve: bool
+    command_argv: list[str]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -184,6 +212,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="existing target project directory (required with --approve)",
     )
+    _add_lifecycle_parsers(commands)
     return parser
 
 
@@ -241,6 +270,382 @@ def _present_formal(run: FormalRun) -> None:
         )
 
 
+type _LifecycleHandler = Callable[[argparse.Namespace], int]
+type _CommandClass = type[Any]
+
+
+def _kebab_case(name: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", name).lower().replace("_", "-")
+
+
+def _unit_ref(value: str) -> UnitRef:
+    if value.count("@") != 1:
+        raise argparse.ArgumentTypeError("expected NAME@VERSION")
+    name, version = value.split("@", 1)
+    if not name or not version:
+        raise argparse.ArgumentTypeError("expected NAME@VERSION")
+    return UnitRef(name, version)
+
+
+def _command_classes() -> tuple[_CommandClass, ...]:
+    reflected = {
+        value
+        for value in vars(command_module).values()
+        if isinstance(value, type)
+        and dataclasses.is_dataclass(value)
+        and hasattr(value, "ir_command")
+    }
+    return tuple(sorted(reflected, key=lambda value: cast(str, value.ir_command)))
+
+
+_LIFECYCLE_COMMANDS: dict[str, _CommandClass] = {
+    cast(str, command_type.ir_command): command_type
+    for command_type in _command_classes()
+}
+
+
+def _add_lifecycle_common(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--root", required=True, help="store root directory")
+    parser.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="emit one JSON result instead of text",
+    )
+
+
+def _is_string_tuple(annotation: object) -> bool:
+    return get_origin(annotation) is tuple and get_args(annotation) == (str, Ellipsis)
+
+
+def _add_reflected_field(
+    parser: argparse.ArgumentParser,
+    field: dataclasses.Field[Any],
+    annotation: object,
+) -> None:
+    flag = "--" + field.name.replace("_", "-")
+    required = (
+        field.default is dataclasses.MISSING
+        and field.default_factory is dataclasses.MISSING
+    )
+    if annotation is str:
+        parser.add_argument(flag, required=required)
+        return
+    if _is_string_tuple(annotation):
+        parser.add_argument(flag, action="append", required=required, default=[])
+        return
+    if annotation is UnitRef:
+        parser.add_argument(flag, type=_unit_ref, required=required, metavar="NAME@VERSION")
+        return
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        parser.add_argument(
+            flag,
+            choices=tuple(member.value for member in annotation),
+            required=required,
+        )
+        return
+    if annotation is LaunchCriteria:
+        parser.add_argument("--launch-criteria", action="append", required=True)
+        parser.add_argument("--verification-window", required=True)
+        parser.add_argument("--rollback-trigger", action="append", required=True)
+        parser.add_argument("--go-no-go-authority", required=True)
+        return
+    raise TypeError(
+        f"unsupported lifecycle field {field.name!r} on "
+        f"{field.type!r} ({annotation!r})"
+    )
+
+
+def _add_lifecycle_parsers(commands: Any) -> None:
+    for verb, command_type in _LIFECYCLE_COMMANDS.items():
+        parser = commands.add_parser(
+            verb,
+            help=(command_type.__doc__ or f"run {verb}").splitlines()[0],
+        )
+        _add_lifecycle_common(parser)
+        if command_type is command_module.RecordEvidence:
+            parser.add_argument("--unit", type=_unit_ref, required=True, metavar="NAME@VERSION")
+            parser.add_argument(
+                "--kind",
+                choices=tuple(kind.value for kind in EvidenceKind),
+                required=True,
+            )
+            continue
+        if command_type is command_module.RecordFormalCertificate:
+            continue
+        annotations = get_type_hints(command_type)
+        for field in dataclasses.fields(command_type):
+            _add_reflected_field(parser, field, annotations[field.name])
+
+
+def _deduplicated(values: Sequence[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(values))
+
+
+def _command_kwargs(
+    command_type: _CommandClass, namespace: argparse.Namespace
+) -> dict[str, object]:
+    annotations = get_type_hints(command_type)
+    values: dict[str, object] = {}
+    for field in dataclasses.fields(command_type):
+        annotation = annotations[field.name]
+        if annotation is LaunchCriteria:
+            values[field.name] = LaunchCriteria(
+                launch_criteria=_deduplicated(namespace.launch_criteria),
+                verification_window=namespace.verification_window,
+                rollback_triggers=_deduplicated(namespace.rollback_trigger),
+                go_no_go_authority=namespace.go_no_go_authority,
+            )
+            continue
+        value = getattr(namespace, field.name)
+        if _is_string_tuple(annotation):
+            value = _deduplicated(value)
+        elif isinstance(annotation, type) and issubclass(annotation, Enum):
+            value = annotation(value)
+        values[field.name] = value
+    return values
+
+
+def _wire_value(value: object) -> object:
+    if isinstance(value, Enum):
+        return value.value
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _wire_value(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
+    if isinstance(value, tuple | list):
+        return [_wire_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _wire_value(item) for key, item in value.items()}
+    return value
+
+
+def _event_object(event: object) -> dict[str, object]:
+    fields = cast(dict[str, object], _wire_value(event))
+    if "event" in fields:
+        fields["evidence"] = fields.pop("event")
+    return {"event": _kebab_case(type(event).__name__), **fields}
+
+
+def _present_refusal(
+    json_output: bool, refusal: Refused | RefusedError
+) -> int:
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "accepted": False,
+                    "violations": [
+                        {"code": violation.code, "detail": violation.detail}
+                        for violation in refusal.violations
+                    ],
+                },
+                sort_keys=True,
+            )
+        )
+    else:
+        for violation in refusal.violations:
+            print(f"{violation.code}: {violation.detail}", file=sys.stderr)
+    return 2
+
+
+def _present_accepted_json(revision: int, events: Sequence[object]) -> None:
+    print(
+        json.dumps(
+            {
+                "accepted": True,
+                "revision": revision,
+                "events": [_event_object(event) for event in events],
+            },
+            sort_keys=True,
+        )
+    )
+
+
+def _accepted_text(command: Command, snapshot: Snapshot) -> str:
+    name = getattr(command, "name", None)
+    if isinstance(name, str):
+        unit = snapshot.unit(name)
+        if unit is not None:
+            return f"{unit.ref().label()}: {unit.status.value}"
+    deviation_id = getattr(command, "deviation_id", None)
+    if isinstance(deviation_id, str):
+        deviation = snapshot.deviation(deviation_id)
+        if deviation is not None:
+            return f"deviation {deviation_id}: {deviation.status.value}"
+    release_id = getattr(command, "release_id", None)
+    if isinstance(release_id, str):
+        release = snapshot.release(release_id)
+        if release is not None:
+            return f"release {release_id}: {release.state.value}"
+    unit_name = getattr(command, "unit_name", None)
+    if isinstance(unit_name, str):
+        head = snapshot.evidence_head(unit_name)
+        if head is not None:
+            return f"{unit_name}: anchor {head.anchored[:16]}"
+    tier = getattr(command, "tier", None)
+    if isinstance(tier, Enum):
+        return f"tier: {tier.value}"
+    mode = getattr(command, "mode", None)
+    if isinstance(mode, Enum):
+        return f"anchor mode: {mode.value}"
+    return f"{cast(str, type(command).ir_command)}: recorded"
+
+
+def _generic_lifecycle_handler(
+    command_type: _CommandClass, namespace: argparse.Namespace
+) -> int:
+    constructor = cast(Callable[..., Command], command_type)
+    command = constructor(**_command_kwargs(command_type, namespace))
+    try:
+        with Store.open(namespace.root) as store:
+            with store.write_locked():
+                snapshot = store.read_snapshot()
+                decision = decide(snapshot, command)
+                if isinstance(decision, Refused):
+                    return _present_refusal(namespace.json_output, decision)
+                next_snapshot = apply(snapshot, decision.events)
+                store.commit(next_snapshot)
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    if namespace.json_output:
+        _present_accepted_json(next_snapshot.revision, decision.events)
+    else:
+        print(_accepted_text(command, next_snapshot))
+    return 0
+
+
+def _make_lifecycle_handler(command_type: _CommandClass) -> _LifecycleHandler:
+    def handler(namespace: argparse.Namespace) -> int:
+        return _generic_lifecycle_handler(command_type, namespace)
+
+    return handler
+
+
+def _record_evidence_handler(namespace: argparse.Namespace) -> int:
+    command_argv = cast(list[str], namespace.command_argv)
+    if not command_argv:
+        print("vouch-mk2: record-evidence requires -- <argv...>", file=sys.stderr)
+        return 2
+    try:
+        completed = subprocess.run(
+            command_argv,
+            check=False,
+            stdout=subprocess.PIPE if namespace.json_output else None,
+        )
+    except OSError as error:
+        print(
+            f"vouch-mk2: cannot execute {command_argv[0]!r}: {error}",
+            file=sys.stderr,
+        )
+        return 2
+    if namespace.json_output and completed.stdout:
+        child_stdout = cast(bytes, completed.stdout)
+        stream = getattr(sys.stderr, "buffer", None)
+        if stream is None:
+            sys.stderr.write(child_stdout.decode("utf-8", errors="replace"))
+            sys.stderr.flush()
+        else:
+            stream.write(child_stdout)
+            stream.flush()
+    if completed.returncode < 0:
+        print(
+            "vouch-mk2: record-evidence refused: child produced no verdict "
+            f"(terminated by signal {-completed.returncode})",
+            file=sys.stderr,
+        )
+        return 2
+    outcome = (
+        EvidenceOutcome.TESTS_PASSED
+        if completed.returncode == 0
+        else EvidenceOutcome.TESTS_FAILED
+    )
+    kind = EvidenceKind(namespace.kind)
+    unit = cast(UnitRef, namespace.unit)
+    try:
+        with Store.open(namespace.root) as store:
+            with store.write_locked():
+                snapshot = store.read_snapshot()
+                head = snapshot.evidence_head(unit.name)
+                sequence = 1 if head is None else head.head_sequence + 1
+                parent = "GENESIS" if head is None else head.head
+                event = EvidenceEvent(
+                    unit=unit,
+                    sequence=sequence,
+                    parent=parent,
+                    kind=kind,
+                    command_line=shlex.join(command_argv),
+                    outcome=outcome,
+                    recorded_at=datetime.datetime.now(datetime.UTC).isoformat(
+                        timespec="seconds"
+                    ),
+                )
+                digest = record_evidence(store, event)
+                revision = store.read_snapshot().revision
+    except RefusedError as error:
+        return _present_refusal(namespace.json_output, error)
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    recorded = EvidenceRecorded(event=event, event_digest=digest)
+    if namespace.json_output:
+        _present_accepted_json(revision, (recorded,))
+    else:
+        print(
+            f"[evidence] recorded {kind.value} #{sequence} for "
+            f"{unit.label()}: {digest[:16]}"
+        )
+    return 0
+
+
+def _run_formal_command(
+    root: str, *, record: bool, json_output: bool = False
+) -> int:
+    run = run_formal()
+    if not json_output:
+        _present_formal(run)
+    if not passed(run):
+        return 1
+    if not record:
+        return 0
+    try:
+        with Store.open(root) as store:
+            with store.write_locked():
+                digest = record_formal_certificate(store, run)
+                revision = store.read_snapshot().revision
+    except RefusedError as error:
+        return _present_refusal(json_output, error)
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    if json_output:
+        event = FormalCertificateRecorded(certificate_digest=digest)
+        _present_accepted_json(revision, (event,))
+    else:
+        print(f"formal certificate: {digest}")
+    return 0
+
+
+def _record_formal_certificate_handler(namespace: argparse.Namespace) -> int:
+    return _run_formal_command(
+        namespace.root, record=True, json_output=namespace.json_output
+    )
+
+
+LIFECYCLE_VERBS: dict[str, _LifecycleHandler] = {
+    verb: (
+        _record_evidence_handler
+        if command_type is command_module.RecordEvidence
+        else _record_formal_certificate_handler
+        if command_type is command_module.RecordFormalCertificate
+        else _make_lifecycle_handler(command_type)
+    )
+    for verb, command_type in _LIFECYCLE_COMMANDS.items()
+}
+
+
 def _format_counts(rows: tuple[tuple[str, int], ...]) -> str:
     return ",".join(f"{status}={count}" for status, count in rows)
 
@@ -266,6 +671,26 @@ def _expected_lock_digest(spec: str) -> str | None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    parser = _parser()
+    evidence_argv: list[str] | None = None
+    if (
+        arguments
+        and arguments[0] == command_module.RecordEvidence.ir_command
+    ):
+        try:
+            separator = arguments.index("--")
+        except ValueError:
+            if "--help" not in arguments:
+                parser.error("record-evidence requires -- <argv...>")
+        else:
+            lifecycle_arguments = arguments[:separator]
+            child_arguments = arguments[separator + 1 :]
+            arguments = lifecycle_arguments
+            if "--help" not in lifecycle_arguments:
+                evidence_argv = child_arguments
+                if not evidence_argv:
+                    parser.error("record-evidence requires -- <argv...>")
     namespace = _Arguments(
         command="",
         root=".",
@@ -282,10 +707,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         config=None,
         drop_qualified=False,
         approve=False,
+        command_argv=[],
     )
-    parsed = _parser().parse_args(argv, namespace=namespace)
+    parsed = parser.parse_args(arguments, namespace=namespace)
     if not isinstance(parsed, _Arguments):
         raise TypeError("argparse returned an unexpected namespace type")
+    if evidence_argv is not None:
+        parsed.command_argv = evidence_argv
+
+    lifecycle_handler = LIFECYCLE_VERBS.get(parsed.command)
+    if lifecycle_handler is not None:
+        return lifecycle_handler(parsed)
 
     if parsed.command == "build-lock":
         try:
@@ -414,17 +846,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if parsed.record and not parsed.root:
             print("vouch-mk2: formal --record requires --root", file=sys.stderr)
             return 2
-        run = run_formal()
-        _present_formal(run)
-        if parsed.record:
-            try:
-                with Store.open(parsed.root) as store:
-                    digest = record_formal_certificate(store, run)
-            except StoreError as error:
-                print(f"vouch-mk2: {error}", file=sys.stderr)
-                return 2
-            print(f"formal certificate: {digest}")
-        return 0 if passed(run) else 1
+        return _run_formal_command(parsed.root, record=parsed.record)
 
     if parsed.command == "generate":
         try:
@@ -453,7 +875,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if parsed.command in ("next", "status"):
         try:
-            with Store.open(parsed.root) as store:
+            with Store.open(parsed.root, read_only=True) as store:
                 snapshot = store.read_snapshot()
         except StoreError as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)
@@ -463,10 +885,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not actions:
                 print("no next actions")
             for action in actions:
-                print(
-                    f"{action.command}  "
-                    f"{action.subject_kind}/{action.subject_id}  {action.reason}"
-                )
+                subject_flag = {
+                    "unit": "--name",
+                    "deviation": "--deviation-id",
+                    "release": "--release-id",
+                    "evidence": "--unit-name",
+                }[action.subject_kind]
+                command_argv = [
+                    "vouch-mk2",
+                    action.command,
+                    "--root",
+                    parsed.root,
+                    subject_flag,
+                    action.subject_id,
+                ]
+                print(f"{shlex.join(command_argv)}  # {action.reason}")
             return 0
         facts = status_facts(snapshot, actions)
         print(f"unit_counts: {_format_counts(facts.unit_counts)}")
@@ -482,7 +915,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-        with Store.open(parsed.root) as store:
+        with Store.open(parsed.root, read_only=True) as store:
             snapshot = store.read_snapshot()
             artifact_results = run_artifact_checks(store, snapshot)
     except StoreError as error:

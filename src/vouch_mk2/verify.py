@@ -27,7 +27,7 @@ from vouch_mk2.core import (
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.ir import mk2
-from vouch_mk2.ir.schema import Verdict
+from vouch_mk2.ir.schema import Verdict, Violation
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.projections import agent_context, system_map
 from vouch_mk2.store import (
@@ -53,6 +53,20 @@ class _ChainWalk:
     head: EvidenceHead
     events: tuple[tuple[str, EvidenceEvent], ...]
     error: str
+
+
+class RefusedError(StoreError):
+    """A pure lifecycle decision refused a verification-layer mutation."""
+
+    def __init__(self, violations: tuple[Violation, ...]) -> None:
+        self.violations = violations
+        super().__init__(
+            "refused: "
+            + "; ".join(
+                f"{violation.code}: {violation.detail}"
+                for violation in violations
+            )
+        )
 
 
 def _valid_digest(value: str) -> bool:
@@ -478,7 +492,8 @@ def emit_system_map(store: Store) -> bytes:
         system_map(snapshot),
         digest_of(ArtifactKind.STATE, encode_snapshot(snapshot)),
     )
-    store.write_generated("map.json", data)
+    with store.write_locked():
+        store.write_generated("map.json", data)
     return data
 
 
@@ -490,7 +505,8 @@ def emit_context(store: Store, target: str | None) -> str:
     refused rather than followed."""
     snapshot = store.read_snapshot()
     data = agent_context(snapshot).encode("utf-8")
-    store.write_generated("vouch-context.md", data)
+    with store.write_locked():
+        store.write_generated("vouch-context.md", data)
     if target is None:
         return store.generated_path("vouch-context.md")
     current = read_regular_nofollow(target, "context target")
@@ -500,17 +516,17 @@ def emit_context(store: Store, target: str | None) -> str:
 
 
 def record_evidence(store: Store, event: EvidenceEvent) -> str:
-    snapshot = store.read_snapshot()
-    data = encode_evidence_event(event)
-    digest = digest_of(ArtifactKind.EVIDENCE, data)
-    decision = decide(snapshot, RecordEvidence(event, digest))
-    if not isinstance(decision, Accepted):
-        codes = tuple(violation.code for violation in decision.violations)
-        raise StoreError(f"record-evidence refused: {codes!r}")
-    store.commit(
-        apply(snapshot, decision.events),
-        objects=((ArtifactKind.EVIDENCE, data),),
-    )
+    with store.write_locked():
+        snapshot = store.read_snapshot()
+        data = encode_evidence_event(event)
+        digest = digest_of(ArtifactKind.EVIDENCE, data)
+        decision = decide(snapshot, RecordEvidence(event, digest))
+        if not isinstance(decision, Accepted):
+            raise RefusedError(decision.violations)
+        store.commit(
+            apply(snapshot, decision.events),
+            objects=((ArtifactKind.EVIDENCE, data),),
+        )
     return digest
 
 
@@ -535,13 +551,13 @@ def record_formal_certificate(store: Store, run: FormalRun | None = None) -> str
         )
     _certificate, data = build_certificate(run)
     digest = digest_of(ArtifactKind.FORMAL_CERTIFICATE, data)
-    snapshot = store.read_snapshot()
-    decision = decide(snapshot, RecordFormalCertificate(digest))
-    if not isinstance(decision, Accepted):
-        codes = tuple(violation.code for violation in decision.violations)
-        raise StoreError(f"record-formal-certificate refused: {codes!r}")
-    store.commit(
-        apply(snapshot, decision.events),
-        objects=((ArtifactKind.FORMAL_CERTIFICATE, data),),
-    )
+    with store.write_locked():
+        snapshot = store.read_snapshot()
+        decision = decide(snapshot, RecordFormalCertificate(digest))
+        if not isinstance(decision, Accepted):
+            raise RefusedError(decision.violations)
+        store.commit(
+            apply(snapshot, decision.events),
+            objects=((ArtifactKind.FORMAL_CERTIFICATE, data),),
+        )
     return digest

@@ -27,6 +27,20 @@ def valid_identifier(text: str) -> bool:
     )
 
 
+def valid_command_line(text: str) -> bool:
+    """Return whether a rendered argv is bounded printable ledger text."""
+    return (
+        bool(text)
+        and len(text) <= 4096
+        and text == text.strip()
+        and text.isprintable()
+        and all(
+            ord(character) >= 0x20 and ord(character) != 0x7F
+            for character in text
+        )
+    )
+
+
 def valid_unit_identifier(text: str) -> bool:
     """Return whether ``text`` is an unambiguous unit-name/version component."""
     return valid_identifier(text) and "@" not in text
@@ -308,6 +322,7 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
 
 __all__ = [
     "evidence_kind_outcome_coherent",
+    "valid_command_line",
     "valid_identifier",
     "valid_unit_identifier",
     "validate_snapshot",

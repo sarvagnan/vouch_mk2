@@ -11,7 +11,11 @@ import json
 from collections.abc import Callable
 from typing import cast
 
-from vouch_mk2.core.invariants import valid_unit_identifier, validate_snapshot
+from vouch_mk2.core.invariants import (
+    valid_command_line,
+    valid_unit_identifier,
+    validate_snapshot,
+)
 from vouch_mk2.core.model import (
     AnchorMode,
     BundleInventory,
@@ -767,12 +771,17 @@ def decode_evidence_event(data: bytes) -> EvidenceEvent:
     sequence = _integer(obj["sequence"], "sequence")
     if sequence < 1:
         raise DecodeError("sequence: must be at least 1")
+    command_line = _string(obj["command_line"], "command_line")
+    if not valid_command_line(command_line):
+        raise DecodeError(
+            "command_line: expected 1..4096 printable characters"
+        )
     event = EvidenceEvent(
         unit=_decode_unit_ref(obj["unit"], "unit"),
         sequence=sequence,
         parent=_parent(obj["parent"], "parent"),
         kind=_enum_value(obj["kind"], "kind", EvidenceKind),
-        command_line=_string(obj["command_line"], "command_line"),
+        command_line=command_line,
         outcome=_enum_value(obj["outcome"], "outcome", EvidenceOutcome),
         recorded_at=_string(obj["recorded_at"], "recorded_at"),
     )

@@ -82,8 +82,13 @@ def test_normal_commit_emits_the_declared_steps_in_order(tmp_path: Path) -> None
 def test_put_object_emits_its_declared_steps_in_order(tmp_path: Path) -> None:
     seen: list[str] = []
     with Store.init(str(tmp_path / "put"), on_step=seen.append) as store:
-        store.put_object(ArtifactKind.OBJECT, _PAYLOAD)
-    assert tuple(seen) == COMMIT_STEPS[2:6]
+        with store.write_locked():
+            store.put_object(ArtifactKind.OBJECT, _PAYLOAD)
+    assert tuple(seen) == (
+        "lock-acquired",
+        *COMMIT_STEPS[2:6],
+        "lock-released",
+    )
 
 
 @pytest.mark.parametrize("step", COMMIT_STEPS)

@@ -5,12 +5,10 @@
 Run:  python scripts/walkthrough.py --lock PATH/vouch.lock [--keep DIR]
 Exit 0 iff every step succeeds and the final check composes to PASS.
 
-Self-containment is proved three ways: the lock is executed with PYTHONPATH="" so
-nothing outside it is importable; the walkthrough's own scripting of the store goes
-through `python <lock> ...` subcommands where one exists and through the lock's OWN
-packaged modules (imported from the zip via sys.path) where the CLI has no mutation
-surface — never through the source tree; and CI runs it under a network-disabled
-sandbox (see .github/workflows/ci.yml).
+Self-containment is proved three ways: every lifecycle mutation is a
+`python <lock> <verb>` subprocess with PYTHONPATH=""; the sole artifact-construction
+helper imports only the lock's OWN packaged modules (never the source tree); and CI
+runs the walkthrough under a network-disabled sandbox (see .github/workflows/ci.yml).
 """
 
 from __future__ import annotations
@@ -40,45 +38,73 @@ def _step(name: str, proc: subprocess.CompletedProcess[str], expect: int = 0) ->
         raise SystemExit(1)
 
 
-def _drive_lifecycle(lock: str, project: str) -> None:
-    """Mutations have no CLI surface by design (D-7: MCP is read-only; the CLI
-    exposes check/formal/projections/transports). Drive them through the lock's
-    OWN packaged core, imported from the zip — still no source tree, no network."""
+def _bundle_object(lock: str, project: str) -> str:
+    """Build and place one inventory object using only lock-packaged modules."""
     code = r'''
-import sys
-from vouch_mk2.core import *
-from vouch_mk2.store import Store
-from vouch_mk2.verify import record_evidence, record_formal_certificate
-from vouch_mk2.bundle import build_inventory, bind_bundle
 import os, tempfile
+import sys
+from vouch_mk2.bundle import build_inventory
+from vouch_mk2.store import ArtifactKind, Store, digest_of, encode_bundle_inventory
 root = sys.argv[1]
+tree = tempfile.mkdtemp()
+with open(os.path.join(tree, "a.txt"), "w") as stream:
+    stream.write("hello")
+data = encode_bundle_inventory(build_inventory(tree, ()))
+digest = digest_of(ArtifactKind.BUNDLE_INVENTORY, data)
 with Store.open(root) as store:
-    def run(cmd):
-        s = store.read_snapshot(); d = decide(s, cmd)
-        assert isinstance(d, Accepted), (cmd, d)
-        store.commit(apply(s, d.events))
-    run(SpecifyUnit("core", "v1"))
-    run(SpecifyUnit("api", "v1", depends_on=("core",)))
-    for name in ("core", "api"):
-        run(FreezeAcceptance(name, f"pack-{name}")); run(MarkReady(name)); run(StartWork(name)); run(MarkDone(name))
-    red = record_evidence(store, EvidenceEvent(UnitRef("core","v1"), 1, "GENESIS", EvidenceKind.RED, "pytest", EvidenceOutcome.TESTS_FAILED, "t1"))
-    record_evidence(store, EvidenceEvent(UnitRef("core","v1"), 2, red, EvidenceKind.GREEN, "pytest", EvidenceOutcome.TESTS_PASSED, "t2"))
-    run(SetAnchorMode(AnchorMode.CI)); run(AdvanceAnchor("core"))
-    run(Publish("core")); run(Publish("api"))
-    run(PrepareRelease("r1", ("api", "core")))
-    run(SetReleaseCriteria("r1", LaunchCriteria(("healthy",), "1h", ("errors",), "ops")))
-    tree = tempfile.mkdtemp(); open(os.path.join(tree, "a.txt"), "w").write("hello")
-    bind_bundle(store, "r1", build_inventory(tree, ()))
-    run(StartDeploy("r1")); run(StartVerification("r1")); run(CompleteRelease("r1"))
-    record_formal_certificate(store)
-print("lifecycle complete")
+    with store.write_locked():  # object placement is a write; the lock is required
+        assert store.put_object(ArtifactKind.BUNDLE_INVENTORY, data) == digest
+print(digest)
 '''
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": lock, "PYTHONDONTWRITEBYTECODE": "1"}
     proc = subprocess.run(
         [sys.executable, "-c", code, os.path.join(project, ".vouch")],
         cwd=project, env=env, capture_output=True, text=True,
     )
-    _step("lifecycle via lock-packaged core (PYTHONPATH=<lock only>)", proc)
+    _step("bundle object via lock-packaged artifact builder", proc)
+    return proc.stdout.strip()
+
+
+def _drive_lifecycle(lock: str, project: str) -> None:
+    root = ".vouch"
+
+    def verb(name: str, *args: str) -> None:
+        _step(name, _run(lock, name, "--root", root, *args, cwd=project))
+
+    verb("specify", "--name", "core", "--version", "v1")
+    verb("specify", "--name", "api", "--version", "v1", "--depends-on", "core")
+    for name in ("core", "api"):
+        verb("freeze", "--name", name, "--pack-version", f"pack-{name}")
+        verb("mark-ready", "--name", name)
+        verb("start", "--name", name)
+
+    python = sys.executable
+    verb(
+        "record-evidence", "--unit", "core@v1", "--kind", "red", "--",
+        python, "-c", "raise SystemExit(1)",
+    )
+    verb(
+        "record-evidence", "--unit", "core@v1", "--kind", "green", "--",
+        python, "-c", "raise SystemExit(0)",
+    )
+    for name in ("core", "api"):
+        verb("mark-done", "--name", name)
+    verb("set-anchor-mode", "--mode", "ci")
+    verb("advance-anchor", "--unit-name", "core")
+    verb("publish", "--name", "core")
+    verb("publish", "--name", "api")
+    verb("prepare-release", "--release-id", "r1", "--includes", "api", "--includes", "core")
+    verb(
+        "set-criteria", "--release-id", "r1", "--launch-criteria", "healthy",
+        "--verification-window", "1h", "--rollback-trigger", "errors",
+        "--go-no-go-authority", "ops",
+    )
+    digest = _bundle_object(lock, project)
+    verb("bind-bundle", "--release-id", "r1", "--inventory-digest", digest)
+    verb("start-deploy", "--release-id", "r1")
+    verb("start-verification", "--release-id", "r1")
+    verb("complete", "--release-id", "r1")
+    verb("record-formal-certificate")
 
 
 def main() -> int:

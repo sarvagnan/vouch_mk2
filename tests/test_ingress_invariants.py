@@ -101,8 +101,9 @@ def test_p1_store_refuses_oversize_objects_and_generated_files_on_write(tmp_path
     # state (128 bytes), so a 64-byte bound correctly refuses Store.init itself.
     # The write-side rule is exercised with a bound the empty store fits under.
     store = Store.init(str(tmp_path / "s"), max_artifact_bytes=256)
-    with pytest.raises(StoreError, match="bound"):
-        store.put_object(ArtifactKind.OBJECT, b"x" * 257)
+    with store.write_locked():
+        with pytest.raises(StoreError, match="bound"):
+            store.put_object(ArtifactKind.OBJECT, b"x" * 257)
     with pytest.raises(StoreError, match="bound"):
         store.write_generated("map.json", b"y" * 257)
     store.close()
@@ -163,7 +164,8 @@ def test_p2_chain_walk_rejects_incoherent_red_that_passed(tmp_path: Path) -> Non
         digest = digest_of(ArtifactKind.EVIDENCE, data)
         # decide() refuses it — so plant it directly, as a hostile store would.
         assert isinstance(decide(store.read_snapshot(), RecordEvidence(bad, digest)), Refused)
-        store.put_object(ArtifactKind.EVIDENCE, data)
+        with store.write_locked():
+            store.put_object(ArtifactKind.EVIDENCE, data)
         from vouch_mk2.core.model import EvidenceHead
         snapshot = store.read_snapshot()
         forged = Snapshot(
