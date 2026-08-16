@@ -108,17 +108,16 @@ surface on which that defect existed is absent by a recorded mk2 scope decision.
 
 | disposition | count |
 |---|---:|
-| (a) regression test | 29 |
+| (a) regression test | 30 |
 | (b) unrepresentable | 3 |
 | (c) out of scope | 29 |
-| (d) open | 9 |
+| (d) open | 8 |
 | **all defects** | **70** |
 
 The open items, with the proposed discriminators already named in the table, are:
 
 - project-local lock discrimination across distinct temporary namespaces;
 - a negative binding against formal semantic-uniqueness overclaims;
-- one authoritative runtime assurance tier driving the IR requirements;
 - vendored and digest-bound custody of the acceptance source;
 - cross-surface public claim and version vocabulary binding;
 - exact public-assurance wording across generated contexts;
