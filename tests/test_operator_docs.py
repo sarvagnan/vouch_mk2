@@ -88,7 +88,8 @@ def test_quickstart_ends_with_a_published_unit_a_succeeded_release_and_a_clean_c
 
     with Store.open(str(project / ".vouch"), read_only=True) as store:
         snapshot = store.read_snapshot()
-    assert any(u.status is UnitStatus.PUBLISHED for u in snapshot.units)
+    # pack/2 (DEV-docs-01): a rostered unit is release-bound, which is published-and-more.
+    assert any(u.status in (UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND) and u.published_once for u in snapshot.units)
     assert any(r.state is ReleaseState.SUCCEEDED for r in snapshot.releases)
     assert any(d.status.value == "closed" for d in snapshot.deviations), "the quickstart must walk one deviation to closure"
     assert snapshot.evidence_heads, "the quickstart must record real evidence"

@@ -12,6 +12,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Sync environment
         run: uv sync --locked
+      - name: Generated command reference is fresh
+        run: uv run python scripts/gen_commands_doc.py --check
       - name: Types (Pyrefly strict)
         run: uv run pyrefly check
       - name: Purity contracts (import-linter)

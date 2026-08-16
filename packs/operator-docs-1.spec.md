@@ -36,3 +36,9 @@ R6 README's first 12 lines point to `docs/quickstart.md` and `docs/commands.md` 
 ## Ground rules
 - No new runtime code paths; docs + one script + README head only. Existing tests green.
 - The quickstart must run in CI's no-network walkthrough environment (nothing fetched).
+
+## Amendment pack/2 (DEV-docs-01, pack-defect, adjudicated amend)
+
+The owner's end-state test asserted a `published` unit; a unit rostered into a release is
+`release-bound` (published_once stays true). Raised by the owner's own dry run; the test now
+accepts either status and requires the latch.

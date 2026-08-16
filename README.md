@@ -3,6 +3,9 @@
 Rebuild of Vouch (`../vouch`) as a typed policy engine with one authoritative
 snapshot, content-addressed artifacts, pure projections, and thin adapters.
 
+Start here: [`docs/quickstart.md`](docs/quickstart.md) is the executable lifecycle walkthrough;
+[`docs/commands.md`](docs/commands.md) is the generated command reference.
+
 Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 recorded defects,
 31 behavioral hardening commits (2026-08-03 → 2026-08-10).
 
@@ -79,6 +82,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check   # D-1: strict types
 uv run lint-imports    # D-1: Policy IR purity contract
-uv run pytest          # 658 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest          # 668 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run vouch-mk2 formal  # invariants over core-v1 + history-v1; witness discrimination
 ```

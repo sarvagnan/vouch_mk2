@@ -62,6 +62,10 @@ gates that must be green; write `<unit>.DONE.md`; `bd close <bead>`.
 Write the brief with a QUOTED heredoc delimiter (`<<'EOF'`) — an unquoted one lets the shell eat
 backticked phrases (unit #4 lost two words that way; not fatal, but avoidable).
 
+Launch with `< /dev/null` — without it Codex may wait on stdin ("Reading additional input
+from stdin…") and exit with no report; that is a dead launch, not a timeout, and the one case
+where relaunching is right. Quote `bd create --description` in SINGLE quotes (backticks).
+
 Waiting: poll for the DONE/DEVIATION file or process exit — by **pid**
 (`ps -p <pid>`), never `pgrep -f "codex exec"` (it matches your own waiter shell). Never
 relaunch on a timeout; a second Codex in the same tree is the worst failure mode.
