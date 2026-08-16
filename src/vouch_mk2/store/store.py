@@ -208,6 +208,7 @@ class Store:
 
     def _check_layout(self) -> None:
         self._assert_not_symlink("state.json", self._root_fd, "state.json")
+        self._ensure_lock_file()
         self._assert_not_symlink(".lock", self._root_fd, ".lock")
         objects_fd = self._open_objects_directory()
         os.close(objects_fd)
@@ -252,6 +253,35 @@ class Store:
             return self._open_directory("sha256", objects_fd)
         finally:
             os.close(objects_fd)
+
+    def _ensure_lock_file(self) -> None:
+        """Create the runtime lock file if it is absent.
+
+        ``.lock`` carries no state — it is a flock() primitive — so a store
+        checked out from version control (the committed dogfood store, D-10)
+        legitimately arrives without it. Creating it is not a write to the
+        store's content. O_EXCL keeps a concurrent creator harmless (EEXIST)
+        and O_NOFOLLOW keeps a planted symlink from being followed; the
+        symlink check that follows still refuses a symlinked ``.lock``.
+        """
+        try:
+            os.stat(".lock", dir_fd=self._root_fd, follow_symlinks=False)
+            return
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise IntegrityError(f".lock: cannot inspect: {error}") from error
+        try:
+            fd = os.open(".lock", _TEMP_WRITE_FLAGS, 0o600, dir_fd=self._root_fd)
+        except FileExistsError:
+            return
+        except OSError as error:
+            raise IntegrityError(f".lock: missing and cannot be created: {error}") from error
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.fsync(self._root_fd)
 
     def _open_lock(self) -> int:
         try:

@@ -61,7 +61,7 @@ surface on which that defect existed is absent by a recorded mk2 scope decision.
 | D042 | Distinct signatures admit borrowed witnesses | formal self-certification | (a) regression test | `tests/test_formal.py::test_witness_registry_rejects_missing_and_borrowed_mutations` | Reusing another invariant's mutation is an explicit build error. |
 | D043 | Applicability partitions one invariant | formal self-certification | (b) unrepresentable | `src/vouch_mk2/formal/invariants.py`; `src/vouch_mk2/formal/witnesses.py` | An `Invariant` has no policy/applicability discriminator and the witness registry requires one owned mutation per invariant. |
 | D044 | Status facts omit promised witness evidence | stale generated artifacts | (c) out of scope | `DECISIONS.md` D-5 and D-6 | Mk2 makes the recomputed certificate/CLI the witness-evidence surface; map status facts deliberately carry operational projection facts, not a copied formal report. |
-| D045 | Config and ledger disagree on assurance tier | policy drift | (d) open | Proposed test `test_store_codec.py:test_snapshot_tier_is_the_single_authority_for_ir_requirements` | Tier requirements exist in the IR transcription, but the runtime snapshot has no authoritative tier and therefore cannot enforce them. |
+| D045 | Config and ledger disagree on assurance tier | policy drift | (a) regression test | `tests/test_assurance_tier.py::test_tier_is_snapshot_state_defaulting_to_lightweight_and_round_trips` | `Snapshot.tier` is the one runtime authority; migration refuses config/ledger disagreement and tier-matrix cells bind the checks that consume them. |
 | D046 | Status can publish before unit-done | fail-opens | (a) regression test | `tests/test_decide_gates.py::test_d046_publication_with_unsatisfied_dependency_is_refused` | The publication command and its dependency gate are one `decide()` path. |
 | D047 | Serialized anchor can move backward | coupled writes | (a) regression test | `tests/test_evidence.py::test_anchor_monotonicity_by_construction`; `tests/test_evidence.py::test_anchor_advanced_event_is_promotion_only_by_type` | Anchor advance targets only the current append-only head, so a caller cannot nominate an older digest. |
 | D048 | Kit authority and defect metadata not self-contained | missing digest bindings | (d) open | Proposed test `test_doc_binding.py:test_defect_acceptance_source_is_vendored_and_digest_bound` | This map reads the sibling 0.6 defect log but mk2 neither vendors nor digest-binds that acceptance source. |
@@ -108,17 +108,16 @@ surface on which that defect existed is absent by a recorded mk2 scope decision.
 
 | disposition | count |
 |---|---:|
-| (a) regression test | 28 |
+| (a) regression test | 29 |
 | (b) unrepresentable | 3 |
 | (c) out of scope | 29 |
-| (d) open | 10 |
+| (d) open | 9 |
 | **all defects** | **70** |
 
 The open items, with the proposed discriminators already named in the table, are:
 
 - project-local lock discrimination across distinct temporary namespaces;
 - a negative binding against formal semantic-uniqueness overclaims;
-- byte-preserving migration refusal for cyclic producer topology;
 - one authoritative runtime assurance tier driving the IR requirements;
 - vendored and digest-bound custody of the acceptance source;
 - cross-surface public claim and version vocabulary binding;

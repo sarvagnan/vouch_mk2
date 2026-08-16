@@ -34,7 +34,7 @@ permanently NOT_CHECKED, and self-hosting does not change that.
 
 1. Friction on every change (freeze first, formal deviations, per-red/green evidence) —
    the method's deliberate friction; today's flow is fast because it skips it.
-2. That friction lands on the smallest remaining work (10 open dispositions, D045, perf).
+2. That friction lands on the smallest remaining work (9 open dispositions, D045, perf).
 3. One-time infrastructure the pilot forces: re-versioning through `decide()` (which
    retires D-9's seeded state — good regardless) and a pytest→`record_evidence` adapter.
 4. Ceremony can rot into theater; the mechanical guards (red-before-green, blocked-on-open

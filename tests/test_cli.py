@@ -285,6 +285,24 @@ def test_cli_formal_record_requires_explicit_root(
     assert "requires --root" in captured.err
 
 
+def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: Path) -> None:
+    # A store checked out from version control arrives WITHOUT .lock (it is
+    # gitignored as a runtime primitive). Opening must create it, not fail —
+    # this is exactly the shape CI sees for the committed dogfood store.
+    import shutil
+
+    src = Path(__file__).resolve().parents[1] / ".vouch"
+    dst = tmp_path / "checkout"
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".lock"))
+    assert not (dst / ".lock").exists()
+    assert main(["check", "--ci", "--root", str(dst)]) == 0
+    assert (dst / ".lock").exists() and not (dst / ".lock").is_symlink()
+    # A planted symlink at .lock is still refused, not followed.
+    (dst / ".lock").unlink()
+    (dst / ".lock").symlink_to(dst / "state.json")
+    assert main(["check", "--ci", "--root", str(dst)]) != 0
+
+
 def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[str]) -> None:
     # D-10: mk2's own committed store must pass check --ci with zero mechanical
     # NOT_CHECKED and all five organizational rows visibly NOT_CHECKED.
