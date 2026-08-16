@@ -107,6 +107,8 @@ def _baseline_document() -> dict[str, object]:
                 "status": "specified",
                 "depends_on": [],
                 "acceptance_pack_version": "",
+                "acceptance_pack_digest": "",
+                "pack_history": [],
                 "published_once": False,
             }
         ],
@@ -335,7 +337,7 @@ def test_duplicate_json_keys_are_refused_at_every_level() -> None:
     nested = (
         b'{"anchor_mode":"none","tier":"lightweight","evidence_heads":[],"formal_certificate_digest":"","revision":0,"deviations":[],"releases":[],"units":[{"name":"a","name":"b",'
         b'"version":"1","status":"specified","depends_on":[],'
-        b'"acceptance_pack_version":"","published_once":false}]}'
+        b'"acceptance_pack_version":"","acceptance_pack_digest":"","published_once":false}]}'
     )
     with pytest.raises(DecodeError, match="duplicate object key 'name'"):
         decode_snapshot(nested)
@@ -570,11 +572,11 @@ def test_system_map_refuses_two_contradictory_tiers_and_format_one() -> None:
 
     encoded = encode_system_map(system_map(Snapshot(revision=1, tier=Tier.STANDARD)), "a" * 64)
     document = json.loads(encoded)
-    assert document["map_format"] == 2
+    assert document["map_format"] == 3
     document["map"]["status_facts"]["tier"] = "high"
     with pytest.raises(DecodeError, match="status_facts.tier"):
         decode_system_map(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")
     document = json.loads(encoded)
-    document["map_format"] = 1
-    with pytest.raises(DecodeError, match="format 1"):
+    document["map_format"] = 2
+    with pytest.raises(DecodeError, match="format 2"):
         decode_system_map(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")

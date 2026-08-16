@@ -75,3 +75,12 @@ refs in the mapping are refused too), and the verb takes `--was-published NAME@V
 `--never-published NAME@V` (repeatable), lists what is missing on refusal (also under
 `--dry-run`), and prints every assertion it applied. An unknown status is refused explicitly
 (not left for the codec). D-13 is corrected accordingly.
+
+## Amendment pack/4 (DEV-sf-03, contract-conflict with D-14, adjudicated amend)
+
+D-14 (`pack-binding@1`) bumps the state format to 2. R1's "CURRENT_STATE_FORMAT == 1", the
+format-1 golden reference, and the upgrade step list `[(0, 1)]` were true at publication and are
+now superseded by the format-2 layout: `state_format == 2`, golden `format2.golden.json`, steps
+`[(0, 1), (1, 2)]`, and `Unit` gains `acceptance_pack_digest`. The unit is re-verified against
+this pack; the format policy itself (strict decode, explicit upgrade, no invented state) is
+unchanged.

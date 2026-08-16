@@ -210,14 +210,14 @@ def test_system_map_complete_round_trip() -> None:
 def _regression_system_map_v2_refuses_v1_and_contradictory_tiers() -> None:
     data = encode_system_map(system_map(_populated_snapshot()), "a" * 64)
     document = json.loads(data)
-    document["map_format"] = 1
+    document["map_format"] = 2
     legacy = json.dumps(
         document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8") + b"\n"
-    with pytest.raises(DecodeError, match="format 1 is no longer supported"):
+    with pytest.raises(DecodeError, match="format 2 is no longer supported"):
         decode_system_map(legacy)
 
-    document["map_format"] = 2
+    document["map_format"] = 3
     document["map"]["status_facts"]["tier"] = "high"
     contradictory = json.dumps(
         document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -610,9 +610,16 @@ def _regression_tier_control_coverage_reports_partial_none_full_and_waived() -> 
             cell = requirement.cell(tier)
             if requirement.control_id in {
                 "typed-contracts",
-                "acceptance-frozen-before-implementation",
             }:
                 assert cell.coverage is Coverage.PARTIAL
+                assert cell.residual
+            elif requirement.control_id == "acceptance-frozen-before-implementation":
+                expected = (
+                    Coverage.NONE
+                    if tier is Tier.LIGHTWEIGHT
+                    else Coverage.PARTIAL
+                )
+                assert cell.coverage is expected
                 assert cell.residual
             elif requirement.control_id == mk2.TIER_EVIDENCE_CONTROL:
                 assert cell.coverage is Coverage.FULL

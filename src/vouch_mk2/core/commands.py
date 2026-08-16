@@ -37,6 +37,16 @@ class FreezeAcceptance:
     ir_command: ClassVar[str] = mk2.CMD_FREEZE
     name: str
     pack_version: str
+    pack_digest: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class BindPack:
+    """Bind the current acceptance-pack version to immutable inventory bytes."""
+
+    ir_command: ClassVar[str] = mk2.CMD_BIND_PACK
+    name: str
+    pack_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +242,7 @@ type Command = (
     | PrepareRelease
     | SetReleaseCriteria
     | BindBundle
+    | BindPack
     | RecordEvidence
     | AdvanceAnchor
     | SetAnchorMode

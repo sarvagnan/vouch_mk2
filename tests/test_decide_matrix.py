@@ -109,6 +109,8 @@ PURE_ARTIFACT_RESULTS = tuple(
         mk2.CHECK_FORMAL_CERTIFICATE,
         mk2.CHECK_MAP_FRESHNESS,
         mk2.CHECK_CONTEXT_FRESHNESS,
+        mk2.CHECK_PACK_BOUND,
+        mk2.CHECK_PACK_FILES_MATCH,
     )
 )
 
@@ -596,6 +598,7 @@ def test_reachable_snapshots_from_seeded_history_pass_standing_checks() -> None:
     )
     universe: tuple[Command, ...] = (
         FreezeAcceptance(name="u", pack_version="p2"),
+        FreezeAcceptance(name="u", pack_version="p3"),
         MarkReady(name="u"),
         StartWork(name="u"),
         MarkDone(name="u"),
@@ -603,6 +606,7 @@ def test_reachable_snapshots_from_seeded_history_pass_standing_checks() -> None:
         Respecify(name="u"),
         BeginReverify(name="u"),
         FreezeAcceptance(name="w", pack_version="p-w"),
+        FreezeAcceptance(name="w", pack_version="p-w2"),
         MarkReady(name="w"),
         StartWork(name="w"),
         MarkDone(name="w"),

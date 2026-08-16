@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/cli-completeness-1.spec.md","sha256":"c52e98271126daaaecd7b0c770aa193384779e0156fb51954a0916ee8a7b2034","size":2880},{"path":"tests/test_cli_completeness.py","sha256":"f604842586a267ca2e63f838c509ea98238fd9bcb88b351e4b03e66c39c96c59","size":6887}],"pack_format":1}

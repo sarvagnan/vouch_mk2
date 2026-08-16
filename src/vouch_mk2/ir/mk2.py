@@ -68,6 +68,7 @@ CMD_ROLL_BACK = "roll-back"
 CMD_MARK_FAILED_UNRECOVERED = "mark-failed-unrecovered"
 CMD_RETIRE_RELEASE = "retire"
 CMD_BIND_BUNDLE = "bind-bundle"
+CMD_BIND_PACK = "bind-pack"
 
 # Evidence commands.
 CMD_RECORD_EVIDENCE = "record-evidence"
@@ -131,6 +132,7 @@ CHECK_RELEASE_CLOSURE_RECORDS = "check.release-closure-records"
 CHECK_RELEASE_BOUND_UNITS_ROSTERED = "check.release-bound-units-rostered"
 CHECK_TIER_EVIDENCE_REQUIRED = "check.tier.evidence-required"
 CHECK_TIER_HIGH_ATTESTATION = "check.tier.high-attestation"
+CHECK_PACK_BOUND = "check.pack-bound"
 
 # Phase 5 I/O-side artifact checks.
 CHECK_EVIDENCE_CHAINS = "check.evidence-chains"
@@ -139,6 +141,7 @@ CHECK_BUNDLE_INVENTORIES = "check.bundle-inventories"
 CHECK_FORMAL_CERTIFICATE = "check.formal-certificate"
 CHECK_MAP_FRESHNESS = "check.map-freshness"
 CHECK_CONTEXT_FRESHNESS = "check.context-freshness"
+CHECK_PACK_FILES_MATCH = "check.pack-files-match"
 
 # Permanently NOT_CHECKED organizational claims (docs/claim-boundary.md).
 ORG_ACCEPTANCE_OWNERSHIP = "org.acceptance-ownership"
@@ -597,6 +600,13 @@ _OBLIGATIONS = (
         ),
     ),
     Obligation(
+        obligation_id=CHECK_PACK_BOUND,
+        scope=ObligationScope.STANDING_CHECK,
+        description=(
+            "Tier-scoped acceptance pack versions are bound to canonical inventory objects."
+        ),
+    ),
+    Obligation(
         obligation_id=CHECK_EVIDENCE_CHAINS,
         scope=ObligationScope.ARTIFACT_CHECK,
         description="Evidence heads resolve to coherent content-addressed chains.",
@@ -631,6 +641,16 @@ _OBLIGATIONS = (
         scope=ObligationScope.ARTIFACT_CHECK,
         description=(
             "A generated agent context exactly matches the authoritative snapshot."
+        ),
+    ),
+    Obligation(
+        obligation_id=CHECK_PACK_FILES_MATCH,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description=(
+            "Bound acceptance-pack inventories match files under the supplied project root."
+        ),
+        applicability=(
+            Applicability(kind=ConditionKind.PROJECT_ROOT_PRESENT, value="provided"),
         ),
     ),
     Obligation(
@@ -795,20 +815,33 @@ _TIER_REQUIREMENTS = (
         description="Acceptance frozen before implementation",
         lightweight=_required(
             scope="critical-behavior",
-            mechanical_evidence=("acceptance pack digest bound at freeze",),
-            coverage=Coverage.PARTIAL,
-            residual="frozen BEFORE implementation is human attested",
+            residual=(
+                "frozen BEFORE implementation is human attested; the pack's "
+                "EXECUTION is not verified — runner configuration (conftest.py, "
+                "pytest.ini, pyproject testpaths) can deselect a bound test; bind "
+                "those files too"
+            ),
         ),
         standard=_required(
-            mechanical_evidence=("acceptance pack digest bound at freeze",),
+            mechanical_checks=(CHECK_PACK_BOUND, CHECK_PACK_FILES_MATCH),
             coverage=Coverage.PARTIAL,
-            residual="frozen BEFORE implementation is human attested",
+            residual=(
+                "frozen BEFORE implementation is human attested; the pack's "
+                "EXECUTION is not verified — runner configuration (conftest.py, "
+                "pytest.ini, pyproject testpaths) can deselect a bound test; bind "
+                "those files too"
+            ),
         ),
         high=_required(
             detail="independently reviewed",
-            mechanical_evidence=("acceptance pack digest bound at freeze",),
+            mechanical_checks=(CHECK_PACK_BOUND, CHECK_PACK_FILES_MATCH),
             coverage=Coverage.PARTIAL,
-            residual="frozen BEFORE implementation is human attested",
+            residual=(
+                "frozen BEFORE implementation is human attested; the pack's "
+                "EXECUTION is not verified — runner configuration (conftest.py, "
+                "pytest.ini, pyproject testpaths) can deselect a bound test; bind "
+                "those files too"
+            ),
         ),
     ),
     TierRequirement(

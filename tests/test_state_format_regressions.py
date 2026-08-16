@@ -81,7 +81,7 @@ def test_upgrade_waits_for_the_writer_lock(tmp_path: Path) -> None:
     stdout, stderr = process.communicate(timeout=5)
     assert process.returncode == 0, stderr
     assert "0 -> 1" in stdout
-    assert json.loads((root / "state.json").read_bytes())["state_format"] == 1
+    assert json.loads((root / "state.json").read_bytes())["state_format"] == 2
 
 
 def test_upgrade_catches_upgrader_exception_without_writing(
@@ -218,15 +218,15 @@ def test_projection_failure_reports_committed_upgrade_and_retry_repairs(
     assert main(["upgrade", "--root", str(root)]) == 2
     error = capsys.readouterr().err
     assert (
-        "state upgraded to format 1; projection regeneration failed: "
+        "state upgraded to format 2; projection regeneration failed: "
         "synthetic map failure — run 'vouch-mk2 generate'"
     ) in error
-    assert json.loads((root / "state.json").read_bytes())["state_format"] == 1
+    assert json.loads((root / "state.json").read_bytes())["state_format"] == 2
 
     monkeypatch.setattr(verify_module, "emit_system_map", real_emit_system_map)
     assert main(["upgrade", "--root", str(root)]) == 0
     assert (
-        "already at format 1; projections regenerated"
+        "already at format 2; projections regenerated"
         in capsys.readouterr().out
     )
     with Store.open(str(root), read_only=True) as store:
@@ -249,7 +249,7 @@ def test_already_current_upgrade_repairs_stale_and_missing_projections(
 
     assert main(["upgrade", "--root", str(root)]) == 0
     assert (
-        "already at format 1; projections regenerated"
+        "already at format 2; projections regenerated"
         in capsys.readouterr().out
     )
     with Store.open(str(root), read_only=True) as store:

@@ -56,6 +56,10 @@ inherits the caller's environment and working directory. This is not a claim tha
 the argv names a test runner, that the runner is honest, or that its exit status
 truthfully represents a test suite.
 
+For acceptance-pack binding, the pack's EXECUTION is not verified — runner
+configuration (conftest.py, pytest.ini, pyproject testpaths) can deselect a bound
+test; bind those files too.
+
 ## Permanently `NOT_CHECKED` (organizational)
 
 These are exclusions, not omissions. Reports on a Vouch-governed project state them.

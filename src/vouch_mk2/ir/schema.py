@@ -76,6 +76,7 @@ class ConditionKind(Enum):
     ARCHETYPE_IS = "archetype-is"
     TIER_AT_LEAST = "tier-at-least"
     ANCHOR_MODE_IS = "anchor-mode-is"
+    PROJECT_ROOT_PRESENT = "project-root-present"
 
 
 @dataclass(frozen=True, slots=True)

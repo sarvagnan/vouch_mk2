@@ -6,6 +6,10 @@ snapshot, content-addressed artifacts, pure projections, and thin adapters.
 Start here: [`docs/quickstart.md`](docs/quickstart.md) is the executable lifecycle walkthrough;
 [`docs/commands.md`](docs/commands.md) is the generated command reference.
 
+The one rule (from [`docs/claim-boundary.md`](docs/claim-boundary.md), emitted verbatim into
+every agent context): Vouch checks only what artifacts can prove; where it cannot, it prints
+`NOT_CHECKED` rather than offering a button that fakes it.
+
 Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 recorded defects,
 31 behavioral hardening commits (2026-08-03 → 2026-08-10).
 
@@ -82,6 +86,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check   # D-1: strict types
 uv run lint-imports    # D-1: Policy IR purity contract
-uv run pytest          # 668 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest          # 720 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run vouch-mk2 formal  # invariants over core-v1 + history-v1; witness discrimination
 ```

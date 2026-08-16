@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
-from vouch_mk2.core.model import Snapshot
+from vouch_mk2.core.model import Snapshot, UnitStatus
 from vouch_mk2.projections.next_actions import NextAction
 
 
@@ -20,6 +20,8 @@ class StatusFacts:
     tier: str
     formal_certificate_recorded: bool
     next_action_count: int
+    unbound_pack_units: tuple[str, ...]
+    late_bound_pack_units: tuple[str, ...]
 
 
 def _counts(values: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
@@ -46,4 +48,21 @@ def status_facts(
         tier=snapshot.tier.value,
         formal_certificate_recorded=bool(snapshot.formal_certificate_digest),
         next_action_count=len(actions),
+        unbound_pack_units=tuple(
+            sorted(
+                unit.ref().label()
+                for unit in snapshot.units
+                if unit.status is not UnitStatus.SUPERSEDED
+                and unit.acceptance_pack_version
+                and not unit.acceptance_pack_digest
+            )
+        ),
+        late_bound_pack_units=tuple(
+            sorted(
+                unit.ref().label()
+                for unit in snapshot.units
+                if unit.status is not UnitStatus.SUPERSEDED
+                and unit.pack_binding == "late"
+            )
+        ),
     )

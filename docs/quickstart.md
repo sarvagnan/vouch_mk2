@@ -35,10 +35,13 @@ which additionally takes `-- <argv…>` after its options (its help does not sho
 ## 2. Specify a unit and freeze its acceptance pack
 
 A unit is named work with a version. Its *acceptance pack* — the tests that define done — is
-meant to be frozen **before** implementation. What Vouch records is a pack-version *string*
-you supply; it does not read or hash the pack, and it cannot prove the freeze preceded the
-implementation — those are your method's controls, which the string makes auditable. Here
-the pack is one failing test.
+meant to be frozen **before** implementation. Vouch records a pack-version *label* you supply
+and, when you pass `--pack-file`, stores an inventory of the pack's files (path, size, sha256)
+as a content-addressed object bound to the unit. From then on `check --project .` re-hashes
+those files and FAILs if any moved — the goalposts are mechanically pinned. What Vouch still
+cannot prove is *chronology*: that the freeze preceded the implementation is your method's
+control, which the recorded order of Vouch's own events makes auditable. Here the pack is one
+failing test.
 
 ```sh
 python3 vouch.lock specify --root .vouch --name greeter --version v1
@@ -51,14 +54,15 @@ def test_greets_by_name():
 PY
 ```
 
-Freeze it. The pack version is yours to name. Embedding a digest of the pack's bytes is a
-convention: Vouch stores the string as given and never recomputes it, so tampering becomes
-visible only when something outside Vouch — your review, your CI — rehashes the same bytes
-and compares.
+Freeze it, binding the pack file. The version label is yours to name (embedding a short digest
+is a readable convention); the binding is the mechanism. At tier `standard` and above, `check`
+requires every frozen unit to be bound; at `lightweight`, a label-only freeze is allowed and
+reported as NOT-APPLICABLE.
 
 ```sh
 python3 vouch.lock freeze --root .vouch --name greeter \
-  --pack-version "greeter-pack/1@$(shasum -a 256 tests/test_greeter.py | cut -c1-16)"
+  --pack-version "greeter-pack/1@$(shasum -a 256 tests/test_greeter.py | cut -c1-16)" \
+  --pack-file tests/test_greeter.py
 python3 vouch.lock mark-ready --root .vouch --name greeter
 python3 vouch.lock start --root .vouch --name greeter
 ```
@@ -146,7 +150,8 @@ python3 vouch.lock adjudicate-amend --root .vouch --deviation-id DEV-1 \
 python3 vouch.lock close-deviation --root .vouch --deviation-id DEV-1
 python3 vouch.lock respecify --root .vouch --name greeter
 python3 vouch.lock freeze --root .vouch --name greeter \
-  --pack-version "greeter-pack/2@$(shasum -a 256 tests/test_greeter.py | cut -c1-16)"
+  --pack-version "greeter-pack/2@$(shasum -a 256 tests/test_greeter.py | cut -c1-16)" \
+  --pack-file tests/test_greeter.py
 python3 vouch.lock mark-ready --root .vouch --name greeter
 python3 vouch.lock start --root .vouch --name greeter
 ```

@@ -29,6 +29,8 @@ from vouch_mk2.core.model import (
     EvidenceOutcome,
     InventoryEntry,
     LaunchCriteria,
+    PackEntry,
+    PackInventory,
     Release,
     ReleaseArchetype,
     ReleaseState,
@@ -52,7 +54,7 @@ from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
 
-CURRENT_STATE_FORMAT = 1
+CURRENT_STATE_FORMAT = 2
 
 
 def _canonical_json(document: object) -> bytes:
@@ -152,11 +154,18 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
         "units": [
             {
                 "acceptance_pack_version": unit.acceptance_pack_version,
+                "acceptance_pack_digest": unit.acceptance_pack_digest,
                 "depends_on": list(unit.depends_on),
                 "name": unit.name,
+                "pack_history": list(unit.pack_history),
                 "published_once": unit.published_once,
                 "status": unit.status.value,
                 "version": unit.version,
+                **(
+                    {"pack_binding": unit.pack_binding}
+                    if unit.pack_binding == "late"
+                    else {}
+                ),
             }
             for unit in snapshot.units
         ],
@@ -197,6 +206,38 @@ def encode_bundle_inventory(inventory: BundleInventory) -> bytes:
                 for entry in inventory.entries
             ],
             "exclusions": list(inventory.exclusions),
+        }
+    )
+
+
+def encode_pack_inventory(inventory: PackInventory) -> bytes:
+    """Encode one canonical acceptance-pack inventory (D-14)."""
+    if not inventory.entries:
+        raise StoreError("acceptance pack inventory must contain at least one entry")
+    previous = ""
+    for entry in inventory.entries:
+        RelPath.parse(entry.path)
+        if previous and entry.path <= previous:
+            raise StoreError(
+                "pack inventory entries must be strictly sorted by path; "
+                f"{entry.path!r} follows {previous!r}"
+            )
+        if len(entry.sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in entry.sha256
+        ):
+            raise StoreError(
+                f"pack entry {entry.path!r}: sha256 must be 64 lowercase hexadecimal characters"
+            )
+        if type(entry.size) is not int or entry.size < 0:
+            raise StoreError(f"pack entry {entry.path!r}: size must be non-negative")
+        previous = entry.path
+    return _canonical_json(
+        {
+            "pack_format": 1,
+            "entries": [
+                {"path": entry.path, "sha256": entry.sha256, "size": entry.size}
+                for entry in inventory.entries
+            ],
         }
     )
 
@@ -273,7 +314,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "source_state_digest: expected 64 lowercase hexadecimal characters"
         )
     document = {
-        "map_format": 2,
+        "map_format": 3,
         "source_state_digest": source_state_digest,
         "map": {
             "anchor_mode": map.anchor_mode,
@@ -341,15 +382,24 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
                     map.status_facts.formal_certificate_recorded
                 ),
                 "next_action_count": map.status_facts.next_action_count,
+                "late_bound_pack_units": list(
+                    map.status_facts.late_bound_pack_units
+                ),
+                "unbound_pack_units": list(
+                    map.status_facts.unbound_pack_units
+                ),
                 "release_counts": _count_objects(map.status_facts.release_counts),
                 "unit_counts": _count_objects(map.status_facts.unit_counts),
             },
             "units": [
                 {
                     "acceptance_pack_version": unit.acceptance_pack_version,
+                    "acceptance_pack_digest": unit.acceptance_pack_digest,
                     "blocking_deviation_ids": list(unit.blocking_deviation_ids),
                     "depends_on": list(unit.depends_on),
                     "name": unit.name,
+                    "pack_binding": unit.pack_binding,
+                    "pack_history": list(unit.pack_history),
                     "published_once": unit.published_once,
                     "status": unit.status,
                     "version": unit.version,
@@ -406,10 +456,11 @@ def _fields(
     value: object,
     path: str,
     required: frozenset[str],
+    optional: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     obj = _object(value, path)
     for field in obj:
-        if field not in required:
+        if field not in required and field not in optional:
             raise DecodeError(f"{_child(path, field)}: unknown field")
     for field in sorted(required):
         if field not in obj:
@@ -441,9 +492,12 @@ _UNIT_FIELDS = frozenset(
         "status",
         "depends_on",
         "acceptance_pack_version",
+        "acceptance_pack_digest",
+        "pack_history",
         "published_once",
     }
 )
+_UNIT_OPTIONAL_FIELDS = frozenset({"pack_binding"})
 _UNIT_REF_FIELDS = frozenset({"name", "version"})
 _DEVIATION_FIELDS = frozenset(
     {
@@ -492,6 +546,8 @@ _EVIDENCE_EVENT_FIELDS = frozenset(
 )
 _INVENTORY_ENTRY_FIELDS = frozenset({"path", "digest"})
 _BUNDLE_INVENTORY_FIELDS = frozenset({"entries", "exclusions"})
+_PACK_ENTRY_FIELDS = frozenset({"path", "sha256", "size"})
+_PACK_INVENTORY_FIELDS = frozenset({"pack_format", "entries"})
 _FORMAL_CERTIFICATE_FIELDS = frozenset(
     {
         "checker_version",
@@ -539,6 +595,9 @@ _SYSTEM_MAP_UNIT_FIELDS = frozenset(
         "status",
         "depends_on",
         "acceptance_pack_version",
+        "acceptance_pack_digest",
+        "pack_binding",
+        "pack_history",
         "published_once",
         "blocking_deviation_ids",
     }
@@ -557,6 +616,8 @@ _STATUS_FACTS_FIELDS = frozenset(
         "tier",
         "formal_certificate_recorded",
         "next_action_count",
+        "late_bound_pack_units",
+        "unbound_pack_units",
     }
 )
 
@@ -578,7 +639,17 @@ def _parent(value: object, path: str) -> str:
 
 
 def _decode_unit(value: object, path: str) -> Unit:
-    obj = _fields(value, path, _UNIT_FIELDS)
+    obj = _fields(value, path, _UNIT_FIELDS, _UNIT_OPTIONAL_FIELDS)
+    digest = _digest(
+        obj["acceptance_pack_digest"],
+        _child(path, "acceptance_pack_digest"),
+        allow_empty=True,
+    )
+    binding = (
+        "at-freeze" if digest else ""
+    ) if "pack_binding" not in obj else _decode_pack_binding(
+        obj["pack_binding"], digest, _child(path, "pack_binding")
+    )
     return Unit(
         name=_string(obj["name"], _child(path, "name")),
         version=_string(obj["version"], _child(path, "version")),
@@ -588,10 +659,24 @@ def _decode_unit(value: object, path: str) -> Unit:
             obj["acceptance_pack_version"],
             _child(path, "acceptance_pack_version"),
         ),
+        acceptance_pack_digest=digest,
         published_once=_boolean(
             obj["published_once"], _child(path, "published_once")
         ),
+        pack_history=_strings(
+            obj["pack_history"], _child(path, "pack_history")
+        ),
+        pack_binding=binding,
     )
+
+
+def _decode_pack_binding(value: object, digest: str, path: str) -> str:
+    binding = _string(value, path)
+    if binding not in {"", "at-freeze", "late"}:
+        raise DecodeError(f"{path}: expected '', 'at-freeze', or 'late'")
+    if bool(binding) != bool(digest):
+        raise DecodeError(f"{path}: must be empty iff acceptance pack digest is empty")
+    return binding
 
 
 def _decode_unit_ref(value: object, path: str) -> UnitRef:
@@ -847,6 +932,51 @@ def decode_bundle_inventory(data: bytes) -> BundleInventory:
     return inventory
 
 
+def decode_pack_inventory(data: bytes) -> PackInventory:
+    obj = _fields(
+        _decode_json(data, "acceptance pack inventory"),
+        "",
+        _PACK_INVENTORY_FIELDS,
+    )
+    pack_format = _integer(obj["pack_format"], "pack_format")
+    if pack_format != 1:
+        raise DecodeError(f"pack_format: expected 1, got {pack_format}")
+    raw_entries = _array(obj["entries"], "entries")
+    if not raw_entries:
+        raise DecodeError("entries: acceptance pack inventory must not be empty")
+    entries: list[PackEntry] = []
+    seen_paths: set[str] = set()
+    previous = ""
+    for index, raw in enumerate(raw_entries):
+        path = f"entries[{index}]"
+        fields = _fields(raw, path, _PACK_ENTRY_FIELDS)
+        text = _string(fields["path"], f"{path}.path")
+        try:
+            RelPath.parse(text)
+        except StoreError as error:
+            raise DecodeError(f"{path}.path: {error}") from error
+        if text in seen_paths:
+            raise DecodeError(f"{path}.path: duplicate path {text!r}")
+        if previous and text < previous:
+            raise DecodeError(f"{path}.path: entries must be sorted by path")
+        size = _integer(fields["size"], f"{path}.size")
+        if size < 0:
+            raise DecodeError(f"{path}.size: must be non-negative")
+        entries.append(
+            PackEntry(
+                path=text,
+                sha256=_digest(fields["sha256"], f"{path}.sha256"),
+                size=size,
+            )
+        )
+        seen_paths.add(text)
+        previous = text
+    inventory = PackInventory(entries=tuple(entries))
+    if encode_pack_inventory(inventory) != data:
+        raise DecodeError("$: non-canonical acceptance pack inventory encoding")
+    return inventory
+
+
 def decode_formal_certificate(data: bytes) -> FormalCertificate:
     obj = _fields(
         _decode_json(data, "formal certificate"),
@@ -1055,6 +1185,9 @@ def _decode_count_rows(
 
 def _decode_system_map_unit(value: object, path: str) -> SystemMapUnit:
     obj = _fields(value, path, _SYSTEM_MAP_UNIT_FIELDS)
+    digest = _digest(
+        obj["acceptance_pack_digest"], f"{path}.acceptance_pack_digest", allow_empty=True
+    )
     return SystemMapUnit(
         name=_string(obj["name"], f"{path}.name"),
         version=_string(obj["version"], f"{path}.version"),
@@ -1062,6 +1195,11 @@ def _decode_system_map_unit(value: object, path: str) -> SystemMapUnit:
         depends_on=_strings(obj["depends_on"], f"{path}.depends_on"),
         acceptance_pack_version=_string(
             obj["acceptance_pack_version"], f"{path}.acceptance_pack_version"
+        ),
+        acceptance_pack_digest=digest,
+        pack_history=_strings(obj["pack_history"], f"{path}.pack_history"),
+        pack_binding=_decode_pack_binding(
+            obj["pack_binding"], digest, f"{path}.pack_binding"
         ),
         published_once=_boolean(obj["published_once"], f"{path}.published_once"),
         blocking_deviation_ids=_strings(
@@ -1162,6 +1300,12 @@ def _decode_status_facts(value: object, path: str) -> StatusFacts:
         next_action_count=_non_negative(
             obj["next_action_count"], f"{path}.next_action_count"
         ),
+        late_bound_pack_units=_strings(
+            obj["late_bound_pack_units"], f"{path}.late_bound_pack_units"
+        ),
+        unbound_pack_units=_strings(
+            obj["unbound_pack_units"], f"{path}.unbound_pack_units"
+        ),
     )
 
 
@@ -1199,8 +1343,10 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         _decode_json(data, "system map"), "", _SYSTEM_MAP_DOCUMENT_FIELDS
     )
     map_format = _integer(document["map_format"], "map_format")
-    if map_format != 2:
-        raise DecodeError("map_format: expected 2; format 1 is no longer supported")
+    if map_format != 3:
+        raise DecodeError(
+            f"map_format: expected 3; format {map_format} is no longer supported"
+        )
     source_state_digest = _digest(
         document["source_state_digest"], "source_state_digest"
     )

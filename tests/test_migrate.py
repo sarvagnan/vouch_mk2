@@ -194,6 +194,7 @@ def test_fixture_warning_and_validation_inventory_is_honest() -> None:
         mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE,
         mk2.CHECK_TIER_EVIDENCE_REQUIRED,
         mk2.CHECK_TIER_HIGH_ATTESTATION,
+        mk2.CHECK_PACK_BOUND,
     }
     amended = next(
         result
@@ -274,6 +275,7 @@ def test_approve_commits_revision_one_reports_predicted_fail_and_refuses_rerun(
         mk2.CHECK_EVIDENCE_ANCHORS,
         mk2.CHECK_TIER_EVIDENCE_REQUIRED,
         mk2.CHECK_TIER_HIGH_ATTESTATION,
+        mk2.CHECK_PACK_BOUND,
     }
     assert check_output.rstrip().endswith("composed: FAIL")
 

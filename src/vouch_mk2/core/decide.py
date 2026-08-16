@@ -20,6 +20,7 @@ from vouch_mk2.core.commands import (
     AdvanceAnchor,
     AmendDeviation,
     BeginReverify,
+    BindPack,
     BindBundle,
     CloseDeviation,
     Command,
@@ -50,6 +51,7 @@ from vouch_mk2.core.commands import (
 )
 from vouch_mk2.core.events import (
     AcceptanceFrozen,
+    AcceptancePackBound,
     AnchorAdvanced,
     AnchorModeSet,
     BundleBound,
@@ -579,9 +581,12 @@ def _transition_event(
     command: UnitTransitionCommand, unit: Unit, record: GateRecord
 ) -> Event:
     match command:
-        case FreezeAcceptance(pack_version=pack_version):
+        case FreezeAcceptance(pack_version=pack_version, pack_digest=pack_digest):
             return AcceptanceFrozen(
-                name=unit.name, pack_version=pack_version, gate=record
+                name=unit.name,
+                pack_version=pack_version,
+                pack_digest=pack_digest,
+                gate=record,
             )
         case MarkReady():
             return UnitMarkedReady(name=unit.name)
@@ -624,6 +629,26 @@ def _decide_unit_transition(
             "identifier.invalid",
             f"pack version {command.pack_version!r} is not a valid identifier",
         )
+    if (
+        isinstance(command, FreezeAcceptance)
+        and command.pack_version
+        and command.pack_version in (
+            *unit.pack_history,
+            unit.acceptance_pack_version,
+        )
+    ):
+        return _refuse(
+            "pack.version-reused",
+            f"acceptance pack version {command.pack_version!r} was already used by "
+            f"unit {unit.ref().label()!r}",
+        )
+    if isinstance(command, FreezeAcceptance) and command.pack_digest and not _valid_digest(
+        command.pack_digest
+    ):
+        return _refuse(
+            "pack.digest-invalid",
+            "acceptance pack digest must be empty or 64 lowercase hexadecimal characters",
+        )
     pack_version = (
         command.pack_version
         if isinstance(command, FreezeAcceptance)
@@ -636,6 +661,40 @@ def _decide_unit_transition(
     if violations:
         return Refused(violations=violations)
     return Accepted(events=(_transition_event(command, unit, record),))
+
+
+def _decide_bind_pack(snapshot: Snapshot, command: BindPack) -> Decision:
+    unit = snapshot.unit(command.name)
+    if unit is None:
+        return _refuse("unit.unknown", f"unit {command.name!r} does not exist")
+    if unit.status is UnitStatus.SUPERSEDED:
+        return _refuse(
+            "pack.superseded",
+            f"unit {unit.ref().label()!r} is superseded history and cannot be bound",
+        )
+    if not unit.acceptance_pack_version:
+        return _refuse(
+            "pack.no-version",
+            f"unit {unit.ref().label()!r} has no acceptance pack version",
+        )
+    if unit.acceptance_pack_digest:
+        return _refuse(
+            "pack.already-bound",
+            f"unit {unit.ref().label()!r} acceptance pack is already bound",
+        )
+    if not _valid_digest(command.pack_digest):
+        return _refuse(
+            "pack.digest-invalid",
+            "acceptance pack digest must be 64 lowercase hexadecimal characters",
+        )
+    return Accepted(
+        events=(
+            AcceptancePackBound(
+                name=unit.name,
+                pack_digest=command.pack_digest,
+            ),
+        )
+    )
 
 
 # --- operational releases -----------------------------------------------------
@@ -1171,6 +1230,8 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             return _decide_set_release_criteria(snapshot, command)
         case BindBundle():
             return _decide_bind_bundle(snapshot, command)
+        case BindPack():
+            return _decide_bind_pack(snapshot, command)
         case RecordEvidence():
             return _decide_record_evidence(snapshot, command)
         case AdvanceAnchor():
@@ -1266,7 +1327,9 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                     depends_on=depends_on,
                 ),
             )
-        case AcceptanceFrozen(name=name, pack_version=pack_version):
+        case AcceptanceFrozen(
+            name=name, pack_version=pack_version, pack_digest=pack_digest
+        ):
             unit = _existing(snapshot, name)
             units = _with_unit(
                 units,
@@ -1275,6 +1338,19 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                     unit,
                     status=UnitStatus.ACCEPTANCE_FROZEN,
                     acceptance_pack_version=pack_version,
+                    acceptance_pack_digest=pack_digest,
+                    pack_binding="at-freeze" if pack_digest else "",
+                ),
+            )
+        case AcceptancePackBound(name=name, pack_digest=pack_digest):
+            unit = _existing(snapshot, name)
+            units = _with_unit(
+                units,
+                name,
+                replace(
+                    unit,
+                    acceptance_pack_digest=pack_digest,
+                    pack_binding="late",
                 ),
             )
         case UnitMarkedReady(name=name):
@@ -1300,7 +1376,16 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                 units,
                 name,
                 replace(
-                    unit, status=UnitStatus.SPECIFIED, acceptance_pack_version=""
+                    unit,
+                    status=UnitStatus.SPECIFIED,
+                    acceptance_pack_version="",
+                    acceptance_pack_digest="",
+                    pack_history=(
+                        unit.pack_history + (unit.acceptance_pack_version,)
+                        if unit.acceptance_pack_version
+                        else unit.pack_history
+                    ),
+                    pack_binding="",
                 ),
             )
         case ReverificationStarted(name=name):

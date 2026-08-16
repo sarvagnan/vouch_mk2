@@ -23,6 +23,9 @@ class SystemMapUnit:
     status: str
     depends_on: tuple[str, ...]
     acceptance_pack_version: str
+    acceptance_pack_digest: str
+    pack_history: tuple[str, ...]
+    pack_binding: str
     published_once: bool
     blocking_deviation_ids: tuple[str, ...]
 
@@ -75,6 +78,9 @@ def system_map(snapshot: Snapshot) -> SystemMap:
                     status=unit.status.value,
                     depends_on=unit.depends_on,
                     acceptance_pack_version=unit.acceptance_pack_version,
+                    acceptance_pack_digest=unit.acceptance_pack_digest,
+                    pack_history=unit.pack_history,
+                    pack_binding=unit.pack_binding,
                     published_once=unit.published_once,
                     blocking_deviation_ids=tuple(
                         sorted(

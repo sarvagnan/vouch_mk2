@@ -127,6 +127,17 @@ class Unit:
     depends_on: tuple[str, ...] = ()
     acceptance_pack_version: str = ""
     published_once: bool = False
+    acceptance_pack_digest: str = ""
+    pack_history: tuple[str, ...] = ()
+    pack_binding: str = ""
+
+    def __post_init__(self) -> None:
+        # Format 2 predates the provenance spelling in the owner-pinned golden.
+        # A bound digest without an explicit provenance is therefore the
+        # canonical at-freeze case; only the security-relevant late case needs
+        # an additional serialized field.
+        if self.acceptance_pack_digest and not self.pack_binding:
+            object.__setattr__(self, "pack_binding", "at-freeze")
 
     def ref(self) -> UnitRef:
         return UnitRef(name=self.name, version=self.version)
@@ -176,6 +187,18 @@ class InventoryEntry:
 class BundleInventory:
     entries: tuple[InventoryEntry, ...]
     exclusions: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PackEntry:
+    path: str
+    sha256: str
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
+class PackInventory:
+    entries: tuple[PackEntry, ...]
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,12 +6,14 @@ This CI/verify layer loads the claimed bytes and proves their content addressing
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import assert_never
 
+from vouch_mk2.bundle import build_pack_inventory
 from vouch_mk2.checks import CheckResult, compose
-from vouch_mk2.checks.tier import tier_check_applies
+from vouch_mk2.checks.tier import check_pack_bound, tier_check_applies
 from vouch_mk2.core import (
     Accepted,
     AnchorMode,
@@ -21,15 +23,16 @@ from vouch_mk2.core import (
     RecordEvidence,
     RecordFormalCertificate,
     Snapshot,
+    UnitStatus,
     apply,
     decide,
     evidence_kind_outcome_coherent,
 )
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
+from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict, Violation
-from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.projections import agent_context, system_map
 from vouch_mk2.store import (
     ArtifactKind,
@@ -38,11 +41,12 @@ from vouch_mk2.store import (
     decode_bundle_inventory,
     decode_evidence_event,
     decode_formal_certificate,
+    decode_pack_inventory,
     decode_snapshot,
     decode_system_map,
     digest_of,
-    encode_evidence_event,
     encode_document,
+    encode_evidence_event,
     encode_formal_certificate,
     encode_formal_relation,
     encode_formal_tables,
@@ -311,6 +315,98 @@ def _check_bundle_inventories(store: Store, snapshot: Snapshot) -> CheckResult:
     )
 
 
+def _check_pack_bound_objects(store: Store, snapshot: Snapshot) -> CheckResult:
+    standing = check_pack_bound(snapshot)
+    if standing.verdict is Verdict.NOT_APPLICABLE:
+        return standing
+    details: list[str] = [standing.detail] if standing.detail else []
+    failed = standing.verdict is Verdict.FAIL
+    for unit in snapshot.units:
+        if (
+            unit.status is UnitStatus.SUPERSEDED
+            or not unit.acceptance_pack_digest
+        ):
+            continue
+        try:
+            decode_pack_inventory(
+                store.get_object(
+                    ArtifactKind.ACCEPTANCE_PACK,
+                    unit.acceptance_pack_digest,
+                )
+            )
+        except StoreError as error:
+            failed = True
+            details.append(
+                f"unit {unit.ref().label()!r}: bound pack object is missing or undecodable: {error}"
+            )
+    return CheckResult(
+        check_id=mk2.CHECK_PACK_BOUND,
+        verdict=Verdict.FAIL if failed else Verdict.PASS,
+        detail="; ".join(details),
+    )
+
+
+def _check_pack_files_match(
+    store: Store, snapshot: Snapshot, project: str | None
+) -> CheckResult:
+    if not tier_check_applies(snapshot, mk2.CHECK_PACK_FILES_MATCH):
+        return CheckResult(
+            check_id=mk2.CHECK_PACK_FILES_MATCH,
+            verdict=Verdict.NOT_APPLICABLE,
+            detail=(
+                f"IR tier matrix {snapshot.tier.value} cell: pack-file verification "
+                "is not applicable; no project root verification required"
+            ),
+        )
+    if project is None:
+        return CheckResult(
+            check_id=mk2.CHECK_PACK_FILES_MATCH,
+            verdict=Verdict.NOT_CHECKED,
+            detail="no project root; pass --project",
+        )
+    project_root = os.path.abspath(project)
+    failures: list[str] = []
+    for unit in sorted(snapshot.units, key=lambda item: item.ref().label()):
+        if (
+            unit.status is UnitStatus.SUPERSEDED
+            or not unit.acceptance_pack_digest
+        ):
+            continue
+        try:
+            inventory = decode_pack_inventory(
+                store.get_object(
+                    ArtifactKind.ACCEPTANCE_PACK,
+                    unit.acceptance_pack_digest,
+                )
+            )
+        except StoreError as error:
+            failures.append(
+                f"unit {unit.ref().label()!r}: pack inventory unavailable: {error}"
+            )
+            continue
+        try:
+            actual = build_pack_inventory(
+                project_root, tuple(entry.path for entry in inventory.entries)
+            )
+        except StoreError as error:
+            failures.append(f"unit {unit.ref().label()!r}: missing pack file: {error}")
+            continue
+        actual_by_path = {entry.path: entry for entry in actual.entries}
+        for expected in inventory.entries:
+            found = actual_by_path[expected.path]
+            if found.size != expected.size or found.sha256 != expected.sha256:
+                failures.append(
+                    f"unit {unit.ref().label()!r}: changed pack file {expected.path!r}"
+                )
+    return CheckResult(
+        check_id=mk2.CHECK_PACK_FILES_MATCH,
+        verdict=Verdict.FAIL if failures else Verdict.PASS,
+        detail="; ".join(
+            (f"project root used: {project_root}", *failures)
+        ),
+    )
+
+
 def build_certificate(run: FormalRun) -> tuple[FormalCertificate, bytes]:
     tables_digest = digest_of(
         ArtifactKind.FORMAL_TABLES, encode_formal_tables(run.tables)
@@ -494,7 +590,9 @@ def _check_context_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
     )
 
 
-def run_artifact_checks(store: Store, snapshot: Snapshot) -> tuple[CheckResult, ...]:
+def run_artifact_checks(
+    store: Store, snapshot: Snapshot, *, project: str | None = None
+) -> tuple[CheckResult, ...]:
     """Run all IR-declared artifact checks, reusing one parent walk per head."""
     walks = tuple(_walk_chain(store, head) for head in snapshot.evidence_heads)
     return tuple(
@@ -506,6 +604,8 @@ def run_artifact_checks(store: Store, snapshot: Snapshot) -> tuple[CheckResult, 
                 _check_formal_certificate(store, snapshot),
                 _check_map_freshness(store, snapshot),
                 _check_context_freshness(store, snapshot),
+                _check_pack_bound_objects(store, snapshot),
+                _check_pack_files_match(store, snapshot, project),
             ),
             key=lambda result: result.check_id,
         )

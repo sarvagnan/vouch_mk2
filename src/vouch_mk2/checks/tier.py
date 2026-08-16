@@ -11,21 +11,67 @@ from vouch_mk2.ir.schema import Coverage, RequirementLevel, TierCell, TierRequir
 _PUBLISHED_STATUSES = frozenset({UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND})
 
 
-def _evidence_requirement() -> TierRequirement:
+def _requirement(control_id: str) -> TierRequirement:
     for requirement in mk2.MK2.tier_requirements:
-        if requirement.control_id == mk2.TIER_EVIDENCE_CONTROL:
+        if requirement.control_id == control_id:
             return requirement
     raise LookupError(
-        f"mk2 tier matrix has no {mk2.TIER_EVIDENCE_CONTROL!r} control"
+        f"mk2 tier matrix has no {control_id!r} control"
     )
 
 
 def tier_evidence_cell(snapshot: Snapshot) -> TierCell:
-    return _evidence_requirement().cell(snapshot.tier)
+    return _requirement(mk2.TIER_EVIDENCE_CONTROL).cell(snapshot.tier)
 
 
 def tier_check_applies(snapshot: Snapshot, check_id: str) -> bool:
-    return check_id in tier_evidence_cell(snapshot).mechanical_checks
+    return any(
+        check_id in requirement.cell(snapshot.tier).mechanical_checks
+        for requirement in mk2.MK2.tier_requirements
+    )
+
+
+def check_pack_bound(snapshot: Snapshot) -> CheckResult:
+    if not tier_check_applies(snapshot, mk2.CHECK_PACK_BOUND):
+        return CheckResult(
+            check_id=mk2.CHECK_PACK_BOUND,
+            verdict=Verdict.NOT_APPLICABLE,
+            detail=(
+                f"IR tier matrix: {snapshot.tier.value} label-only pack "
+                "binding is permitted"
+            ),
+        )
+    offenders = tuple(
+        sorted(
+            unit.ref().label()
+            for unit in snapshot.units
+            if unit.status is not UnitStatus.SUPERSEDED
+            and unit.acceptance_pack_version
+            and not unit.acceptance_pack_digest
+        )
+    )
+    late = tuple(
+        sorted(
+            unit.ref().label()
+            for unit in snapshot.units
+            if unit.status is not UnitStatus.SUPERSEDED
+            and unit.pack_binding == "late"
+        )
+    )
+    failures: list[str] = []
+    if offenders:
+        failures.append(
+            f"{snapshot.tier.value}: acceptance packs are unbound: {offenders!r}"
+        )
+    if snapshot.tier.value == "high" and late:
+        failures.append("high: acceptance packs bound late: " + ", ".join(late))
+    return CheckResult(
+        check_id=mk2.CHECK_PACK_BOUND,
+        verdict=Verdict.FAIL if failures else Verdict.PASS,
+        detail="; ".join(failures) if failures else (
+            "bound late: " + ", ".join(late) if late else ""
+        ),
+    )
 
 
 def check_tier_evidence_required(snapshot: Snapshot) -> CheckResult:
@@ -128,6 +174,7 @@ def check_tier_controls(snapshot: Snapshot) -> CheckResult:
 
 
 __all__ = [
+    "check_pack_bound",
     "check_tier_controls",
     "check_tier_evidence_required",
     "check_tier_high_attestation",

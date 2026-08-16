@@ -175,6 +175,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_FORMAL_CERTIFICATE,
         mk2.CHECK_MAP_FRESHNESS,
         mk2.CHECK_CONTEXT_FRESHNESS,
+        mk2.CHECK_PACK_FILES_MATCH,
     ):
         assert check_id in text
     assert main(["check", "--ci", "--json", "--root", str(root)]) == 0
@@ -188,6 +189,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_FORMAL_CERTIFICATE,
         mk2.CHECK_MAP_FRESHNESS,
         mk2.CHECK_CONTEXT_FRESHNESS,
+        mk2.CHECK_PACK_FILES_MATCH,
     } <= ids
 
 
@@ -269,12 +271,13 @@ def test_cli_formal_reports_closed_relation_and_discriminators(
     init_store(root)
     assert main(["formal", "--record", "--root", str(root)]) == 0
     output = capsys.readouterr().out
-    assert "states: 109130" in output
-    assert "transitions: 599226" in output
+    assert "states: 268202" in output
+    assert "transitions: 1453962" in output
     assert "universe: tier-v1" in output
-    assert "states: 9" in output
-    assert "transitions: 30" in output
+    assert "states: 12" in output
+    assert "transitions: 39" in output
     assert "PASS  M1.no-direct-republication" in output
+    assert "universe-bounded: label set exhausted for unit b: 2 labels" in output
     assert "PASS  M9.anchor-monotonic" in output
     assert "DISCRIMINATED     W1.direct-republication" in output
     assert "DISCRIMINATED     W9.anchor-rotation" in output
@@ -302,11 +305,12 @@ def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: 
     dst = tmp_path / "checkout"
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".lock"))
     assert not (dst / ".lock").exists()
-    assert main(["check", "--ci", "--root", str(dst)]) == 0
+    # A copied store has no project context; at tier standard the pack-files check needs it.
+    assert main(["check", "--ci", "--root", str(dst), "--project", str(src.parent)]) == 0
     assert not (dst / ".lock").exists()
     # A planted symlink at .lock is still refused, not followed.
     (dst / ".lock").symlink_to(dst / "state.json")
-    assert main(["check", "--ci", "--root", str(dst)]) != 0
+    assert main(["check", "--ci", "--root", str(dst), "--project", str(src.parent)]) != 0
 
 
 def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[str]) -> None:

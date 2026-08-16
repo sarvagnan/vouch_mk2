@@ -20,6 +20,7 @@ class ArtifactKind(Enum):
     FORMAL_RELATION = "formal-relation"
     FILE = "file"
     LOCK = "lock"
+    ACCEPTANCE_PACK = "acceptance-pack"
 
 
 def digest_of(kind: ArtifactKind, payload: bytes) -> str:

@@ -43,10 +43,11 @@ def test_state_format_is_two_and_the_unit_carries_a_pack_digest() -> None:
     from vouch_mk2.store import CURRENT_STATE_FORMAT
 
     assert CURRENT_STATE_FORMAT == 2
-    unit = Unit("u", "1", UnitStatus.ACCEPTANCE_FROZEN, (), "u-pack/1", False, acceptance_pack_digest="a" * 64)
+    unit = Unit("u", "1", UnitStatus.ACCEPTANCE_FROZEN, (), "u-pack/1", False, acceptance_pack_digest="a" * 64, pack_history=("u-pack/0",))
     snapshot = Snapshot(revision=1, units=(unit,))
     assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
-    assert json.loads(encode_snapshot(snapshot))["units"][0]["acceptance_pack_digest"] == "a" * 64
+    document = json.loads(encode_snapshot(snapshot))["units"][0]
+    assert document["acceptance_pack_digest"] == "a" * 64 and document["pack_history"] == ["u-pack/0"]
 
 
 def test_format1_upgrades_to_format2_with_unbound_packs() -> None:
@@ -58,7 +59,7 @@ def test_format1_upgrades_to_format2_with_unbound_packs() -> None:
     units = upgraded["units"]
     assert isinstance(units, list)
     for unit in units:
-        assert unit["acceptance_pack_digest"] == ""
+        assert unit["acceptance_pack_digest"] == "" and unit["pack_history"] == []
     decode_snapshot(json.dumps(upgraded, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode() + b"\n")
 
 
@@ -118,7 +119,6 @@ def test_binding_is_write_once_per_pack_version_and_respecify_clears_it(tmp_path
     assert main(["freeze", "--root", root, "--name", "core", "--pack-version", "core-pack/1", "--project", str(project), "--pack-file", "tests/test_a.py"]) == 0
     assert main(["bind-pack", "--root", root, "--name", "core", "--project", str(project), "--pack-file", "tests/test_b.py"]) == 2
     assert "pack.already-bound" in capsys.readouterr().err
-    from vouch_mk2.core.model import DeviationType, UnitRef
     for argv in (["mark-ready", "--name", "core"], ["start", "--name", "core"],
                  ["open-deviation", "--deviation-id", "D1", "--deviation-type", "pack-defect", "--unit", "core@v1"],
                  ["adjudicate-amend", "--deviation-id", "D1", "--amendment-version", "core-pack/2"],
@@ -127,6 +127,26 @@ def test_binding_is_write_once_per_pack_version_and_respecify_clears_it(tmp_path
     with Store.open(root, read_only=True) as store:
         unit = store.read_snapshot().unit("core")
         assert unit is not None and unit.acceptance_pack_digest == "" and unit.acceptance_pack_version == ""
+        # pack/2 (DEV-pb-01): the retired label is REMEMBERED so it can never be rebound.
+        assert unit.pack_history == ("core-pack/1",)
+    capsys.readouterr()
+    assert main(["freeze", "--root", root, "--name", "core", "--pack-version", "core-pack/1", "--project", str(project), "--pack-file", "tests/test_b.py"]) == 2
+    assert "pack.version-reused" in capsys.readouterr().err
+    assert main(["freeze", "--root", root, "--name", "core", "--pack-version", "core-pack/2", "--project", str(project), "--pack-file", "tests/test_b.py"]) == 0
+
+
+def test_bind_pack_is_refused_on_superseded_history() -> None:
+    # pack/2 (DEV-pb-01): a superseded record is inert history (D-9, M10); binding it is refused.
+    from vouch_mk2.core import Accepted, BindPack, Refused, decide
+    from vouch_mk2.core.model import Unit
+
+    s = Snapshot(revision=1, units=(Unit("u", "0", UnitStatus.SUPERSEDED, (), "u-pack/1", True), Unit("u", "1", UnitStatus.PUBLISHED, (), "u-pack/2", True)))
+    d = decide(s, BindPack("u", "a" * 64))
+    # the active record (u@1) is the one addressed by name; it binds fine
+    assert isinstance(d, Accepted)
+    only_history = Snapshot(revision=1, units=(Unit("u", "0", UnitStatus.SUPERSEDED, (), "u-pack/1", True),))
+    d2 = decide(only_history, BindPack("u", "a" * 64))
+    assert isinstance(d2, Refused) and d2.violations[0].code in ("unit.unknown", "pack.superseded")
 
 
 def test_freeze_refuses_a_pack_file_outside_the_project_or_missing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -158,6 +178,8 @@ def test_pack_bound_check_is_tier_scoped(tmp_path: Path) -> None:
 
 def test_pack_files_match_check_verifies_the_working_tree(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     project, root = _project(tmp_path)
+    assert main(["set-tier", "--root", root, "--tier", "standard"]) == 0  # pack/3 (DEV-pb-02): both checks are tier-scoped
+    assert main(["set-anchor-mode", "--root", root, "--mode", "ci"]) == 0  # standard also requires anchoring mode
     assert main(["freeze", "--root", root, "--name", "core", "--pack-version", "core-pack/1", "--project", str(project), "--pack-file", "tests/test_a.py"]) == 0
     assert main(["check", "--ci", "--root", root, "--project", str(project)]) == 0
     out = capsys.readouterr().out
@@ -166,7 +188,18 @@ def test_pack_files_match_check_verifies_the_working_tree(tmp_path: Path, capsys
     assert main(["check", "--ci", "--root", root, "--project", str(project)]) == 1
     out = capsys.readouterr().out
     assert "FAIL" in out and "tests/test_a.py" in out
-    assert main(["check", "--ci", "--root", root]) == 0  # no project root: files check NOT_APPLICABLE
+    # pack/3: the store is <project>/.vouch, so `--project` DEFAULTS to the parent — the changed
+    # file is still caught without the flag; a store not named .vouch has no default and at
+    # standard+ reports NOT_CHECKED "no project root" (never a clean N/A).
+    assert main(["check", "--ci", "--root", root]) == 1
+    assert "changed pack file" in capsys.readouterr().out
+    other = str(tmp_path / "elsewhere-store")
+    Store.init(other).close()
+    assert main(["set-tier", "--root", other, "--tier", "standard"]) == 0
+    assert main(["specify", "--root", other, "--name", "x", "--version", "1"]) == 0
+    assert main(["freeze", "--root", other, "--name", "x", "--pack-version", "p", "--project", str(project), "--pack-file", "tests/test_b.py"]) == 0
+    capsys.readouterr()
+    assert main(["check", "--ci", "--root", other]) == 1
     assert "no project root" in capsys.readouterr().out
 
 

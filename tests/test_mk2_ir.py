@@ -189,6 +189,7 @@ def test_artifact_obligations_are_exactly_six_and_never_gates() -> None:
         "check.formal-certificate",
         "check.map-freshness",
         "check.context-freshness",
+        "check.pack-files-match",
     }
     bound = {
         gate

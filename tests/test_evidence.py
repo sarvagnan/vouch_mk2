@@ -223,7 +223,12 @@ def test_artifact_checks_pass_for_complete_anchored_chain(tmp_path: Path) -> Non
         assert all(
             result.verdict is Verdict.PASS
             for result in results
-            if result.check_id != mk2.CHECK_MAP_FRESHNESS
+            if result.check_id
+            not in {
+                mk2.CHECK_MAP_FRESHNESS,
+                mk2.CHECK_PACK_BOUND,
+                mk2.CHECK_PACK_FILES_MATCH,
+            }
         )
 
 

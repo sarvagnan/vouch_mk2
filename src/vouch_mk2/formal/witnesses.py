@@ -79,7 +79,13 @@ def _replace_representative(
     )
     states = tuple(sorted(new if item == old else item for item in relation.states))
     initial = new if relation.initial == old else relation.initial
-    return Relation(states, transitions, initial, tuple(sorted(representatives.items())))
+    return replace(
+        relation,
+        states=states,
+        transitions=transitions,
+        initial=initial,
+        representatives=tuple(sorted(representatives.items())),
+    )
 
 
 def _first_snapshot(
@@ -271,7 +277,18 @@ def _mutate_m6(relation: Relation) -> Relation:
         )
     )
     mutated, _fingerprint = _with_representative(relation, snapshot)
-    return mutated
+    # This is a genuine missing transition, not finite-label exhaustion: the
+    # mutated universe explicitly offers w-m6 a fresh label that is absent from
+    # both its history and current acceptance-pack version.
+    return replace(
+        mutated,
+        offered_freeze_labels=tuple(
+            sorted(
+                dict(mutated.offered_freeze_labels).items()
+                | {"w-m6": ("w-m6-fresh",)}.items()
+            )
+        ),
+    )
 
 
 def _mutate_m7(relation: Relation) -> Relation:
@@ -438,7 +455,7 @@ WITNESSES: tuple[Witness, ...] = (
     Witness("W3.invalid-success", "M3.succeeded-entry-valid", "Forge success from an invalid roster source.", _mutate_m3),
     Witness("W4.missing-closure", "M4.protective-closure-records", "Drop a protective closure record.", _mutate_m4),
     Witness("W5.late-criteria", "M5.criteria-before-progression", "Drop criteria from a progressed release.", _mutate_m5),
-    Witness("W6.deadlock", "M6.no-nonterminal-deadlock", "Add an isolated unfinished state.", _mutate_m6),
+    Witness("W6.deadlock", "M6.no-nonterminal-deadlock", "Omit a genuinely fresh freeze transition.", _mutate_m6),
     Witness("W7.no-escape", "M7.escape-property", "Remove one active state's protective exits.", _mutate_m7),
     Witness("W8.release-not-withdrawn", "M8.amendment-withdraws-releases", "Keep an amendment-affected release prepared.", _mutate_m8),
     Witness("W9.anchor-rotation", "M9.anchor-monotonic", "Rotate an anchor to an unrelated digest.", _mutate_m9),

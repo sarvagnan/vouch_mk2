@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any, Callable, cast, get_args, get_origin, get_type_hints
 
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
+from vouch_mk2.bundle import build_pack_inventory
 from vouch_mk2.core import (
     Accepted,
     AnchorMode,
@@ -83,6 +84,7 @@ class _Arguments(argparse.Namespace):
     target: str | None
     output: str
     project: str
+    pack_file: list[str]
     lock_path: str | None
     edit_target: str | None
     ledger: str
@@ -117,6 +119,14 @@ def _parser() -> argparse.ArgumentParser:
         "--root",
         default=".",
         help="store root directory (default: current directory)",
+    )
+    check.add_argument(
+        "--project",
+        default="",
+        help=(
+            "project root for acceptance-pack file verification (default: parent "
+            "of --root when its basename is .vouch)"
+        ),
     )
     formal = commands.add_parser(
         "formal", help="explore and check the bounded runtime relation"
@@ -300,6 +310,8 @@ def _present_formal(run: FormalRun) -> None:
         print("invariants")
         for verdict in universe.invariants:
             print(f"{'PASS' if verdict.held else 'FAIL':<5} {verdict.invariant_id}")
+            if verdict.detail:
+                print(f"  {verdict.detail}")
             for violation in verdict.violations:
                 print(f"  {violation}")
     print("witnesses")
@@ -403,6 +415,26 @@ def _add_lifecycle_parsers(commands: Any) -> None:
             help=(command_type.__doc__ or f"run {verb}").splitlines()[0],
         )
         _add_lifecycle_common(parser)
+        if command_type in {
+            command_module.FreezeAcceptance,
+            command_module.BindPack,
+        }:
+            parser.add_argument("--name", required=True)
+            if command_type is command_module.FreezeAcceptance:
+                parser.add_argument("--pack-version", required=True)
+            parser.add_argument(
+                "--project",
+                default=".",
+                help="project root for --pack-file paths (default: current directory)",
+            )
+            parser.add_argument(
+                "--pack-file",
+                action="append",
+                default=[],
+                required=command_type is command_module.BindPack,
+                help="project-relative acceptance file (repeatable)",
+            )
+            continue
         if command_type is command_module.RecordEvidence:
             parser.add_argument("--unit", type=_unit_ref, required=True, metavar="NAME@VERSION")
             parser.add_argument(
@@ -564,6 +596,62 @@ def _make_lifecycle_handler(command_type: _CommandClass) -> _LifecycleHandler:
     return handler
 
 
+def _pack_binding_handler(
+    command_type: _CommandClass, namespace: argparse.Namespace
+) -> int:
+    from vouch_mk2.store import ArtifactKind, digest_of, encode_pack_inventory
+
+    data: bytes | None = None
+    digest = ""
+    try:
+        pack_files = tuple(cast(list[str], namespace.pack_file))
+        if pack_files:
+            inventory = build_pack_inventory(namespace.project, pack_files)
+            data = encode_pack_inventory(inventory)
+            digest = digest_of(ArtifactKind.ACCEPTANCE_PACK, data)
+        if command_type is command_module.FreezeAcceptance:
+            command: Command = command_module.FreezeAcceptance(
+                name=namespace.name,
+                pack_version=namespace.pack_version,
+                pack_digest=digest,
+            )
+        elif command_type is command_module.BindPack:
+            command = command_module.BindPack(
+                name=namespace.name,
+                pack_digest=digest,
+            )
+        else:
+            raise AssertionError("pack binding handler received another command")
+        with Store.open(namespace.root) as store:
+            with store.write_locked():
+                snapshot = store.read_snapshot()
+                decision = decide(snapshot, command)
+                if isinstance(decision, Refused):
+                    return _present_refusal(namespace.json_output, decision)
+                next_snapshot = apply(snapshot, decision.events)
+                objects = (
+                    ()
+                    if data is None
+                    else ((ArtifactKind.ACCEPTANCE_PACK, data),)
+                )
+                store.commit(next_snapshot, objects=objects)
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    if namespace.json_output:
+        _present_accepted_json(next_snapshot.revision, decision.events)
+    else:
+        print(_accepted_text(command, next_snapshot))
+    return 0
+
+
+def _make_pack_binding_handler(command_type: _CommandClass) -> _LifecycleHandler:
+    def handler(namespace: argparse.Namespace) -> int:
+        return _pack_binding_handler(command_type, namespace)
+
+    return handler
+
+
 def _record_evidence_handler(namespace: argparse.Namespace) -> int:
     command_argv = cast(list[str], namespace.command_argv)
     if not command_argv:
@@ -686,6 +774,11 @@ LIFECYCLE_VERBS: dict[str, _LifecycleHandler] = {
         if command_type is command_module.RecordEvidence
         else _record_formal_certificate_handler
         if command_type is command_module.RecordFormalCertificate
+        else _make_pack_binding_handler(command_type)
+        if command_type in {
+            command_module.FreezeAcceptance,
+            command_module.BindPack,
+        }
         else _make_lifecycle_handler(command_type)
     )
     for verb, command_type in _LIFECYCLE_COMMANDS.items()
@@ -762,6 +855,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         target=None,
         output="",
         project="",
+        pack_file=[],
         lock_path=None,
         edit_target=None,
         ledger="",
@@ -1022,12 +1116,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         recorded = "true" if facts.formal_certificate_recorded else "false"
         print(f"formal_certificate_recorded: {recorded}")
         print(f"next_action_count: {facts.next_action_count}")
+        print(
+            "unbound_pack_units: " + ",".join(facts.unbound_pack_units)
+        )
+        print(
+            "late_bound_pack_units: " + ",".join(facts.late_bound_pack_units)
+        )
         return 0
 
     try:
         with Store.open(parsed.root, read_only=True) as store:
             snapshot = store.read_snapshot()
-            artifact_results = run_artifact_checks(store, snapshot)
+            project = parsed.project or None
+            normalized_root = os.path.normpath(parsed.root)
+            if project is None and os.path.basename(normalized_root) == ".vouch":
+                project = os.path.abspath(os.path.dirname(normalized_root))
+            artifact_results = run_artifact_checks(
+                store, snapshot, project=project
+            )
     except StoreError as error:
         print(f"vouch-mk2: {error}", file=sys.stderr)
         return 2

@@ -132,6 +132,52 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                 f"{index}].acceptance_pack_version {unit.acceptance_pack_version!r} "
                 "is not a valid identifier",
             )
+        digest = unit.acceptance_pack_digest
+        if digest and (
+            len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            add(
+                "pack.digest-invalid",
+                f"units[{index}].acceptance_pack_digest must be empty or 64 "
+                "lowercase hexadecimal characters",
+            )
+        if digest and not unit.acceptance_pack_version:
+            add(
+                "pack.digest-without-version",
+                f"units[{index}] binds a pack digest without a pack version",
+            )
+        if unit.pack_binding not in {"", "at-freeze", "late"}:
+            add(
+                "pack.binding-invalid",
+                f"units[{index}].pack_binding must be '', 'at-freeze', or 'late'",
+            )
+        if bool(unit.pack_binding) != bool(digest):
+            add(
+                "pack.binding-incoherent",
+                f"units[{index}].pack_binding must be empty iff its pack digest is empty",
+            )
+        seen_pack_versions: set[str] = set()
+        for history_index, pack_version in enumerate(unit.pack_history):
+            if not valid_identifier(pack_version):
+                add(
+                    "identifier.invalid",
+                    f"units[{index}].pack_history[{history_index}] "
+                    f"{pack_version!r} is not a valid identifier",
+                )
+            if pack_version in seen_pack_versions:
+                add(
+                    "pack.history-duplicate",
+                    f"units[{index}].pack_history[{history_index}] duplicates "
+                    f"retired version {pack_version!r}",
+                )
+            seen_pack_versions.add(pack_version)
+        if unit.acceptance_pack_version in seen_pack_versions:
+            add(
+                "pack.version-reused",
+                f"units[{index}] reuses retired acceptance pack version "
+                f"{unit.acceptance_pack_version!r}",
+            )
         for dependency_index, dependency in enumerate(unit.depends_on):
             if not valid_unit_identifier(dependency):
                 add(

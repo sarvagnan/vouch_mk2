@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
 
 from vouch_mk2.core import (
     Accepted,
     BindBundle,
+    BindPack,
     BundleInventory,
     InventoryEntry,
+    PackEntry,
+    PackInventory,
     apply,
     decide,
 )
@@ -21,6 +25,7 @@ from vouch_mk2.store import (
     StoreError,
     digest_of,
     encode_bundle_inventory,
+    encode_pack_inventory,
 )
 
 
@@ -134,6 +139,130 @@ def _read_regular_file(path: str) -> bytes:
         os.close(fd)
 
 
+def _read_relative_regular(root_fd: int, path: RelPath) -> bytes:
+    """Read one project-relative regular file without following any symlink."""
+    directory_fd = os.dup(root_fd)
+    try:
+        for segment in path.segments[:-1]:
+            _require_case_exact(directory_fd, segment, path)
+            try:
+                next_fd = os.open(
+                    segment,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=directory_fd,
+                )
+            except OSError as error:
+                raise InventoryError(
+                    f"{path.segments!r}: cannot open directory component {segment!r}: {error}"
+                ) from error
+            os.close(directory_fd)
+            directory_fd = next_fd
+        _require_case_exact(directory_fd, path.segments[-1], path)
+        try:
+            fd = os.open(
+                path.segments[-1],
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=directory_fd,
+            )
+        except OSError as error:
+            raise InventoryError(f"{path_text(path)}: cannot open: {error}") from error
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise InventoryError(f"{path_text(path)}: expected regular file")
+            if info.st_size > DEFAULT_MAX_ARTIFACT_BYTES:
+                raise InventoryError(
+                    f"{path_text(path)}: exceeds the "
+                    f"{DEFAULT_MAX_ARTIFACT_BYTES}-byte artifact bound"
+                )
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = os.read(fd, min(1024 * 1024, DEFAULT_MAX_ARTIFACT_BYTES + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > DEFAULT_MAX_ARTIFACT_BYTES:
+                    raise InventoryError(
+                        f"{path_text(path)}: exceeds the "
+                        f"{DEFAULT_MAX_ARTIFACT_BYTES}-byte artifact bound"
+                    )
+            return b"".join(chunks)
+        finally:
+            os.close(fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _require_case_exact(directory_fd: int, segment: str, path: RelPath) -> None:
+    """Refuse case-folded aliases before opening the next path component."""
+    try:
+        names = os.listdir(directory_fd)
+    except OSError as error:
+        raise InventoryError(
+            f"{path_text(path)}: cannot list parent directory: {error}"
+        ) from error
+    if segment not in names:
+        raise InventoryError(
+            f"{path_text(path)}: path segment {segment!r} is absent with exact case"
+        )
+
+
+def path_text(path: RelPath) -> str:
+    return "/".join(path.segments)
+
+
+def build_pack_inventory(
+    project: str, pack_files: tuple[str, ...]
+) -> PackInventory:
+    """Hash an explicit, canonical set of project-relative acceptance files."""
+    if not pack_files:
+        raise InventoryError("acceptance pack must contain at least one file")
+    relative_paths: list[RelPath] = []
+    seen: set[str] = set()
+    for text in pack_files:
+        try:
+            relative = RelPath.parse(text)
+        except StoreError as error:
+            raise InventoryError(f"pack file {text!r}: {error}") from error
+        canonical = path_text(relative)
+        if canonical in seen:
+            raise InventoryError(f"pack file {canonical!r}: duplicate path")
+        seen.add(canonical)
+        relative_paths.append(relative)
+
+    absolute_root = os.path.abspath(project)
+    try:
+        info = os.lstat(absolute_root)
+    except OSError as error:
+        raise InventoryError(f"{absolute_root}: cannot inspect project: {error}") from error
+    if stat.S_ISLNK(info.st_mode):
+        raise InventoryError(f"{absolute_root}: symlink project root refused")
+    if not stat.S_ISDIR(info.st_mode):
+        raise InventoryError(f"{absolute_root}: expected project directory")
+    try:
+        root_fd = os.open(
+            absolute_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+    except OSError as error:
+        raise InventoryError(f"{absolute_root}: cannot open project: {error}") from error
+    try:
+        entries: list[PackEntry] = []
+        for relative in sorted(relative_paths, key=path_text):
+            data = _read_relative_regular(root_fd, relative)
+            entries.append(
+                PackEntry(
+                    path=path_text(relative),
+                    sha256=hashlib.sha256(data).hexdigest(),
+                    size=len(data),
+                )
+            )
+        return PackInventory(entries=tuple(entries))
+    finally:
+        os.close(root_fd)
+
+
 def build_inventory(root: str, exclusions: tuple[str, ...]) -> BundleInventory:
     patterns = tuple(_pattern_segments(pattern) for pattern in exclusions)
     absolute_root = os.path.abspath(root)
@@ -211,5 +340,23 @@ def bind_bundle(store: Store, release_id: str, inventory: BundleInventory) -> st
     store.commit(
         apply(snapshot, decision.events),
         objects=((ArtifactKind.BUNDLE_INVENTORY, data),),
+    )
+    return digest
+
+
+def bind_pack(store: Store, name: str, inventory: PackInventory) -> str:
+    """Atomically bind an inventory object to the unit's current pack version."""
+    if not inventory.entries:
+        raise StoreError("bind-pack refuses an empty acceptance pack inventory")
+    snapshot = store.read_snapshot()
+    data = encode_pack_inventory(inventory)
+    digest = digest_of(ArtifactKind.ACCEPTANCE_PACK, data)
+    decision = decide(snapshot, BindPack(name, digest))
+    if not isinstance(decision, Accepted):
+        codes = tuple(violation.code for violation in decision.violations)
+        raise StoreError(f"bind-pack refused: {codes!r}")
+    store.commit(
+        apply(snapshot, decision.events),
+        objects=((ArtifactKind.ACCEPTANCE_PACK, data),),
     )
     return digest

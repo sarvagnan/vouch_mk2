@@ -7,7 +7,16 @@ from pathlib import Path
 import pytest
 
 import vouch_mk2.verify as verify_module
-from vouch_mk2.core import Accepted, RecordFormalCertificate, Snapshot, Tier, apply, decide
+from vouch_mk2.core import (
+    Accepted,
+    RecordFormalCertificate,
+    Snapshot,
+    Tier,
+    Unit,
+    UnitStatus,
+    apply,
+    decide,
+)
 from vouch_mk2.formal import (
     CORE_V1,
     HISTORY_V1,
@@ -17,6 +26,7 @@ from vouch_mk2.formal import (
     run_formal,
     state_fingerprint,
 )
+from vouch_mk2.formal.explore import Relation
 from vouch_mk2.formal.invariants import INVARIANTS
 from vouch_mk2.formal.witnesses import (
     WITNESSES,
@@ -51,8 +61,8 @@ def test_core_v1_closes_exhaustively_with_stable_counts(
 ) -> None:
     core = formal_run.universe(CORE_V1.name)
     assert core.universe_name == CORE_V1.name == "core-v1"
-    assert core.state_count == 109_130
-    assert core.transition_count == 599_226
+    assert core.state_count == 268_202
+    assert core.transition_count == 1_453_962
     assert len(set(core.relation.states)) == core.state_count
     assert len(set(core.relation.transitions)) == core.transition_count
     assert passed(formal_run)
@@ -65,12 +75,103 @@ def test_history_v1_closes_exhaustively_with_stable_counts(
 ) -> None:
     history = formal_run.universe(HISTORY_V1.name)
     assert history.universe_name == HISTORY_V1.name == "history-v1"
-    assert history.state_count == 7_120 > 0
-    assert history.transition_count == 18_380 > 0
+    assert history.state_count == 31_416
+    assert history.transition_count == 94_280
     assert len(set(history.relation.states)) == history.state_count
     assert len(set(history.relation.transitions)) == history.transition_count
     assert all(verdict.held for verdict in history.invariants)
     _regression_tier_v1_covers_legal_lowering_and_committed_refusals(formal_run)
+
+
+def _assert_respecify_refreeze_republish_reachable(
+    formal_run: FormalRun, universe_name: str, unit_name: str
+) -> None:
+    relation = formal_run.universe(universe_name).relation
+    units = tuple(
+        unit
+        for _fingerprint, snapshot in relation.representatives
+        if (unit := snapshot.unit(unit_name)) is not None
+    )
+    assert any(
+        unit.pack_history
+        and unit.status is UnitStatus.ACCEPTANCE_FROZEN
+        for unit in units
+    )
+    assert any(
+        unit.pack_history and unit.status is UnitStatus.PUBLISHED
+        for unit in units
+    )
+
+
+def test_core_v1_keeps_the_respecify_refreeze_loop_reachable(
+    formal_run: FormalRun,
+) -> None:
+    _assert_respecify_refreeze_republish_reachable(
+        formal_run, CORE_V1.name, "b"
+    )
+
+
+def test_history_v1_keeps_the_respecify_refreeze_loop_reachable(
+    formal_run: FormalRun,
+) -> None:
+    _assert_respecify_refreeze_republish_reachable(
+        formal_run, HISTORY_V1.name, "u"
+    )
+
+
+def test_m6_reports_bounded_label_exhaustion_and_w6_still_discriminates(
+    formal_run: FormalRun,
+) -> None:
+    core_m6 = next(
+        verdict
+        for verdict in formal_run.universe(CORE_V1.name).invariants
+        if verdict.invariant_id == "M6.no-nonterminal-deadlock"
+    )
+    assert core_m6.held
+    assert core_m6.detail.startswith("excluded ")
+    assert "universe-bounded: label set exhausted for unit b: 2 labels" in (
+        core_m6.detail
+    )
+    exhausted = Snapshot(
+        units=(
+            Unit(
+                "b",
+                "v1",
+                UnitStatus.SPECIFIED,
+                pack_history=("p-b", "p-b2"),
+            ),
+        )
+    )
+    exhausted_fingerprint = state_fingerprint(exhausted)
+    bounded_relation = Relation(
+        states=(exhausted_fingerprint,),
+        transitions=(),
+        initial=exhausted_fingerprint,
+        representatives=((exhausted_fingerprint, exhausted),),
+        offered_freeze_labels=(("b", ("p-b", "p-b2")),),
+    )
+    m6 = next(
+        invariant
+        for invariant in INVARIANTS
+        if invariant.invariant_id == "M6.no-nonterminal-deadlock"
+    )
+    assert not m6.check(bounded_relation)
+    assert m6.detail is not None
+    assert m6.detail(bounded_relation) == (
+        "excluded 1 universe-bounded state; universe-bounded: label set "
+        "exhausted for unit b: 2 labels (1 state)"
+    )
+    fresh_label_relation = replace(
+        bounded_relation,
+        offered_freeze_labels=(("b", ("p-b", "p-b2", "p-b3")),),
+    )
+    assert m6.check(fresh_label_relation)
+    w6 = next(
+        verdict
+        for verdict in formal_run.witnesses
+        if verdict.witness_id == "W6.deadlock"
+    )
+    assert w6.discriminated
 
 
 def _regression_tier_v1_covers_legal_lowering_and_committed_refusals(
@@ -80,8 +181,8 @@ def _regression_tier_v1_covers_legal_lowering_and_committed_refusals(
 
     tier = formal_run.universe(TIER_V1.name)
     assert tier.universe_name == TIER_V1.name == "tier-v1"
-    assert tier.state_count == 9
-    assert tier.transition_count == 30
+    assert tier.state_count == 12
+    assert tier.transition_count == 39
     representatives = dict(tier.relation.representatives)
     lowering = [
         (representatives[source], representatives[target])

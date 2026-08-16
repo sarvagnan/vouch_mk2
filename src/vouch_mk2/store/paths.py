@@ -34,6 +34,10 @@ class RelPath:
             raise PathError("path: backslash is forbidden")
         if "\x00" in text:
             raise PathError("path: NUL byte is forbidden")
+        try:
+            text.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise PathError("path: must be valid UTF-8 without surrogate code points") from error
 
         segments = tuple(text.split("/"))
         for index, segment in enumerate(segments):

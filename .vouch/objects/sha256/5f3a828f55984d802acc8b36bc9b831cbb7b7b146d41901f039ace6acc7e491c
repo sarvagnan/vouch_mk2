@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/ingress-invariants-1.spec.md","sha256":"33f1a3186526a6ead99b9feeec291862d61e8964f3b97fec2dccddc8a35afd74","size":8640},{"path":"tests/test_ingress_invariants.py","sha256":"5fdd4b6972d26f563fec482dc530e33774da7daa7fa59265c1ce16109710d5a3","size":13715}],"pack_format":1}

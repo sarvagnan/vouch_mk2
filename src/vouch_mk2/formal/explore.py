@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vouch_mk2.core import Accepted, Snapshot, apply, decide
+from vouch_mk2.core import Accepted, FreezeAcceptance, Snapshot, apply, decide
 from vouch_mk2.formal.universe import Universe
 from vouch_mk2.ir import mk2
 
@@ -29,13 +29,14 @@ class Relation:
     transitions: tuple[tuple[str, str, str], ...]
     initial: str
     representatives: tuple[tuple[str, Snapshot], ...]
+    offered_freeze_labels: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 class StateLimitExceeded(Exception):
     """Exploration exceeded its explicit bound; no partial run is returned."""
 
 
-_STATE_LIMIT = 250_000
+_STATE_LIMIT = 400_000
 
 
 def state_fingerprint(snapshot: Snapshot) -> str:
@@ -46,6 +47,9 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             unit.version,
             unit.status.value,
             unit.acceptance_pack_version,
+            unit.acceptance_pack_digest,
+            tuple(unit.pack_history),
+            unit.pack_binding,
             unit.published_once,
             tuple(unit.depends_on),
         )
@@ -143,6 +147,21 @@ def explore(universe: Universe) -> Relation:
         transitions=tuple(sorted(transitions)),
         initial=initial,
         representatives=tuple(sorted(representatives.items())),
+        offered_freeze_labels=tuple(
+            (name, tuple(sorted(labels)))
+            for name, labels in sorted(
+                {
+                    command.name: {
+                        item.pack_version
+                        for item in universe.commands
+                        if isinstance(item, FreezeAcceptance)
+                        and item.name == command.name
+                    }
+                    for command in universe.commands
+                    if isinstance(command, FreezeAcceptance)
+                }.items()
+            )
+        ),
     )
 
 

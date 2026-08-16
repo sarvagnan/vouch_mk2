@@ -13,6 +13,7 @@ from vouch_mk2.checks.organizational import (
 )
 from vouch_mk2.checks.results import CheckReport, CheckResult
 from vouch_mk2.checks.tier import (
+    check_pack_bound,
     check_tier_controls,
     check_tier_evidence_required,
     check_tier_high_attestation,
@@ -65,6 +66,7 @@ def _check_registry_complete(
     mechanical_keys = set(mechanical)
     organizational_keys = set(organizational)
     artifact_ids = {result.check_id for result in artifact_results}
+    hybrid_artifact = {mk2.CHECK_PACK_BOUND}
     missing_mechanical = tuple(sorted(declared_mechanical - mechanical_keys))
     extra_mechanical = tuple(sorted(mechanical_keys - declared_mechanical))
     missing_organizational = tuple(
@@ -73,8 +75,15 @@ def _check_registry_complete(
     extra_organizational = tuple(
         sorted(organizational_keys - declared_organizational)
     )
-    missing_artifact = tuple(sorted(declared_artifact - artifact_ids))
-    extra_artifact = tuple(sorted(artifact_ids - declared_artifact))
+    # Hybrid checks have both standing and artifact evaluators under one id.
+    # Registry completeness must prove both halves ran; a standing result can
+    # never stand in for object resolution.
+    missing_artifact = tuple(
+        sorted((declared_artifact | hybrid_artifact) - artifact_ids)
+    )
+    extra_artifact = tuple(
+        sorted(artifact_ids - declared_artifact - hybrid_artifact)
+    )
     duplicate_artifact = tuple(
         sorted(
             {
@@ -132,6 +141,7 @@ MECHANICAL_CHECKS: Mapping[str, CheckEvaluator] = {
     mk2.CHECK_RELEASE_BOUND_UNITS_ROSTERED: check_release_bound_units_rostered,
     mk2.CHECK_TIER_EVIDENCE_REQUIRED: check_tier_evidence_required,
     mk2.CHECK_TIER_HIGH_ATTESTATION: check_tier_high_attestation,
+    mk2.CHECK_PACK_BOUND: check_pack_bound,
 }
 
 ORGANIZATIONAL_CHECKS: Mapping[str, CheckEvaluator] = {
@@ -208,7 +218,10 @@ def run_checks(
     artifact_obligations = {
         obligation.obligation_id: obligation
         for obligation in mk2.MK2.obligations
-        if obligation.scope is ObligationScope.ARTIFACT_CHECK
+        if obligation.scope in {
+            ObligationScope.ARTIFACT_CHECK,
+            ObligationScope.STANDING_CHECK,
+        }
     }
     for result in artifact_results:
         obligation = artifact_obligations.get(result.check_id)
@@ -228,6 +241,10 @@ def run_checks(
                     result.check_id == mk2.CHECK_MAP_FRESHNESS
                     and "map.json is absent" in result.detail
                 )
+                and not (
+                    result.check_id == mk2.CHECK_PACK_BOUND
+                    and "IR tier matrix" in result.detail
+                )
             )
         ):
             # The same vacuous-coverage guard the organizational rows have: a
@@ -246,6 +263,12 @@ def run_checks(
                 )
             )
         else:
+            if result.check_id in mechanical:
+                mechanical_results = [
+                    row
+                    for row in mechanical_results
+                    if row.check_id != result.check_id
+                ]
             mechanical_results.append(result)
 
     organizational_results = tuple(

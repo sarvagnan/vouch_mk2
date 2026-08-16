@@ -1,4 +1,17 @@
-"""The canonical finite command universes used by the formal checker."""
+"""The canonical finite command universes used by the formal checker.
+
+A shrink must be explained in the commit; dropping a command from a universe
+is a coverage decision, not a fix.
+"""
+
+# Pinned coverage counts (2026-08-17), states/transitions:
+# - core-v1 268,202/1,453,962: restored b's invalidate -> respecify -> re-freeze
+#   -> publish loop and added its fresh p-b2 label after pack-label reuse became
+#   a refusal.
+# - history-v1 31,416/94,280: restored u's seeded-history respecify loop with
+#   fresh p3 (p2 is already current) while retaining pack-binding@1 coverage.
+# - tier-v1 12/39: pack-binding@1 added BindPack to cover binding after freeze;
+#   this command was restored after an owner recovery accidentally dropped it.
 
 from __future__ import annotations
 
@@ -9,6 +22,7 @@ from vouch_mk2.core import (
     AmendDeviation,
     AnchorMode,
     BeginReverify,
+    BindPack,
     CloseDeviation,
     Command,
     CompleteRelease,
@@ -73,6 +87,7 @@ CORE_V1 = Universe(
         SpecifyUnit(name="b", version="v1"),
         SpecifyUnit(name="a", version="v1", depends_on=("b",)),
         FreezeAcceptance(name="b", pack_version="p-b"),
+        FreezeAcceptance(name="b", pack_version="p-b2"),
         MarkReady(name="b"),
         StartWork(name="b"),
         MarkDone(name="b"),
@@ -87,7 +102,8 @@ CORE_V1 = Universe(
         # deadlocked even though decide() would accept one) and falsifies the
         # liveness invariant M6 against the universe rather than the system.
         # "a" gets supersession — a terminating exit from every stuck state —
-        # while "b" exercises the full recovery loop (re-verify, respecify);
+        # while "b" exercises the full recovery loop (re-verify, respecify) — a second
+        # label keeps re-freeze reachable now that freeze refuses a reused label;
         # giving both units the loop exceeds the exploration bound.
         Supersede(name="b"),
         BeginReverify(name="b"),
@@ -198,6 +214,8 @@ HISTORY_V1 = Universe(
     commands=(
         # Current u lifecycle from the seeded published record.
         FreezeAcceptance(name="u", pack_version="p2"),
+        FreezeAcceptance(name="u", pack_version="p3"),
+        BindPack(name="u", pack_digest="e" * 64),
         MarkReady(name="u"),
         StartWork(name="u"),
         MarkDone(name="u"),
@@ -214,6 +232,7 @@ HISTORY_V1 = Universe(
         CloseDeviation(deviation_id="d1"),
         # Publish dependent w, then exercise one release over the current refs.
         FreezeAcceptance(name="w", pack_version="p-w"),
+        BindPack(name="w", pack_digest="f" * 64),
         MarkReady(name="w"),
         StartWork(name="w"),
         MarkDone(name="w"),
@@ -248,6 +267,7 @@ TIER_V1 = Universe(
         SetTier(Tier.HIGH),
         SpecifyUnit(name="tier-unit", version="v1"),
         FreezeAcceptance(name="tier-unit", pack_version="pack-v1"),
+        BindPack(name="tier-unit", pack_digest="e" * 64),
     ),
     initial=Snapshot(tier=Tier.HIGH),
     invariant_ids=("M11.tier-never-lowers-after-commitment",),

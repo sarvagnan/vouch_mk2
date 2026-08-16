@@ -133,6 +133,13 @@ subagent wrapper is Sonnet on the shared session limit: if ever used, spec by fi
 
 ## What to watch (observed, not hypothetical)
 
+- **Formal universe sizes are a coverage gauge — read them every pass.** A shrink means
+  transitions became refused or a command was dropped; unit #6's fix pass silently removed
+  `Respecify` from two universes (core-v1 109k → 66k) because a new refusal made the loop
+  hit the state cap, and "M1–M11 hold" stayed true over the smaller relation. Never accept a
+  smaller universe without the reason in the DONE file; never `git checkout` a file Codex has
+  edited to undo your own change (I lost its edit that way — recover from its log's `git diff`).
+
 - Codex reports "blocked" for owner items rather than doing them — correct; read its notes.
 - Doc totals drift when a row moves (DEFECTS 28→29→30): fix the summary and the open list
   in the same change as the row.

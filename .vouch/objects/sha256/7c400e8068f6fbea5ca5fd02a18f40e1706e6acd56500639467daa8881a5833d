@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_defect_dispositions.py -q","kind":"green","outcome":"tests-passed","parent":"98b6eac3ff6cf8acd6af7058d4e2ec2ce3bf7d4f0a7dfc8dae08e9fb0edae3df","recorded_at":"2026-08-16T16:06:23+00:00","sequence":2,"unit":{"name":"defect-dispositions","version":"1"}}

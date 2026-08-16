@@ -54,7 +54,26 @@ def _upgrade_0_to_1(document: StateDocument) -> StateDocument:
     return upgraded
 
 
-UPGRADERS: dict[int, Upgrader] = {0: _upgrade_0_to_1}
+def _upgrade_1_to_2(document: StateDocument) -> StateDocument:
+    """Record the truthful pre-D-14 fact: no acceptance pack was byte-bound."""
+    upgraded = dict(document)
+    raw_units = document.get("units")
+    if type(raw_units) is list:
+        units: list[object] = []
+        for raw_unit in cast(list[object], raw_units):
+            if type(raw_unit) is not dict:
+                units.append(raw_unit)
+                continue
+            copied = dict(cast(dict[str, object], raw_unit))
+            copied["acceptance_pack_digest"] = ""
+            copied["pack_history"] = []
+            units.append(copied)
+        upgraded["units"] = units
+    upgraded["state_format"] = 2
+    return upgraded
+
+
+UPGRADERS: dict[int, Upgrader] = {0: _upgrade_0_to_1, 1: _upgrade_1_to_2}
 
 
 def _prepare_format_zero_assertions(

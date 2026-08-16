@@ -46,7 +46,14 @@ class UnitSpecified:
 class AcceptanceFrozen:
     name: str
     pack_version: str
+    pack_digest: str
     gate: GateRecord
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptancePackBound:
+    name: str
+    pack_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +240,7 @@ class ReleaseInvalidated:
 type Event = (
     UnitSpecified
     | AcceptanceFrozen
+    | AcceptancePackBound
     | UnitMarkedReady
     | WorkStarted
     | UnitMarkedDone

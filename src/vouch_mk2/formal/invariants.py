@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from collections import Counter
 from dataclasses import dataclass
 
 from vouch_mk2.core import (
@@ -22,6 +23,7 @@ class Invariant:
     invariant_id: str
     description: str
     check: Callable[[Relation], tuple[str, ...]]
+    detail: Callable[[Relation], str] | None = None
 
 
 def _representatives(relation: Relation) -> dict[str, Snapshot]:
@@ -154,6 +156,7 @@ _CONFIGURATION_COMMANDS = frozenset(
         mk2.CMD_SET_TIER,
         mk2.CMD_ADVANCE_ANCHOR,
         mk2.CMD_RECORD_FORMAL_CERTIFICATE,
+        mk2.CMD_BIND_PACK,
     }
 )
 
@@ -179,24 +182,106 @@ def _is_quiescent(snapshot: Snapshot) -> bool:
     )
 
 
-def _no_nonterminal_deadlock(relation: Relation) -> tuple[str, ...]:
+def _universe_bounded_reason(
+    snapshot: Snapshot,
+    offered_freeze_labels: dict[str, tuple[str, ...]],
+) -> str | None:
+    """Name the one honest finite-universe exception to M6.
+
+    A real unit can always choose a fresh pack label.  A finite command
+    universe cannot.  Exclude only an otherwise-idle snapshot whose sole
+    active record is waiting at ``specified`` and for which the universe
+    offers at least one freeze label, all already consumed by that record.
+    """
+    active_units = tuple(
+        unit
+        for unit in snapshot.units
+        if unit.status is not UnitStatus.SUPERSEDED
+    )
+    active_release_states = {
+        ReleaseState.PREPARED,
+        ReleaseState.DEPLOYING,
+        ReleaseState.VERIFYING,
+    }
+    if (
+        len(active_units) != 1
+        or active_units[0].status is not UnitStatus.SPECIFIED
+        or any(
+            release.state in active_release_states
+            for release in snapshot.releases
+        )
+        or any(
+            deviation.status is not DeviationStatus.CLOSED
+            for deviation in snapshot.deviations
+        )
+    ):
+        return None
+    unit = active_units[0]
+    labels = offered_freeze_labels.get(unit.name, ())
+    if not labels:
+        return None
+    used_labels = set(unit.pack_history)
+    if unit.acceptance_pack_version:
+        used_labels.add(unit.acceptance_pack_version)
+    if not set(labels).issubset(used_labels):
+        return None
+    return (
+        "universe-bounded: label set exhausted for unit "
+        f"{unit.name}: {len(labels)} labels"
+    )
+
+
+def _m6_analysis(relation: Relation) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """mk2 M6, descended from vouch 0.6 invariant I6.
 
     Every reachable state that still owes progress (a non-superseded unit, an
     active release, or an unclosed deviation) has at least one outgoing
-    NON-CONFIGURATION transition that changes state."""
+    NON-CONFIGURATION transition that changes state.  The separately reported
+    finite-label exception is a property of the bounded universe, not the
+    runtime lifecycle."""
     progressing = {
         source
         for source, command, target in relation.transitions
         if source != target and command not in _CONFIGURATION_COMMANDS
     }
+    offered_freeze_labels = dict(relation.offered_freeze_labels)
     violations: list[str] = []
+    excluded: list[str] = []
     for fingerprint, snapshot in relation.representatives:
         if fingerprint not in progressing and not _is_quiescent(snapshot):
+            reason = _universe_bounded_reason(snapshot, offered_freeze_labels)
+            if reason is not None:
+                excluded.append(reason)
+                continue
             violations.append(
                 f"{fingerprint}: active state has no non-configuration exit"
             )
-    return tuple(violations)
+    return tuple(violations), tuple(excluded)
+
+
+def _no_nonterminal_deadlock(relation: Relation) -> tuple[str, ...]:
+    return _m6_analysis(relation)[0]
+
+
+def _no_nonterminal_deadlock_detail(relation: Relation) -> str:
+    excluded = _m6_analysis(relation)[1]
+    counts = Counter(excluded)
+    for name, labels in relation.offered_freeze_labels:
+        counts.setdefault(
+            "universe-bounded: label set exhausted for unit "
+            f"{name}: {len(labels)} labels",
+            0,
+        )
+    reasons = "; ".join(
+        f"{reason} ({count} {'state' if count == 1 else 'states'})"
+        for reason, count in sorted(counts.items())
+    )
+    excluded_count = len(excluded)
+    summary = (
+        f"excluded {excluded_count} universe-bounded "
+        f"{'state' if excluded_count == 1 else 'states'}"
+    )
+    return f"{summary}; {reasons}" if reasons else summary
 
 
 def _escape_property(relation: Relation) -> tuple[str, ...]:
@@ -389,6 +474,7 @@ INVARIANTS: tuple[Invariant, ...] = (
         "M6.no-nonterminal-deadlock",
         "0.6 I6: every active reachable state has a non-configuration exit.",
         _no_nonterminal_deadlock,
+        _no_nonterminal_deadlock_detail,
     ),
     Invariant(
         "M7.escape-property",

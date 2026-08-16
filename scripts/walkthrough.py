@@ -67,6 +67,13 @@ print(digest)
 
 def _drive_lifecycle(lock: str, project: str) -> None:
     root = ".vouch"
+    tests = os.path.join(project, "tests")
+    os.makedirs(tests, exist_ok=True)
+    for name in ("core", "api"):
+        with open(
+            os.path.join(tests, f"test_{name}.py"), "w", encoding="utf-8"
+        ) as stream:
+            stream.write(f"def test_{name}():\n    assert True\n")
 
     def verb(name: str, *args: str) -> None:
         _step(name, _run(lock, name, "--root", root, *args, cwd=project))
@@ -74,7 +81,15 @@ def _drive_lifecycle(lock: str, project: str) -> None:
     verb("specify", "--name", "core", "--version", "v1")
     verb("specify", "--name", "api", "--version", "v1", "--depends-on", "core")
     for name in ("core", "api"):
-        verb("freeze", "--name", name, "--pack-version", f"pack-{name}")
+        verb(
+            "freeze",
+            "--name",
+            name,
+            "--pack-version",
+            f"pack-{name}",
+            "--pack-file",
+            f"tests/test_{name}.py",
+        )
         verb("mark-ready", "--name", name)
         verb("start", "--name", name)
 
@@ -143,7 +158,9 @@ def main() -> int:
     _drive_lifecycle(lock, project)
     _step("generate map", _run(lock, "generate", "--root", ".vouch", cwd=project))
     _step("emit-context", _run(lock, "emit-context", "--root", ".vouch", cwd=project))
-    check = _run(lock, "check", "--ci", "--root", ".vouch", cwd=project)
+    check = _run(
+        lock, "check", "--ci", "--root", ".vouch", "--project", ".", cwd=project
+    )
     _step("check --ci", check)
     if not check.stdout.rstrip().endswith("composed: PASS"):
         print(check.stdout)

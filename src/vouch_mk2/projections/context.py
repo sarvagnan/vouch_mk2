@@ -48,6 +48,12 @@ def agent_context(snapshot: Snapshot) -> str:
             f"{len(snapshot.deviations)} deviations; {len(snapshot.releases)} releases; "
             f"assurance tier {snapshot.tier.value}."
         ),
+        (
+            "Acceptance packs: "
+            f"{sum(bool(unit.acceptance_pack_digest) for unit in snapshot.units)} bound; "
+            f"{sum(bool(unit.acceptance_pack_version) and not unit.acceptance_pack_digest for unit in snapshot.units)} label-only; "
+            f"{sum(unit.pack_binding == 'late' for unit in snapshot.units)} bound late."
+        ),
         "",
         "## Next actions",
         "",
@@ -62,6 +68,13 @@ def agent_context(snapshot: Snapshot) -> str:
     else:
         lines.append("- none")
     lines.extend(("", "## Not mechanically provable", ""))
+    # D050: the ONE public assurance sentence, verbatim from docs/claim-boundary.md,
+    # emitted into every context so no propagated surface can overstate it.
+    lines.append(
+        "Vouch checks only what artifacts can prove; where it cannot, it prints "
+        "`NOT_CHECKED` rather than offering a button that fakes it."
+    )
+    lines.append("")
     lines.extend(
         f"- {result.check_id}: {result.detail}" for result in organizational
     )

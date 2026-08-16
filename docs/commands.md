@@ -5,13 +5,15 @@
 ## check
 
 ```text
-usage: vouch-mk2 check [-h] [--ci] [--json] [--root ROOT]
+usage: vouch-mk2 check [-h] [--ci] [--json] [--root ROOT] [--project PROJECT]
 
 options:
-  -h, --help   show this help message and exit
-  --ci         no-op today; makes CI intent explicit (IMPLEMENTATION-PLAN.md Phase 3)
-  --json       emit one JSON report instead of text
-  --root ROOT  store root directory (default: current directory)
+  -h, --help         show this help message and exit
+  --ci               no-op today; makes CI intent explicit (IMPLEMENTATION-PLAN.md Phase 3)
+  --json             emit one JSON report instead of text
+  --root ROOT        store root directory (default: current directory)
+  --project PROJECT  project root for acceptance-pack file verification (default: parent of --root
+                     when its basename is .vouch)
 ```
 
 ## formal
@@ -217,6 +219,22 @@ options:
   --inventory-digest INVENTORY_DIGEST
 ```
 
+## bind-pack
+
+```text
+usage: vouch-mk2 bind-pack [-h] --root ROOT [--json] --name NAME [--project PROJECT]
+                           --pack-file PACK_FILE
+
+options:
+  -h, --help            show this help message and exit
+  --root ROOT           store root directory
+  --json                emit one JSON result instead of text
+  --name NAME
+  --project PROJECT     project root for --pack-file paths (default: current directory)
+  --pack-file PACK_FILE
+                        project-relative acceptance file (repeatable)
+```
+
 ## close-deviation
 
 ```text
@@ -245,6 +263,7 @@ options:
 
 ```text
 usage: vouch-mk2 freeze [-h] --root ROOT [--json] --name NAME --pack-version PACK_VERSION
+                        [--project PROJECT] [--pack-file PACK_FILE]
 
 options:
   -h, --help            show this help message and exit
@@ -252,6 +271,9 @@ options:
   --json                emit one JSON result instead of text
   --name NAME
   --pack-version PACK_VERSION
+  --project PROJECT     project root for --pack-file paths (default: current directory)
+  --pack-file PACK_FILE
+                        project-relative acceptance file (repeatable)
 ```
 
 ## mark-done

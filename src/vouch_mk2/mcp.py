@@ -151,6 +151,8 @@ def _status_object(facts: StatusFacts) -> dict[str, object]:
         "tier": facts.tier,
         "formal_certificate_recorded": facts.formal_certificate_recorded,
         "next_action_count": facts.next_action_count,
+        "unbound_pack_units": list(facts.unbound_pack_units),
+        "late_bound_pack_units": list(facts.late_bound_pack_units),
     }
 
 

@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/operator-docs-1.spec.md","sha256":"bf82b94d998e38c26a157f998f4e42650af6c69ea165da9c7d867a5c71906cf0","size":3296},{"path":"tests/test_operator_docs.py","sha256":"b72eef64e6860fa37111cda94ece11677eebea95816ccd19cb19072ea2d971d8","size":6053}],"pack_format":1}

@@ -54,3 +54,21 @@ R9 `docs/quickstart.md` freezes with `--pack-file tests/test_greeter.py` (both f
 - Do not touch `.vouch/`: the owner runs `upgrade` (1→2) and `bind-pack` on the five published units.
 - Every pre-existing test green (adjust codec/format/golden-dependent tests coherently); Pyrefly strict; import-linter kept.
 - New test functions for every non-pack behavior (path traversal, symlink, duplicate entries, map format 3 refusal of 2).
+
+## Amendment pack/2 (DEV-pb-01, contract defects in the owner's R1/R4 and D-14, adjudicated amend)
+
+Raised by the mechanical review. (i) R4 said `bind-pack` is legal "in any status": a `superseded`
+record is inert history (D-9; M10) — binding it is refused; a `BindPack` names the unit's ACTIVE
+record only. (ii) "write-once per pack version" was unenforceable because `respecify` cleared the
+label and nothing remembered it: `Unit.pack_history: tuple[str, ...] = ()` (still format 2 —
+uncommitted; golden re-pinned with `pack_history: []` on every unit) — `respecify` appends the
+retired label and clears version+digest; `freeze` refuses `pack.version-reused` for any label in
+the history or equal to the current; the upgrader 1→2 sets `()`. `pack_history` appears in the
+map (format 3) and the projections. Formal: `BindPack` is generated only for non-superseded
+statuses; M10 holds.
+
+## Amendment pack/3 (DEV-pb-02, pack-defect, adjudicated amend)
+
+The owner's D-14 correction (adversarial review) made `check.pack-files-match` tier-scoped and made a
+missing project root NOT_CHECKED at standard+; the owner's frozen R6 test predates that and ran at
+`lightweight`. The test now sets tier `standard` (and anchor mode `ci`, which `standard` requires) first and expects exit 1 without a project root.

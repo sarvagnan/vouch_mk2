@@ -17,6 +17,7 @@ class InvariantVerdict:
     invariant_id: str
     held: bool
     violations: tuple[str, ...]
+    detail: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,11 @@ def _run_universe(universe: Universe) -> UniverseRun:
                 invariant_id=invariant.invariant_id,
                 held=not violations,
                 violations=violations,
+                detail=(
+                    invariant.detail(relation)
+                    if invariant.detail is not None
+                    else ""
+                ),
             )
         )
     return UniverseRun(
