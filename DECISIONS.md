@@ -395,3 +395,37 @@ entry is mk2's recorded discrepancy for its own semantics.
 - **Infrastructure the pilot forces, accepted as in-scope:** re-versioning through
   `decide()` (retiring D-9's seeded state), and a pytest→`record_evidence` adapter so red
   and green evidence is recorded by the harness, never hand-typed.
+
+## D-12 — Assurance tier lives in the snapshot and has exactly one mechanical consumer
+
+**Status:** decided 2026-08-16 (pilot unit #2, D045).
+
+- **The 0.6 defect.** D045: config and ledger each carried a tier and could disagree; the
+  ledger's tier silently won, so a "high" project got lightweight enforcement. Two
+  authorities for one fact — the same class D-4 closed for anchor mode.
+- **Decision.** `Snapshot.tier: Tier` (closed enum lightweight|standard|high; default
+  `lightweight`), set by one command `set-tier` (any direction, recorded, table-visible;
+  raising is free, LOWERING is refused while any unit is beyond `specified` — budget
+  never lowers tier below the risk already committed to, machine.md §1). One authority;
+  no config field.
+- **What the tier mechanically GOVERNS — and only this.** The 0.6 §13 matrix has 13
+  controls; most are organizational or concern surfaces mk2 does not have (mutation
+  testing, security evidence, external map delivery). mk2 binds the tier to the checks it
+  can actually run, and states the rest as NOT_CHECKED rows scoped by tier:
+  - `standard`+: evidence anchoring required — `check.evidence-anchors` under mode `none`
+    is FAIL (not NOT_APPLICABLE) and a published unit with no evidence chain is FAIL
+    (`check.tier.evidence-required`); at `lightweight` chains are optional (ordering-only,
+    no causal claim — the matrix's own words).
+  - `high`: additionally every published unit's chain must be anchored (not merely
+    present) and a formal certificate must be recorded (`check.tier.high-attestation`).
+  - The remaining matrix rows appear as organizational NOT_CHECKED lines whose detail
+    names the tier and the control ("standard: mutation testing risk-triggered — not
+    mechanically checkable"), so a report never implies a control was checked because a
+    tier was declared.
+- **The tier requirements themselves move from the 0.6 transcription into the mk2 IR** as
+  first-class data (`TierRequirement` rows already exist in the schema); the mk2 checks
+  read the matrix rather than hardcoding tier→control, so the doc-binding test can bind
+  the matrix to the checks that consume it.
+- **Rejected:** a tier in `.vouch/config.json` (0.6's shape — the D045 defect itself);
+  and enforcing the full 13-row matrix mechanically (would require faking checks mk2
+  cannot perform — the vacuous-coverage class).
