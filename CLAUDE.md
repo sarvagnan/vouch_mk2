@@ -58,6 +58,10 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 <!-- END BEADS INTEGRATION -->
 
 
+## Working method
+
+Every forward change is a self-hosted unit: Fable plans + writes the frozen pack, Codex implements (direct `codex exec`), Codex then Opus review, Fable's overall pass publishes through the DoD gates. The full procedure, roles, cost rules and commands: `docs/method.md`.
+
 ## Build & Test
 
 _Add your build and test commands here_

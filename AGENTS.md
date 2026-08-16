@@ -48,6 +48,10 @@ cp -rf source dest          # NOT: cp -r source dest
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
+## Working method (vouch mk2)
+
+Every forward change is a self-hosted unit: Fable plans + writes the frozen pack, Codex implements (direct `codex exec`) against it and may not edit it, Codex then Opus review, Fable's overall pass publishes through the DoD gates. Full procedure, roles, cost rules and commands: `docs/method.md`.
+
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
