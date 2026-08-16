@@ -59,6 +59,9 @@ The brief always says: may NOT edit the pack; a contradiction → STOP on that r
 write `<unit>.DEVIATION.md`, implement the rest; do not touch `.vouch/`, README count, git;
 gates that must be green; write `<unit>.DONE.md`; `bd close <bead>`.
 
+Write the brief with a QUOTED heredoc delimiter (`<<'EOF'`) — an unquoted one lets the shell eat
+backticked phrases (unit #4 lost two words that way; not fatal, but avoidable).
+
 Waiting: poll for the DONE/DEVIATION file or process exit — by **pid**
 (`ps -p <pid>`), never `pgrep -f "codex exec"` (it matches your own waiter shell). Never
 relaunch on a timeout; a second Codex in the same tree is the worst failure mode.
