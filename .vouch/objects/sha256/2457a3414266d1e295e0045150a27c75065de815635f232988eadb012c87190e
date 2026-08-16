@@ -1,0 +1,1 @@
+{"command_line":"/Users/sarvagnan/Documents/project_blueprint/vouch_mk2/.venv/bin/python3 -m pytest -q -p no:cacheprovider tests/test_assurance_tier.py -q","kind":"red","outcome":"tests-failed","parent":"GENESIS","recorded_at":"2026-08-16T08:09:52+00:00","sequence":1,"unit":{"name":"assurance-tier","version":"1"}}
