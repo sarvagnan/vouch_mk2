@@ -28,6 +28,7 @@ from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.store import (
     ArtifactKind,
     Store,
+    StoreError,
     decode_evidence_event,
     decode_snapshot,
     digest_of,
@@ -336,7 +337,7 @@ def test_fifo_planted_over_object_is_refused_not_hung(tmp_path: Path) -> None:
         assert found.verdict is Verdict.FAIL
 
 
-def test_ghost_evidence_head_fails_chains_check(tmp_path: Path) -> None:
+def test_ghost_evidence_head_is_refused_at_store_ingress(tmp_path: Path) -> None:
     # The fabricated-ledger exploit: a head for a unit absent from the
     # snapshot must never produce a clean report.
     root = tmp_path / "store"
@@ -351,10 +352,9 @@ def test_ghost_evidence_head_fails_chains_check(tmp_path: Path) -> None:
             units=(),
             evidence_heads=snapshot.evidence_heads,
         )
-        store.commit(ghost)
-        found = _result(store, ghost, mk2.CHECK_EVIDENCE_CHAINS)
-        assert found.verdict is Verdict.FAIL
-        assert "absent from the snapshot" in found.detail
+        with pytest.raises(StoreError, match="evidence head"):
+            store.commit(ghost)
+        assert store.read_snapshot() == snapshot
         del digest
 
 

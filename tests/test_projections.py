@@ -84,7 +84,7 @@ def _closure() -> ClosureRecord:
     return ClosureRecord(
         "operator stop",
         ClosureTriggerKind.OPERATOR,
-        (("consumer", UnitStatus.RELEASE_BOUND.value),),
+        (("consumer", "v2", UnitStatus.RELEASE_BOUND.value),),
         True,
         ("latency",),
     )

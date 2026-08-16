@@ -51,14 +51,18 @@ OBLIGATION_CLOSURE_RECORD = "obligation.closure-record"
 
 def _set_status(source: str, targets: tuple[str, ...]) -> tuple[Transition, ...]:
     return tuple(
-        Transition(source=source, command="set-status", target=target)
+        Transition(
+            source=source,
+            command=f"set-status:{target}",
+            target=target,
+        )
         for target in targets
     )
 
 
 def _advance(source: str, targets: tuple[str, ...]) -> tuple[Transition, ...]:
     return tuple(
-        Transition(source=source, command="advance", target=target)
+        Transition(source=source, command=f"advance:{target}", target=target)
         for target in targets
     )
 

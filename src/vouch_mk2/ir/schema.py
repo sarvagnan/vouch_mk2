@@ -265,11 +265,21 @@ def _validate_machine(machine: StateMachine, out: _Collector) -> None:
         out.add("machine.unknown-initial", f"{prefix}: initial {machine.initial!r}")
     states = set(machine.states)
     seen_edges: set[tuple[str, str, str]] = set()
+    command_targets: dict[tuple[str, str], str] = {}
     for t in machine.command_transitions:
         edge = (t.source, t.command, t.target)
         if edge in seen_edges:
             out.add("transition.duplicate", f"{prefix}: {edge!r}")
         seen_edges.add(edge)
+        command_key = (t.source, t.command)
+        previous_target = command_targets.get(command_key)
+        if previous_target is not None and previous_target != t.target:
+            out.add(
+                "transition.ambiguous-command",
+                f"{prefix}: source/command {command_key!r} targets both "
+                f"{previous_target!r} and {t.target!r}",
+            )
+        command_targets[command_key] = t.target
         if not t.command:
             out.add("transition.empty-command", f"{prefix}: {t.source!r}->{t.target!r}")
         for endpoint in (t.source, t.target):

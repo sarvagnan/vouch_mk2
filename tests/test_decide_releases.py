@@ -99,7 +99,7 @@ def closure(
     return ClosureRecord(
         trigger="operator",
         trigger_kind=ClosureTriggerKind.OPERATOR,
-        roster_snapshot=(("u", "release-bound"),),
+        roster_snapshot=(("u", "v1", "release-bound"),),
         no_completion_claim=no_completion_claim,
         observations=(),
     )
@@ -150,7 +150,7 @@ def test_prepare_does_not_rebind_already_release_bound_members() -> None:
 def test_prepare_refuses_identity_duplicate_and_unknown_unit() -> None:
     snapshot = Snapshot(units=(unit("u", UnitStatus.PUBLISHED),))
     assert refused_codes(snapshot, PrepareRelease("", ("u",))) == {
-        "release.identity-required"
+        "identifier.invalid"
     }
     prepared = accepted(snapshot, PrepareRelease("r1", ("u",)))
     assert refused_codes(prepared, PrepareRelease("r1", ("u",))) == {
@@ -324,9 +324,9 @@ def test_i3_inversion_protective_closure_never_blocked_by_contamination() -> Non
         assert isinstance(event, ReleaseRolledBack | ReleaseRetired)
         event_closure = event.closure
         assert event_closure.roster_snapshot == (
-            ("blocked", "blocked"),
-            ("ghost", "missing"),
-            ("invalid", "invalidated"),
+            ("blocked", "v1", "blocked"),
+            ("ghost", "v1", "missing"),
+            ("invalid", "v1", "invalidated"),
         )
     assert refused_codes(snapshot, RollBack("r1", "")) == {
         "gate.release.closure-trigger-required"
@@ -606,7 +606,7 @@ def test_closure_roster_snapshot_correspondence_is_checked() -> None:
         closure=ClosureRecord(
             trigger="operator",
             trigger_kind=ClosureTriggerKind.OPERATOR,
-            roster_snapshot=(("someone-else", "published"),),
+            roster_snapshot=(("someone-else", "v1", "published"),),
             no_completion_claim=True,
             observations=(),
         ),

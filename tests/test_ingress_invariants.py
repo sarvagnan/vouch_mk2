@@ -97,12 +97,22 @@ def test_p1_store_never_commits_a_state_it_cannot_read_back(tmp_path: Path) -> N
 
 
 def test_p1_store_refuses_oversize_objects_and_generated_files_on_write(tmp_path: Path) -> None:
-    store = Store.init(str(tmp_path / "s"), max_artifact_bytes=64)
+    # Amended under DEV-ingress-01 (pack/2): the bound must also cover the initial
+    # state (128 bytes), so a 64-byte bound correctly refuses Store.init itself.
+    # The write-side rule is exercised with a bound the empty store fits under.
+    store = Store.init(str(tmp_path / "s"), max_artifact_bytes=256)
     with pytest.raises(StoreError, match="bound"):
-        store.put_object(ArtifactKind.OBJECT, b"x" * 65)
+        store.put_object(ArtifactKind.OBJECT, b"x" * 257)
     with pytest.raises(StoreError, match="bound"):
-        store.write_generated("map.json", b"y" * 65)
+        store.write_generated("map.json", b"y" * 257)
     store.close()
+
+
+def test_p1_store_init_itself_honours_the_bound(tmp_path: Path) -> None:
+    # The corollary the deviation surfaced: a store may never be initialized with
+    # a state that exceeds its own read bound.
+    with pytest.raises(StoreError, match="bound"):
+        Store.init(str(tmp_path / "s"), max_artifact_bytes=64)
 
 
 def test_p1_store_rejects_nonsensical_bound_at_construction(tmp_path: Path) -> None:
@@ -178,7 +188,7 @@ def test_p2_release_bound_rostered_uses_exact_refs() -> None:
         units=(_unit("u", "v1", UnitStatus.SUPERSEDED), _unit("u", "v2", UnitStatus.RELEASE_BOUND)),
         releases=(
             Release("r1", ReleaseArchetype.OPERATIONAL, ReleaseState.RETIRED, (UnitRef("u", "v1"),), CRITERIA,
-                    ClosureRecord("t", ClosureTriggerKind.OPERATOR, (("u", "superseded"),), True, ())),
+                    ClosureRecord("t", ClosureTriggerKind.OPERATOR, (("u", "v1", "superseded"),), True, ())),
         ),
     )
     # Active u@v2 is release-bound but NO release references u@v2 — only historical u@v1.
@@ -263,3 +273,47 @@ def test_p3_ir_validate_refuses_ambiguous_source_command() -> None:
         )),),
     )
     assert any(v.code == "transition.ambiguous-command" for v in validate(ambiguous))
+
+
+# ---- pack/3 (DEV-ingress-02): closure snapshots are ref-keyed; '@' refused in name/version ----
+
+
+def test_p2_closure_snapshot_is_ref_keyed_and_survives_two_version_roster() -> None:
+    from vouch_mk2.core import RollBack
+    from vouch_mk2.core.invariants import validate_snapshot
+
+    # A D-9 roster holding two versions of one name: rolling back must produce a
+    # closure the validator ACCEPTS, with one row per exact ref.
+    roster = (UnitRef("u", "v1"), UnitRef("u", "v2"))
+    snapshot = Snapshot(
+        revision=1,
+        units=(_unit("u", "v1", UnitStatus.SUPERSEDED), _unit("u", "v2", UnitStatus.RELEASE_BOUND)),
+        releases=(Release("r", ReleaseArchetype.OPERATIONAL, ReleaseState.DEPLOYING, roster, CRITERIA, None),),
+    )
+    assert validate_snapshot(snapshot) == ()
+    decision = decide(snapshot, RollBack("r", trigger="operator"))
+    assert isinstance(decision, Accepted), decision
+    after = apply(snapshot, decision.events)
+    assert validate_snapshot(after) == (), validate_snapshot(after)
+    release = after.release("r")
+    assert release is not None
+    closure = release.closure
+    assert closure is not None
+    assert closure.roster_snapshot == (("u", "v1", "superseded"), ("u", "v2", "release-bound"))
+    # and it round-trips through the codec
+    assert decode_snapshot(encode_snapshot(after)) == after
+
+
+def test_p2_at_sign_refused_in_unit_name_and_version() -> None:
+    from vouch_mk2.core import SpecifyUnit
+
+    assert isinstance(decide(Snapshot(), SpecifyUnit("a@b", "v1")), Refused)
+    assert isinstance(decide(Snapshot(), SpecifyUnit("a", "b@c")), Refused)
+    assert isinstance(decide(Snapshot(), SpecifyUnit("a", "v1")), Accepted)
+    hostile = Snapshot(revision=1, units=(Unit("a@b", "c", UnitStatus.SPECIFIED),))
+    with pytest.raises(DecodeError):
+        decode_snapshot(encode_snapshot(hostile))
+    # pack versions keep '@' (they are never parsed as NAME@VERSION)
+    from vouch_mk2.core import FreezeAcceptance
+    ok = Snapshot(revision=1, units=(Unit("a", "v1", UnitStatus.SPECIFIED),))
+    assert isinstance(decide(ok, FreezeAcceptance("a", "pack/3@abc123")), Accepted)

@@ -9,6 +9,7 @@ import secrets
 import stat
 from collections.abc import Callable, Sequence
 
+from vouch_mk2.core.invariants import validate_snapshot
 from vouch_mk2.core.model import Snapshot
 from vouch_mk2.store.codec import decode_snapshot, encode_snapshot
 from vouch_mk2.store.digests import ArtifactKind, digest_of
@@ -57,6 +58,7 @@ class Store:
         on_step: Callable[[str], None] | None = None,
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
     ) -> None:
+        self._validate_artifact_bound(max_artifact_bytes)
         self._require_platform_capabilities()
         self._root_path = os.path.abspath(root)
         try:
@@ -94,6 +96,7 @@ class Store:
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
     ) -> Store:
         """Create a fresh layout and open its root capability exactly once."""
+        cls._validate_artifact_bound(max_artifact_bytes)
         try:
             os.mkdir(root, 0o700)
         except OSError as error:
@@ -154,7 +157,21 @@ class Store:
         if self._on_step is not None:
             self._on_step(step_id)
 
+    @staticmethod
+    def _validate_artifact_bound(max_artifact_bytes: int) -> None:
+        if max_artifact_bytes < 1:
+            raise StoreError("artifact bound must be at least 1 byte")
+
+    def _require_within_artifact_bound(self, payload: bytes, label: str) -> None:
+        if len(payload) > self._max_artifact_bytes:
+            raise StoreError(
+                f"{label}: {len(payload)} bytes exceeds artifact bound "
+                f"{self._max_artifact_bytes}"
+            )
+
     def _initialize_layout(self) -> None:
+        state = encode_snapshot(Snapshot())
+        self._require_within_artifact_bound(state, "initial state")
         os.mkdir("objects", 0o700, dir_fd=self._root_fd)
         objects_fd = self._open_directory("objects", self._root_fd)
         try:
@@ -183,7 +200,7 @@ class Store:
             dir_fd=self._root_fd,
         )
         try:
-            self._write_all(state_fd, encode_snapshot(Snapshot()))
+            self._write_all(state_fd, state)
             os.fsync(state_fd)
         finally:
             os.close(state_fd)
@@ -304,6 +321,7 @@ class Store:
     def write_generated(self, name: str, data: bytes) -> None:
         """Atomically replace one allowlisted generated file."""
         self._validate_generated_name(name)
+        self._require_within_artifact_bound(data, f"generated file {name!r}")
         temp_name = f".generated-{secrets.token_hex(16)}.tmp"
         temp_exists = False
         try:
@@ -370,6 +388,7 @@ class Store:
 
     def put_object(self, kind: ArtifactKind, payload: bytes) -> str:
         """Durably place an immutable object, detecting corrupt prior content."""
+        self._require_within_artifact_bound(payload, f"{kind.value} object")
         digest = digest_of(kind, payload)
         objects_fd = self._open_objects_directory()
         try:
@@ -499,6 +518,19 @@ class Store:
         """CAS-commit objects first, then atomically replace authoritative state."""
         if self._read_only:
             raise StoreError("commit refused: store handle is read-only")
+        violations = validate_snapshot(snapshot)
+        if violations:
+            raise StoreError(
+                "snapshot invariant violation(s): "
+                + "; ".join(
+                    f"{violation.code}: {violation.detail}"
+                    for violation in violations
+                )
+            )
+        data = encode_snapshot(snapshot)
+        self._require_within_artifact_bound(data, "state")
+        for kind, payload in objects:
+            self._require_within_artifact_bound(payload, f"{kind.value} object")
         lock_fd = self._open_lock()
         locked = False
         try:
@@ -517,7 +549,6 @@ class Store:
             for kind, payload in objects:
                 self.put_object(kind, payload)
 
-            data = encode_snapshot(snapshot)
             temp_name = f".state-{secrets.token_hex(16)}.tmp"
             temp_exists = False
             try:

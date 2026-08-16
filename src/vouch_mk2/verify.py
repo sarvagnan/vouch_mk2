@@ -21,6 +21,7 @@ from vouch_mk2.core import (
     Snapshot,
     apply,
     decide,
+    evidence_kind_outcome_coherent,
 )
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
@@ -145,6 +146,16 @@ def _check_evidence_chains(
 ) -> CheckResult:
     failures: list[str] = []
     for walk in walks:
+        incoherent = tuple(
+            event.sequence
+            for _, event in walk.events
+            if not evidence_kind_outcome_coherent(event.kind, event.outcome)
+        )
+        if incoherent:
+            failures.append(
+                f"unit {walk.head.unit_name!r}: incoherent outcome at evidence "
+                f"sequence(s) {incoherent!r}"
+            )
         # A head must bind a unit the snapshot actually contains — a chain for
         # a ghost unit is fabricated ledger content, not evidence. Every event
         # must bind the unit's current version: mk2 has no re-versioning

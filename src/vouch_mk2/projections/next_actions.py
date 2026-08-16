@@ -125,7 +125,6 @@ def _release_completion_gates_pass(snapshot: Snapshot, release_id: str) -> bool:
         unit = snapshot.unit_ref(ref)
         if (
             unit is None
-            or unit.version != ref.version
             or unit.status is not UnitStatus.RELEASE_BOUND
             or not unit.acceptance_pack_version
             or blocking_deviations(snapshot, unit)

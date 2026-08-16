@@ -21,6 +21,8 @@ from vouch_mk2.core import (
     ReleaseState,
     Refused,
     Snapshot,
+    Unit,
+    UnitStatus,
     apply,
     decide,
 )
@@ -73,15 +75,16 @@ def test_build_and_bind_bundle_round_trip(tmp_path: Path) -> None:
 
     root = tmp_path / "store"
     with Store.init(str(root)) as store:
+        unit = Unit("u", "v1", UnitStatus.SPECIFIED)
         release = Release(
             release_id="r1",
             archetype=ReleaseArchetype.OPERATIONAL,
             state=ReleaseState.PREPARED,
-            includes=(),
+            includes=(unit.ref(),),
             criteria=None,
             closure=None,
         )
-        store.commit(Snapshot(revision=1, releases=(release,)))
+        store.commit(Snapshot(revision=1, units=(unit,), releases=(release,)))
         digest = bind_bundle(store, "r1", inventory)
         decoded = decode_bundle_inventory(
             store.get_object(ArtifactKind.BUNDLE_INVENTORY, digest)
@@ -106,15 +109,17 @@ def test_corrupt_bound_bundle_inventory_fails_with_release(tmp_path: Path) -> No
     inventory: BundleInventory = build_inventory(str(source), ())
     root = tmp_path / "store"
     with Store.init(str(root)) as store:
+        unit = Unit("u", "v1", UnitStatus.SPECIFIED)
         store.commit(
             Snapshot(
                 revision=1,
+                units=(unit,),
                 releases=(
                     Release(
                         "r1",
                         ReleaseArchetype.OPERATIONAL,
                         ReleaseState.PREPARED,
-                        (),
+                        (unit.ref(),),
                         None,
                         None,
                     ),

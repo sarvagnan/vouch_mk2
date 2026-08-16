@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable
 from typing import cast
 
+from vouch_mk2.core.invariants import valid_unit_identifier, validate_snapshot
 from vouch_mk2.core.model import (
     AnchorMode,
     BundleInventory,
@@ -99,8 +100,8 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
                         ),
                         "observations": list(release.closure.observations),
                         "roster_snapshot": [
-                            [name, status]
-                            for name, status in release.closure.roster_snapshot
+                            [name, version, status]
+                            for name, version, status in release.closure.roster_snapshot
                         ],
                         "trigger": release.closure.trigger,
                         "trigger_kind": release.closure.trigger_kind.value,
@@ -623,19 +624,25 @@ _ROSTER_SNAPSHOT_STATUSES = frozenset(
 
 def _decode_roster_snapshot(
     value: object, path: str
-) -> tuple[tuple[str, str], ...]:
-    entries: list[tuple[str, str]] = []
+) -> tuple[tuple[str, str, str], ...]:
+    entries: list[tuple[str, str, str]] = []
     for index, raw_entry in enumerate(_array(value, path)):
         entry_path = f"{path}[{index}]"
-        pair = _array(raw_entry, entry_path)
-        if len(pair) != 2:
-            raise DecodeError(f"{entry_path}: expected two-item array")
-        status = _string(pair[1], f"{entry_path}[1]")
+        triple = _array(raw_entry, entry_path)
+        if len(triple) != 3:
+            raise DecodeError(f"{entry_path}: expected three-item array")
+        status = _string(triple[2], f"{entry_path}[2]")
         if status not in _ROSTER_SNAPSHOT_STATUSES:
             raise DecodeError(
-                f"{entry_path}[1]: unknown roster status {status!r}"
+                f"{entry_path}[2]: unknown roster status {status!r}"
             )
-        entries.append((_string(pair[0], f"{entry_path}[0]"), status))
+        entries.append(
+            (
+                _string(triple[0], f"{entry_path}[0]"),
+                _string(triple[1], f"{entry_path}[1]"),
+                status,
+            )
+        )
     return tuple(entries)
 
 
@@ -669,14 +676,15 @@ def _decode_release(value: object, path: str) -> Release:
         _decode_unit_ref(item, f"{includes_path}[{index}]")
         for index, item in enumerate(_array(obj["includes"], includes_path))
     )
-    seen_members: set[str] = set()
+    seen_members: set[tuple[str, str]] = set()
     for index, ref in enumerate(includes):
-        if ref.name in seen_members:
+        key = (ref.name, ref.version)
+        if key in seen_members:
             raise DecodeError(
-                f"{includes_path}[{index}].name: duplicate roster member "
-                f"{ref.name!r}"
+                f"{includes_path}[{index}].name: duplicate roster binding "
+                f"{ref.label()!r}"
             )
-        seen_members.add(ref.name)
+        seen_members.add(key)
     return Release(
         release_id=_string(obj["release_id"], _child(path, "release_id")),
         archetype=_enum_value(
@@ -748,6 +756,12 @@ def decode_evidence_event(data: bytes) -> EvidenceEvent:
         outcome=_enum_value(obj["outcome"], "outcome", EvidenceOutcome),
         recorded_at=_string(obj["recorded_at"], "recorded_at"),
     )
+    if not valid_unit_identifier(event.unit.name) or not valid_unit_identifier(
+        event.unit.version
+    ):
+        raise DecodeError(
+            f"unit: evidence ref {event.unit.label()!r} contains an invalid identifier"
+        )
     # Content-addressed artifacts must have exactly ONE byte representation per
     # logical value, or digest identity is not event identity.
     if encode_evidence_event(event) != data:
@@ -928,7 +942,7 @@ def decode_snapshot(data: bytes) -> Snapshot:
             )
         seen_heads.add(head.unit_name)
 
-    return Snapshot(
+    snapshot = Snapshot(
         revision=revision,
         units=units,
         deviations=deviations,
@@ -941,6 +955,16 @@ def decode_snapshot(data: bytes) -> Snapshot:
             allow_empty=True,
         ),
     )
+    violations = validate_snapshot(snapshot)
+    if violations:
+        raise DecodeError(
+            "snapshot invariant violation(s): "
+            + "; ".join(
+                f"{violation.code}: {violation.detail}"
+                for violation in violations
+            )
+        )
+    return snapshot
 
 
 def _decode_count_rows(
@@ -1095,8 +1119,12 @@ def _decode_producer_edges(value: object, path: str) -> tuple[tuple[str, str], .
     return tuple(edges)
 
 
-def _require_unique(values: tuple[str, ...], path: str, label: str) -> None:
-    seen: set[str] = set()
+def _require_unique(
+    values: tuple[str, ...] | tuple[tuple[str, str], ...],
+    path: str,
+    label: str,
+) -> None:
+    seen: set[str | tuple[str, str]] = set()
     for index, value in enumerate(values):
         if value in seen:
             raise DecodeError(f"{path}[{index}]: duplicate {label} {value!r}")
@@ -1146,7 +1174,7 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
     # own uniqueness rules — exact NAME@VERSION unique, and at most one ACTIVE
     # record per name.
     _require_unique(
-        tuple(f"{unit.name}@{unit.version}" for unit in units),
+        tuple((unit.name, unit.version) for unit in units),
         "map.units",
         "unit binding",
     )

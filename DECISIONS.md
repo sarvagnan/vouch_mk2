@@ -274,8 +274,11 @@ entry is mk2's recorded discrepancy for its own semantics.
   (→ `release_impact_set`, D-3's typed field). Dropped: `description`, `frozen_artifact`.
 - **Releases:** operational archetype maps in full (`id`, `state`, `includes`,
   criteria fields → `LaunchCriteria`, `closure_record` → `ClosureRecord` with
-  `roster[].{name,status}` → `roster_snapshot`, `bundle_inventory_digest`). **Qualified
-  releases are refused** unless `--drop-qualified` is given, in which case each is
+  `roster[].{name,version?,status}` → exact-ref `roster_snapshot`; a present version
+  maps directly, while an absent version is taken from the single matching include by
+  name, with an ambiguous or absent match REFUSED as "closure roster row cannot be
+  bound to an include"; `bundle_inventory_digest`). **Qualified releases are refused**
+  unless `--drop-qualified` is given, in which case each is
   reported and omitted — Q is a plan §1 non-goal and mk2 cannot represent it honestly.
   Dropped: `criteria_digest` (mk2 recomputes), map digests / `frozen_at` /
   `map_generator_identity` (0.6 map machinery), the `retroactive` closure flag (reported).

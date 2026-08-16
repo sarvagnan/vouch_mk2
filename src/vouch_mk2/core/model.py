@@ -147,7 +147,7 @@ class LaunchCriteria:
 class ClosureRecord:
     trigger: str
     trigger_kind: ClosureTriggerKind
-    roster_snapshot: tuple[tuple[str, str], ...]
+    roster_snapshot: tuple[tuple[str, str, str], ...]
     no_completion_claim: bool
     observations: tuple[str, ...]
 

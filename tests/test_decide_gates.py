@@ -171,7 +171,7 @@ def test_specify_refuses_duplicates_and_unknown_dependencies() -> None:
         s, SpecifyUnit(name="w", version="v1", depends_on=("ghost",))
     ) == ("gate.dependency-unknown",)
     assert refused_codes(s, SpecifyUnit(name="", version="v1")) == (
-        "unit.identity-required",
+        "identifier.invalid",
     )
 
 

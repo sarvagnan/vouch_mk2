@@ -1,0 +1,1 @@
+{"command_line":"/Users/sarvagnan/Documents/project_blueprint/vouch_mk2/.venv/bin/python3 -m pytest -q -p no:cacheprovider tests/test_ingress_invariants.py","kind":"red","outcome":"tests-failed","parent":"ce63329583b85b0916dad1c66eaf84c1d11f979930885f1145bfc915684da2fb","recorded_at":"2026-08-16T07:04:26+00:00","sequence":3,"unit":{"name":"ingress-invariants","version":"1"}}

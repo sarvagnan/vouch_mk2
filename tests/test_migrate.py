@@ -189,7 +189,11 @@ def test_fixture_warning_and_validation_inventory_is_honest() -> None:
     )
     assert "legacy-risk-score" in failures[0].detail
     report = render_diff(plan, validate_candidate(plan.candidate))
-    assert plan.warnings[0] in report
+    from vouch_mk2.projections import escape_markdown
+
+    # Report rows are markdown-escaped (an untrusted ledger's identifiers must not
+    # become live links on the approval surface); assert the escaped form.
+    assert escape_markdown(plan.warnings[0]) in report
     assert failures[0].check_id in report
 
 

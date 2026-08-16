@@ -75,7 +75,7 @@ def _populated_snapshot() -> Snapshot:
     closure = ClosureRecord(
         trigger="operator stop",
         trigger_kind=ClosureTriggerKind.OPERATOR,
-        roster_snapshot=(("consumer", "release-bound"),),
+        roster_snapshot=(("consumer", "3", "release-bound"),),
         no_completion_claim=True,
         observations=("latency",),
     )
@@ -137,7 +137,7 @@ def _release_document() -> dict[str, object]:
         "closure": {
             "trigger": "operator",
             "trigger_kind": "operator",
-            "roster_snapshot": [["alpha", "release-bound"]],
+            "roster_snapshot": [["alpha", "1", "release-bound"]],
             "no_completion_claim": True,
             "observations": [],
         },
@@ -341,7 +341,7 @@ def test_duplicate_roster_member_is_refused() -> None:
     release = _release_document()
     release["includes"] = [
         {"name": "alpha", "version": "1"},
-        {"name": "alpha", "version": "2"},
+        {"name": "alpha", "version": "1"},
     ]
     document["releases"] = [release]
     with pytest.raises(DecodeError, match=r"includes\[1\]\.name.*duplicate"):
@@ -353,15 +353,20 @@ def test_unknown_roster_snapshot_status_is_refused() -> None:
     release = _release_document()
     closure = release["closure"]
     assert isinstance(closure, dict)
-    closure["roster_snapshot"] = [["alpha", "banana"]]
+    closure["roster_snapshot"] = [["alpha", "1", "banana"]]
     document["releases"] = [release]
     with pytest.raises(DecodeError, match="unknown roster status 'banana'"):
+        decode_snapshot(_json_bytes(document))
+
+    closure["roster_snapshot"] = [["alpha", "release-bound"]]
+    with pytest.raises(DecodeError, match="expected three-item array"):
         decode_snapshot(_json_bytes(document))
 
 
 def test_phase5_snapshot_round_trip_and_head_refusals() -> None:
     snapshot = Snapshot(
         revision=8,
+        units=(Unit("u", "v1", UnitStatus.SPECIFIED),),
         evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
         anchor_mode=AnchorMode.CI,
     )

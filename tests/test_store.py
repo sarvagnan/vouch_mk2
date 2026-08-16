@@ -83,6 +83,17 @@ def test_oversized_artifact_is_refused_before_allocation(tmp_path: Path) -> None
             bounded.read_snapshot()
 
 
+def test_write_bound_refuses_before_creating_temp_files(tmp_path: Path) -> None:
+    root = tmp_path / "store"
+    with Store.init(str(root), max_artifact_bytes=256) as store:
+        with pytest.raises(StoreError, match="bound"):
+            store.put_object(ArtifactKind.OBJECT, b"x" * 257)
+        with pytest.raises(StoreError, match="bound"):
+            store.write_generated("map.json", b"y" * 257)
+    assert not tuple((root / "objects" / "sha256").iterdir())
+    assert not any(path.name.startswith(".generated-") for path in root.iterdir())
+
+
 def test_open_sweeps_orphaned_temp_files(tmp_path: Path) -> None:
     root = tmp_path / "store"
     with Store.init(str(root)):

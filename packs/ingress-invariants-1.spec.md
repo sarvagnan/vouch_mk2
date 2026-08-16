@@ -25,3 +25,33 @@ Vacuity/coherence guards were implemented at the COMMAND layer (PrepareRelease r
 
 ## Definition of done
 `uv run pytest` fully green INCLUDING all 15 tests in tests/test_ingress_invariants.py; pyrefly 0 errors; lint-imports kept; the formal run still passes (`uv run vouch-mk2 formal` — if the identifier grammar or validator changed the reachable relation, report the new counts; do NOT re-record the certificate — the acceptance owner does that at publish). Close bead vouch_mk2-4it.3. Final message: files, per-item notes, anything you believe is a PACK defect (deviation candidates), gate tails, new collected count.
+
+
+## Amendment — pack/2 (DEV-ingress-01, adjudicated AMEND by the acceptance owner 2026-08-15)
+
+Item 4 (bound enforced at initialization) contradicted the original test's 64-byte bound: the canonical empty state is 128 bytes. The IMPLEMENTATION was right to refuse; the TEST was wrong. Amended: the write-side test uses a bound the empty store fits under (256/257), and a new corollary test asserts `Store.init` itself refuses a bound smaller than the initial state. Prior version immutable; this diff is the amendment record.
+
+
+## Amendment — pack/3 (DEV-ingress-02, contract-conflict, adjudicated AMEND by the acceptance owner 2026-08-16)
+
+Item 1 required closure roster-snapshot rows to be "unique by name and its name-set == roster
+name-set". That contradicts D-9: a roster may legally hold `u@v1` and `u@v2`, and `RollBack` on
+such a roster produced a snapshot the validator refused — a false refusal on a legal state.
+Amended contract:
+
+1. `ClosureRecord.roster_snapshot` rows are `(name, version, status)`; uniqueness is on the
+   exact `(name, version)` ref, and the set of refs must equal the roster's `includes`. The
+   codec (state + system map), migrator (0.6's 2-tuple rows migrate with the version taken from
+   the matching roster include; an unmatched row is a refusal), standing checks, and D-8's
+   mapping follow.
+2. The identifier grammar additionally forbids `@` in unit NAMES and unit VERSIONS (only), so
+   the canonical `NAME@VERSION` label is injective wherever it is parsed or printed. Pack
+   versions and other identifiers are unaffected.
+
+Acceptance tests added: `test_p2_closure_snapshot_is_ref_keyed_and_survives_two_version_roster`,
+`test_p2_at_sign_refused_in_unit_name_and_version`. Prior versions immutable.
+
+
+## Amendment — pack/4 (DEV-ingress-03, pack-defect, adjudicated AMEND 2026-08-16)
+
+Two TYPING defects in the frozen test file, both the pack author's: a pack/1 test still built a 2-tuple closure row (now `(name, version, status)` under pack/3), and a pack/3 test dereferenced `Snapshot.release()` without narrowing. Behaviour unchanged; the D-1 Pyrefly-clean ground rule blocked publish. Prior versions immutable.

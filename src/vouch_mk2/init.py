@@ -108,7 +108,21 @@ def _plan_file(
             InitStatus.UNCHANGED,
         )
     suggested = target + ".vouch-suggested"
-    read_regular_nofollow(suggested, "init suggestion target")
+    existing_suggestion = read_regular_nofollow(
+        suggested, "init suggestion target"
+    )
+    if existing_suggestion == data:
+        return _PlannedFile(
+            report_path,
+            suggested,
+            data,
+            mode,
+            InitStatus.UNCHANGED,
+        )
+    if existing_suggestion is not None:
+        raise InitError(
+            f"{suggested}: existing suggestion differs; refusing to overwrite"
+        )
     return _PlannedFile(
         report_path,
         suggested,

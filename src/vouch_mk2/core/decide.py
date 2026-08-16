@@ -82,14 +82,17 @@ from vouch_mk2.core.events import (
     VerificationStarted,
     WorkStarted,
 )
+from vouch_mk2.core.invariants import (
+    evidence_kind_outcome_coherent,
+    valid_identifier,
+    valid_unit_identifier,
+)
 from vouch_mk2.core.model import (
     ClosureRecord,
     ClosureTriggerKind,
     Deviation,
     DeviationStatus,
     EvidenceHead,
-    EvidenceKind,
-    EvidenceOutcome,
     Release,
     ReleaseArchetype,
     ReleaseState,
@@ -111,7 +114,9 @@ _SATISFIED_DEPENDENCY_STATUSES = frozenset(
 
 def _index(machine_name: str) -> Mapping[tuple[str, str], Transition]:
     machine = mk2.MK2.machine(machine_name)
-    return {(t.source, t.command): t for t in machine.command_transitions}
+    indexed = {(t.source, t.command): t for t in machine.command_transitions}
+    assert len(indexed) == len(machine.command_transitions)
+    return indexed
 
 
 _UNIT_EDGES = _index(mk2.UNIT_MACHINE)
@@ -164,30 +169,6 @@ def _refuse(code: str, detail: str) -> Refused:
 
 def _valid_digest(digest: str) -> bool:
     return len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)
-
-
-def _evidence_kind_outcome_coherent(
-    kind: EvidenceKind, outcome: EvidenceOutcome
-) -> bool:
-    match kind:
-        case EvidenceKind.RED:
-            match outcome:
-                case EvidenceOutcome.TESTS_FAILED:
-                    return True
-                case EvidenceOutcome.TESTS_PASSED:
-                    return False
-                case _:
-                    assert_never(outcome)
-        case EvidenceKind.GREEN | EvidenceKind.REFACTOR:
-            match outcome:
-                case EvidenceOutcome.TESTS_FAILED:
-                    return False
-                case EvidenceOutcome.TESTS_PASSED:
-                    return True
-                case _:
-                    assert_never(outcome)
-        case _:
-            assert_never(kind)
 
 
 # --- gate evaluation -----------------------------------------------------------
@@ -310,6 +291,13 @@ def _gate_release_criteria(ctx: _ReleaseGateContext) -> tuple[Violation, ...]:
 def _gate_release_roster_resolves(
     ctx: _ReleaseGateContext,
 ) -> tuple[Violation, ...]:
+    if not ctx.release.includes:
+        return (
+            Violation(
+                code="gate.release.roster-empty",
+                detail=f"release {ctx.release.release_id!r} has an empty roster",
+            ),
+        )
     stale: list[str] = []
     for ref in ctx.release.includes:
         unit = ctx.snapshot.unit_ref(ref)
@@ -331,6 +319,13 @@ def _gate_release_roster_resolves(
 def _gate_release_completion_units(
     ctx: _ReleaseGateContext,
 ) -> tuple[Violation, ...]:
+    if not ctx.release.includes:
+        return (
+            Violation(
+                code="gate.release.roster-empty",
+                detail=f"release {ctx.release.release_id!r} has an empty roster",
+            ),
+        )
     offenders: list[str] = []
     for ref in ctx.release.includes:
         unit = ctx.snapshot.unit_ref(ref)
@@ -514,8 +509,14 @@ def _evaluate_release_gates(
 
 
 def _decide_specify(snapshot: Snapshot, command: SpecifyUnit) -> Decision:
-    if not command.name or not command.version:
-        return _refuse("unit.identity-required", "unit name and version are required")
+    if not valid_unit_identifier(command.name) or not valid_unit_identifier(
+        command.version
+    ):
+        return _refuse(
+            "identifier.invalid",
+            "unit name and version must be printable identifiers of at most 200 "
+            "characters without surrounding whitespace or '@'",
+        )
     if snapshot.unit(command.name) is not None:
         return _refuse("unit.exists", f"unit {command.name!r} already exists")
     missing = _unknown_dependencies(snapshot, command.depends_on)
@@ -573,6 +574,16 @@ def _decide_unit_transition(
             f"{command.ir_command!r} is not a legal unit command from "
             f"{unit.status.value!r}",
         )
+    if isinstance(command, FreezeAcceptance) and command.pack_version and not valid_identifier(
+        command.pack_version
+    ):
+        # Grammar at the ingress: a pack version decide() accepts must be one
+        # the validator (hence commit) will accept, or apply() produces a
+        # snapshot the store refuses.
+        return _refuse(
+            "identifier.invalid",
+            f"pack version {command.pack_version!r} is not a valid identifier",
+        )
     pack_version = (
         command.pack_version
         if isinstance(command, FreezeAcceptance)
@@ -627,8 +638,8 @@ def _candidate_release(
 
 
 def _decide_prepare_release(snapshot: Snapshot, command: PrepareRelease) -> Decision:
-    if not command.release_id:
-        return _refuse("release.identity-required", "release id is required")
+    if not valid_identifier(command.release_id):
+        return _refuse("identifier.invalid", "release id is not a valid identifier")
     if snapshot.release(command.release_id) is not None:
         return _refuse(
             "release.exists", f"release {command.release_id!r} already exists"
@@ -755,7 +766,7 @@ def _decide_record_evidence(
             "evidence.digest-invalid",
             "evidence digest must be 64 lowercase hexadecimal characters",
         )
-    if not _evidence_kind_outcome_coherent(event.kind, event.outcome):
+    if not evidence_kind_outcome_coherent(event.kind, event.outcome):
         return _refuse(
             "evidence.kind-outcome-mismatch",
             f"kind {event.kind.value!r} contradicts outcome {event.outcome.value!r}",
@@ -804,14 +815,20 @@ def _decide_record_formal_certificate(
 
 def _roster_snapshot(
     snapshot: Snapshot, release: Release
-) -> tuple[tuple[str, str], ...]:
+) -> tuple[tuple[str, str, str], ...]:
     return tuple(
         sorted(
             (
-                ref.name,
-                unit.status.value if (unit := snapshot.unit_ref(ref)) else "missing",
-            )
-            for ref in release.includes
+                (
+                    ref.name,
+                    ref.version,
+                    unit.status.value
+                    if (unit := snapshot.unit_ref(ref))
+                    else "missing",
+                )
+                for ref in release.includes
+            ),
+            key=lambda row: (row[0], row[1]),
         )
     )
 
@@ -915,8 +932,8 @@ def _decide_release_transition(
 
 
 def _decide_open_deviation(snapshot: Snapshot, command: OpenDeviation) -> Decision:
-    if not command.deviation_id:
-        return _refuse("deviation.identity-required", "deviation id is required")
+    if not valid_identifier(command.deviation_id):
+        return _refuse("identifier.invalid", "deviation id is not a valid identifier")
     if snapshot.deviation(command.deviation_id) is not None:
         return _refuse(
             "deviation.exists", f"deviation {command.deviation_id!r} already exists"

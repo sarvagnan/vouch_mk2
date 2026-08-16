@@ -30,6 +30,12 @@ from vouch_mk2.core.commands import (
     Supersede,
 )
 from vouch_mk2.core.decide import Accepted, Decision, Refused, apply, decide
+from vouch_mk2.core.invariants import (
+    evidence_kind_outcome_coherent,
+    valid_identifier,
+    valid_unit_identifier,
+    validate_snapshot,
+)
 from vouch_mk2.core.events import (
     AcceptanceFrozen,
     AnchorAdvanced,
@@ -176,4 +182,8 @@ __all__ = [
     "apply",
     "blocking_deviations",
     "decide",
+    "evidence_kind_outcome_coherent",
+    "valid_identifier",
+    "valid_unit_identifier",
+    "validate_snapshot",
 ]

@@ -13,6 +13,18 @@ from vouch_mk2.core.model import Snapshot
 from vouch_mk2.projections.next_actions import next_actions
 
 
+_MD_ESCAPED = frozenset("\\[]()*_`#<>")
+
+
+def escape_markdown(text: str) -> str:
+    """Keep an identifier inside the Markdown fragment that contains it."""
+    normalized = text.replace("\r", " ").replace("\n", " ")
+    return "".join(
+        f"\\{character}" if character in _MD_ESCAPED else character
+        for character in normalized
+    )
+
+
 def agent_context(snapshot: Snapshot) -> str:
     actions = next_actions(snapshot)
     organizational = tuple(
@@ -39,7 +51,9 @@ def agent_context(snapshot: Snapshot) -> str:
     ]
     if actions:
         lines.extend(
-            f"- `{action.command}` for {action.subject_kind}/{action.subject_id}: {action.reason}"
+            f"- `{escape_markdown(action.command)}` for "
+            f"{escape_markdown(action.subject_kind)}/{escape_markdown(action.subject_id)}: "
+            f"{action.reason}"
             for action in actions
         )
     else:

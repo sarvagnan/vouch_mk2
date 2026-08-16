@@ -78,7 +78,8 @@ def command_graph(m: StateMachine, command: str) -> dict[str, list[str]]:
     return {
         source: sorted(
             t.target for t in m.command_transitions
-            if t.source == source and t.command == command
+            if t.source == source
+            and (t.command == command or t.command.startswith(command + ":"))
         )
         for source in m.states
     }
@@ -102,7 +103,11 @@ def test_unit_set_status_graph_matches(policy: dict[str, Any]) -> None:
 
 def test_unit_freeze_is_the_only_other_unit_command() -> None:
     m = machine(UNIT_MACHINE)
-    other = [t for t in m.command_transitions if t.command != "set-status"]
+    other = [
+        t
+        for t in m.command_transitions
+        if not t.command.startswith("set-status:")
+    ]
     assert [(t.source, t.command, t.target) for t in other] == [
         ("specified", "freeze", "acceptance-frozen")
     ]

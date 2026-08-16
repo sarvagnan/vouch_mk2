@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import stat
 import sys
 import zipfile
 
@@ -28,7 +29,15 @@ def _entry(name: str) -> zipfile.ZipInfo:
 def build_lock(source_root: str) -> bytes:
     """Build a deterministic zipapp from ``source_root/vouch_mk2`` only."""
     package_root = os.path.join(os.path.abspath(source_root), "vouch_mk2")
-    if not os.path.isdir(package_root):
+    try:
+        package_info = os.lstat(package_root)
+    except OSError as error:
+        raise StoreError(
+            f"{package_root}: cannot inspect vouch_mk2 package directory: {error}"
+        ) from error
+    if stat.S_ISLNK(package_info.st_mode):
+        raise StoreError(f"{package_root}: symlinked package root refused")
+    if not stat.S_ISDIR(package_info.st_mode):
         raise StoreError(f"{package_root}: vouch_mk2 package directory not found")
 
     entries: list[tuple[str, bytes]] = [("__main__.py", _MAIN)]
@@ -116,4 +125,3 @@ def running_lock_bytes() -> bytes | None:
 
 def lock_digest(payload: bytes) -> str:
     return digest_of(ArtifactKind.LOCK, payload)
-

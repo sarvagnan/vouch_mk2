@@ -31,10 +31,12 @@ from vouch_mk2.core import (
     Unit,
     UnitRef,
     UnitStatus,
+    validate_snapshot,
 )
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.init import init_project
+from vouch_mk2.projections import escape_markdown
 from vouch_mk2.store import (
     DecodeError,
     Store,
@@ -69,7 +71,7 @@ class _LedgerClosure:
     trigger: str | None
     trigger_kind: str | None
     no_completion_claim: bool | None
-    roster: tuple[tuple[str, str, str], ...]
+    roster: tuple[tuple[str, str | None, str], ...]
     observations: tuple[str, ...]
 
 
@@ -493,18 +495,21 @@ def _decode_closure(
         if "no_completion_claim" not in fields
         else _boolean(fields["no_completion_claim"], f"{path}.no_completion_claim")
     )
-    roster_rows: list[tuple[str, str, str]] = []
+    roster_rows: list[tuple[str, str | None, str]] = []
     if "roster" in fields:
         for index, raw in enumerate(_array(fields["roster"], f"{path}.roster")):
             row_path = f"{path}.roster[{index}]"
             row = _fields(
-                raw, row_path, _ROSTER_FIELDS, _ROSTER_FIELDS, warnings
+                raw,
+                row_path,
+                _ROSTER_FIELDS,
+                frozenset({"name", "status"}),
+                warnings,
             )
             name = _string(row["name"], f"{row_path}.name")
-            version = _string(row["version"], f"{row_path}.version")
+            version = _optional_string(row, "version", row_path)
             status = _string(row["status"], f"{row_path}.status")
             roster_rows.append((name, version, status))
-            _record_drop(dropped, f"{row_path}.version", row["version"])
     observations = (
         ()
         if "observations" not in fields
@@ -718,7 +723,13 @@ def _closure_for(
         invalid = True
     valid_statuses = {status.value for status in UnitStatus} | {"missing"}
     bad_statuses = tuple(
-        sorted({status for _name, _version, status in closure.roster if status not in valid_statuses})
+        sorted(
+            {
+                status
+                for _name, _version, status in closure.roster
+                if status not in valid_statuses
+            }
+        )
     )
     if bad_statuses:
         refusals.append(f"{prefix}: closure roster has unknown statuses {bad_statuses!r}")
@@ -728,11 +739,29 @@ def _closure_for(
     assert closure.trigger is not None
     assert closure.trigger_kind is not None
     assert closure.no_completion_claim is not None
+    roster_snapshot: list[tuple[str, str, str]] = []
+    for name, version, status in closure.roster:
+        bound_version = version
+        if bound_version is None:
+            matching_versions = {
+                ref.version for ref in release.includes if ref.name == name
+            }
+            if len(matching_versions) != 1:
+                refusals.append(
+                    f"{prefix}: closure roster row cannot be bound to an include "
+                    f"(name={name!r})"
+                )
+                invalid = True
+                continue
+            bound_version = next(iter(matching_versions))
+        roster_snapshot.append((name, bound_version, status))
+    if invalid:
+        return None
     return ClosureRecord(
         trigger=closure.trigger,
         trigger_kind=ClosureTriggerKind(closure.trigger_kind),
         roster_snapshot=tuple(
-            sorted((name, status) for name, _version, status in closure.roster)
+            sorted(roster_snapshot, key=lambda row: (row[0], row[1]))
         ),
         no_completion_claim=closure.no_completion_claim,
         observations=closure.observations,
@@ -792,6 +821,13 @@ def plan_migration(
         )
         for unit in doc.units
     )
+    for unit in doc.units:
+        if "@" in unit.name or "@" in unit.version:
+            refusals.append(
+                "unit name or contract_version contains '@' and cannot be "
+                f"migrated: name={unit.name!r}, "
+                f"contract_version={unit.version!r}"
+            )
     deviations: list[Deviation] = []
     for legacy in doc.deviations:
         ref = _split_binding(legacy.unit_binding)
@@ -867,6 +903,10 @@ def plan_migration(
         evidence_heads=(),
         anchor_mode=anchor_mode,
         formal_certificate_digest="",
+    )
+    refusals.extend(
+        f"{violation.code}: {violation.detail}"
+        for violation in validate_snapshot(candidate)
     )
     for legacy in doc.units:
         ref = UnitRef(legacy.name, legacy.version)
@@ -945,9 +985,12 @@ def _count_lines(before: _Counts, snapshot: Snapshot) -> tuple[str, ...]:
 
 
 def _section(lines: list[str], title: str, rows: tuple[str, ...]) -> None:
+    # Rows carry identifiers from an UNTRUSTED 0.6 ledger; the report is an
+    # approval surface a human reads, so identifiers are markdown-escaped
+    # (same helper as the agent context) — a name may not become a live link.
     lines.extend(("", f"## {title}", ""))
     if rows:
-        lines.extend(f"- {row}" for row in rows)
+        lines.extend(f"- {escape_markdown(row)}" for row in rows)
     else:
         lines.append("- None")
 
@@ -971,7 +1014,7 @@ def render_diff(
     _section(lines, "Dropped fields and entities", plan.dropped)
     _section(lines, "Refusals", plan.refusals)
     failures = tuple(
-        f"{result.check_id}: {result.detail or 'failed without detail'}"
+        f"{result.check_id}: {escape_markdown(result.detail or 'failed without detail')}"
         for result in validation
         if result.verdict is Verdict.FAIL
     )

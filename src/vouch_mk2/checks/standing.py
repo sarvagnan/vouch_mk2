@@ -360,9 +360,10 @@ def check_release_closure_records(snapshot: Snapshot) -> CheckResult:
                     f"release {release.release_id!r}: closure trigger/no-completion "
                     "record is incomplete"
                 )
-            elif {name for name, _status in closure.roster_snapshot} != {
-                ref.name for ref in release.includes
-            }:
+            elif {
+                (name, version)
+                for name, version, _status in closure.roster_snapshot
+            } != {(ref.name, ref.version) for ref in release.includes}:
                 # decide() snapshots exactly the roster; anything else is a
                 # fabricated or truncated record.
                 offenders.append(
@@ -387,13 +388,13 @@ def check_release_closure_records(snapshot: Snapshot) -> CheckResult:
 
 def check_release_bound_units_rostered(snapshot: Snapshot) -> CheckResult:
     rostered = {
-        ref.name for release in snapshot.releases for ref in release.includes
+        ref for release in snapshot.releases for ref in release.includes
     }
     offenders = tuple(
         sorted(
-            unit.name
+            unit.ref().label()
             for unit in snapshot.units
-            if unit.status is UnitStatus.RELEASE_BOUND and unit.name not in rostered
+            if unit.status is UnitStatus.RELEASE_BOUND and unit.ref() not in rostered
         )
     )
     return CheckResult(
