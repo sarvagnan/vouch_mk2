@@ -14,7 +14,11 @@ from typing import Iterator
 
 from vouch_mk2.core.invariants import validate_snapshot
 from vouch_mk2.core.model import Snapshot
-from vouch_mk2.store.codec import decode_snapshot, encode_snapshot
+from vouch_mk2.store.codec import (
+    decode_raw_document,
+    decode_snapshot,
+    encode_snapshot,
+)
 from vouch_mk2.store.digests import ArtifactKind, digest_of
 from vouch_mk2.store.errors import CasConflict, IntegrityError, StoreError
 
@@ -453,17 +457,12 @@ class Store:
         temp_name = f".generated-{secrets.token_hex(16)}.tmp"
         temp_exists = False
         try:
-            try:
-                temp_fd = os.open(
-                    temp_name,
-                    _TEMP_WRITE_FLAGS,
-                    0o600,
-                    dir_fd=self._root_fd,
-                )
-            except OSError as error:
-                raise StoreError(
-                    f"{temp_name}: cannot create generated-file temp: {error}"
-                ) from error
+            temp_fd = os.open(
+                temp_name,
+                _TEMP_WRITE_FLAGS,
+                0o600,
+                dir_fd=self._root_fd,
+            )
             temp_exists = True
             try:
                 self._write_all(temp_fd, data)
@@ -484,9 +483,20 @@ class Store:
                 ) from error
             temp_exists = False
             os.fsync(self._root_fd)
+        except OSError as error:
+            detail = error.strerror or "operating system error"
+            raise StoreError(
+                f"generated file {name!r}: write failed: {detail}"
+            ) from error
         finally:
             if temp_exists:
-                self._unlink_if_present(temp_name, self._root_fd)
+                try:
+                    self._unlink_if_present(temp_name, self._root_fd)
+                except OSError as error:
+                    detail = error.strerror or "operating system error"
+                    raise StoreError(
+                        f"generated file {name!r}: temp cleanup failed: {detail}"
+                    ) from error
 
     @staticmethod
     def _validate_digest(digest: str) -> None:
@@ -640,8 +650,8 @@ class Store:
                 "refusing a path-based fallback"
             ) from error
 
-    def replace_state_bytes(self, data: bytes) -> None:
-        """Atomically replace raw state bytes while the writer lock is held."""
+    def _replace_state_bytes(self, data: bytes) -> None:
+        """Atomically replace prevalidated state bytes under the writer lock."""
         self._require_writable("replace-state")
         self._require_write_lock("replace-state")
         self._require_within_artifact_bound(data, "state")
@@ -677,6 +687,22 @@ class Store:
             if temp_exists:
                 self._unlink_if_present(temp_name, self._root_fd)
 
+    def replace_state_for_upgrade(self, data: bytes) -> None:
+        """Replace state only with strict bytes at the unchanged raw revision."""
+        self._require_writable("replace-state-for-upgrade")
+        self._require_write_lock("replace-state-for-upgrade")
+        upgraded = decode_snapshot(data)
+        current_document = decode_raw_document(self.read_state_bytes())
+        current_revision = current_document.get("revision")
+        if type(current_revision) is not int:
+            raise StoreError("revision: current raw document must declare an integer")
+        if upgraded.revision != current_revision:
+            raise StoreError(
+                "revision: format upgrade must preserve current raw revision "
+                f"{current_revision}, got {upgraded.revision}"
+            )
+        self._replace_state_bytes(data)
+
     def commit(
         self,
         snapshot: Snapshot,
@@ -709,4 +735,4 @@ class Store:
             for kind, payload in objects:
                 self.put_object(kind, payload)
 
-            self.replace_state_bytes(data)
+            self._replace_state_bytes(data)

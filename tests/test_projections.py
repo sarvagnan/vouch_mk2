@@ -549,12 +549,12 @@ def test_map_freshness_passes_then_detects_stale_and_undecodable(
     )
 
 
-def test_absent_map_freshness_is_pass(tmp_path: Path) -> None:
+def test_absent_map_freshness_is_not_applicable(tmp_path: Path) -> None:
     with Store.init(str(tmp_path / "store")) as store:
         snapshot = store.read_snapshot()
         assert (
             _artifact_result(store, snapshot, mk2.CHECK_MAP_FRESHNESS)
-            is Verdict.PASS
+            is Verdict.NOT_APPLICABLE
         )
 
 

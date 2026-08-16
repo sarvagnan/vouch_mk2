@@ -221,12 +221,20 @@ def run_checks(
                 )
             )
         elif result.verdict is Verdict.NOT_APPLICABLE and (
-            not obligation.applicability or not result.detail
+            not result.detail
+            or (
+                not obligation.applicability
+                and not (
+                    result.check_id == mk2.CHECK_MAP_FRESHNESS
+                    and "map.json is absent" in result.detail
+                )
+            )
         ):
             # The same vacuous-coverage guard the organizational rows have: a
             # NOT_APPLICABLE that cites no IR applicability rule (or whose IR
             # obligation declares none) would silently drop a check from
-            # coverage while composing clean.
+            # coverage while composing clean. Map freshness has one explicit
+            # artifact-state exception: no projection exists to compare.
             mechanical_results.append(
                 CheckResult(
                     check_id=result.check_id,

@@ -1,8 +1,8 @@
 """Canonical Snapshot serialization and its single strict JSON ingress.
 
-Every ``state.json`` declares an integer ``state_format``. Strict reads accept
-only :data:`CURRENT_STATE_FORMAT`; older formats require ``vouch-mk2 upgrade``
-and newer formats require a newer Vouch executable."""
+Format 1 and later declare ``state_format``; absence denotes legacy format 0.
+Strict reads accept only :data:`CURRENT_STATE_FORMAT`; older formats require
+``vouch-mk2 upgrade`` and newer formats require a newer Vouch executable."""
 
 from __future__ import annotations
 

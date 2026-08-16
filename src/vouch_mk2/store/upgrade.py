@@ -2,25 +2,28 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import cast
 
 from vouch_mk2.core.model import UnitStatus
 from vouch_mk2.store.codec import CURRENT_STATE_FORMAT
-from vouch_mk2.store.errors import DecodeError
+from vouch_mk2.store.errors import DecodeError, StoreError
 
 
 type StateDocument = dict[str, object]
 type Upgrader = Callable[[StateDocument], StateDocument]
 
-_PUBLISHED_STATUSES = frozenset(
+_UNAMBIGUOUS_PUBLISHED_STATUSES = frozenset(
     {
         UnitStatus.PUBLISHED.value,
         UnitStatus.RELEASE_BOUND.value,
-        UnitStatus.SUPERSEDED.value,
     }
 )
 _KNOWN_STATUSES = frozenset(status.value for status in UnitStatus)
+
+
+class UpgradeRefused(StoreError):
+    """A legacy document needs operator facts that it does not contain."""
 
 
 def _upgrade_0_to_1(document: StateDocument) -> StateDocument:
@@ -41,9 +44,9 @@ def _upgrade_0_to_1(document: StateDocument) -> StateDocument:
             if (
                 "published_once" not in unit
                 and type(status) is str
-                and status in _KNOWN_STATUSES
+                and status in _UNAMBIGUOUS_PUBLISHED_STATUSES
             ):
-                copied["published_once"] = status in _PUBLISHED_STATUSES
+                copied["published_once"] = True
             units.append(copied)
         upgraded["units"] = units
 
@@ -54,8 +57,70 @@ def _upgrade_0_to_1(document: StateDocument) -> StateDocument:
 UPGRADERS: dict[int, Upgrader] = {0: _upgrade_0_to_1}
 
 
+def _prepare_format_zero_assertions(
+    document: StateDocument,
+    published_once: Mapping[str, bool],
+) -> StateDocument:
+    """Copy format 0 and apply only operator-provided latch assertions."""
+    prepared = dict(document)
+    raw_units = document.get("units")
+    units: list[object] = []
+    ambiguous: set[str] = set()
+    missing: list[str] = []
+    unknown_statuses: list[str] = []
+
+    if type(raw_units) is list:
+        for index, raw_unit in enumerate(cast(list[object], raw_units)):
+            if type(raw_unit) is not dict:
+                units.append(raw_unit)
+                continue
+            unit = cast(dict[str, object], raw_unit)
+            copied = dict(unit)
+            name = unit.get("name")
+            version = unit.get("version")
+            ref = (
+                f"{name}@{version}"
+                if type(name) is str and type(version) is str
+                else f"units[{index}]"
+            )
+            status = unit.get("status")
+            if type(status) is not str or status not in _KNOWN_STATUSES:
+                unknown_statuses.append(f"{ref} has unknown status {status!r}")
+            elif "published_once" not in unit:
+                if status in _UNAMBIGUOUS_PUBLISHED_STATUSES:
+                    copied["published_once"] = True
+                else:
+                    ambiguous.add(ref)
+                    assertion = published_once.get(ref)
+                    if assertion is None and ref not in published_once:
+                        missing.append(ref)
+                    elif type(assertion) is not bool:
+                        unknown_statuses.append(
+                            f"{ref} published_once assertion must be boolean"
+                        )
+                    else:
+                        copied["published_once"] = assertion
+            units.append(copied)
+        prepared["units"] = units
+
+    unknown_refs = sorted(set(published_once) - ambiguous)
+    problems = list(unknown_statuses)
+    if missing:
+        problems.append(
+            "published_once is ambiguous for " + ", ".join(sorted(missing))
+        )
+    if unknown_refs:
+        problems.append(
+            "unknown published_once assertion(s): " + ", ".join(unknown_refs)
+        )
+    if problems:
+        raise UpgradeRefused("; ".join(problems))
+    return prepared
+
+
 def upgrade_document(
     document: StateDocument,
+    published_once: Mapping[str, bool] | None = None,
 ) -> tuple[StateDocument, list[tuple[int, int]]]:
     """Return an upgraded copy and the ordered ``(from, to)`` steps applied."""
     raw_format = document.get("state_format", 0)
@@ -68,7 +133,16 @@ def upgrade_document(
     if raw_format < 0:
         raise DecodeError(f"state_format: no upgrader exists for format {raw_format}")
 
-    upgraded = dict(document)
+    assertions: Mapping[str, bool] = {} if published_once is None else published_once
+    if raw_format == 0:
+        upgraded = _prepare_format_zero_assertions(document, assertions)
+    else:
+        if assertions:
+            raise UpgradeRefused(
+                "unknown published_once assertion(s): "
+                + ", ".join(sorted(assertions))
+            )
+        upgraded = dict(document)
     steps: list[tuple[int, int]] = []
     current = raw_format
     while current < CURRENT_STATE_FORMAT:
@@ -88,4 +162,4 @@ def upgrade_document(
     return upgraded, steps
 
 
-__all__ = ["UPGRADERS", "upgrade_document"]
+__all__ = ["UPGRADERS", "UpgradeRefused", "upgrade_document"]

@@ -218,7 +218,13 @@ def test_artifact_checks_pass_for_complete_anchored_chain(tmp_path: Path) -> Non
         _commit_decision(store, SetAnchorMode(AnchorMode.CI))
         _commit_decision(store, AdvanceAnchor("u"))
         results = run_artifact_checks(store, store.read_snapshot())
-        assert all(result.verdict is Verdict.PASS for result in results)
+        by_id = {result.check_id: result for result in results}
+        assert by_id[mk2.CHECK_MAP_FRESHNESS].verdict is Verdict.NOT_APPLICABLE
+        assert all(
+            result.verdict is Verdict.PASS
+            for result in results
+            if result.check_id != mk2.CHECK_MAP_FRESHNESS
+        )
 
 
 def test_corrupt_evidence_and_absent_head_fail(tmp_path: Path) -> None:

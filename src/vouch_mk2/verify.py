@@ -6,6 +6,7 @@ This CI/verify layer loads the claimed bytes and proves their content addressing
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import assert_never
 
@@ -37,15 +38,19 @@ from vouch_mk2.store import (
     decode_bundle_inventory,
     decode_evidence_event,
     decode_formal_certificate,
+    decode_snapshot,
     decode_system_map,
     digest_of,
     encode_evidence_event,
+    encode_document,
     encode_formal_certificate,
     encode_formal_relation,
     encode_formal_tables,
     encode_snapshot,
     encode_system_map,
 )
+from vouch_mk2.store.codec import decode_raw_document
+from vouch_mk2.store.upgrade import upgrade_document
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +72,24 @@ class RefusedError(StoreError):
                 for violation in violations
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class UpgradeResult:
+    """Observable outcome of one validated store-format operation."""
+
+    steps: tuple[tuple[int, int], ...]
+    assertions: tuple[tuple[str, bool], ...]
+    projections_regenerated: bool
+
+
+class ProjectionRegenerationError(StoreError):
+    """Projection regeneration failed after upgrade state preparation."""
+
+    def __init__(self, *, state_upgraded: bool, error: Exception) -> None:
+        self.state_upgraded = state_upgraded
+        self.projection_error = str(error)
+        super().__init__(self.projection_error)
 
 
 def _valid_digest(value: str) -> bool:
@@ -417,7 +440,11 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
 def _check_map_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
     committed = store.read_generated("map.json")
     if committed is None:
-        return CheckResult(mk2.CHECK_MAP_FRESHNESS, Verdict.PASS, "")
+        return CheckResult(
+            mk2.CHECK_MAP_FRESHNESS,
+            Verdict.NOT_APPLICABLE,
+            "map.json is absent; generate with `vouch-mk2 generate`",
+        )
     expected = encode_system_map(
         system_map(snapshot),
         digest_of(ArtifactKind.STATE, encode_snapshot(snapshot)),
@@ -513,6 +540,56 @@ def emit_context(store: Store, target: str | None) -> str:
     destination = target if current is None or current == data else target + ".vouch-suggested"
     write_atomic(destination, data, 0o644, "generated context")
     return destination
+
+
+def upgrade_store(
+    store: Store,
+    *,
+    dry_run: bool,
+    published_once: Mapping[str, bool],
+) -> UpgradeResult:
+    """Validate and apply one format upgrade, then regenerate projections.
+
+    A real operation holds one outer writer lock across the raw state read,
+    pure document upgrade, strict decode, authoritative replacement, and both
+    projection writes. A dry run performs the same preparation read-only.
+    """
+    if dry_run:
+        document = decode_raw_document(store.read_state_bytes())
+        upgraded, steps = upgrade_document(
+            document, published_once=published_once
+        )
+        encoded = encode_document(upgraded)
+        decode_snapshot(encoded)
+        return UpgradeResult(
+            steps=tuple(steps),
+            assertions=tuple(sorted(published_once.items())) if steps else (),
+            projections_regenerated=False,
+        )
+
+    with store.write_locked():
+        document = decode_raw_document(store.read_state_bytes())
+        upgraded, steps = upgrade_document(
+            document, published_once=published_once
+        )
+        encoded = encode_document(upgraded)
+        decode_snapshot(encoded)
+        state_upgraded = bool(steps)
+        if state_upgraded:
+            store.replace_state_for_upgrade(encoded)
+        try:
+            emit_system_map(store)
+            emit_context(store, None)
+        except Exception as error:
+            raise ProjectionRegenerationError(
+                state_upgraded=state_upgraded,
+                error=error,
+            ) from error
+    return UpgradeResult(
+        steps=tuple(steps),
+        assertions=tuple(sorted(published_once.items())) if steps else (),
+        projections_regenerated=True,
+    )
 
 
 def record_evidence(store: Store, event: EvidenceEvent) -> str:

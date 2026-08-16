@@ -53,24 +53,24 @@ from vouch_mk2.migrate import (
 )
 from vouch_mk2.mcp import run_stdio
 from vouch_mk2.projections import next_actions, status_facts
-from vouch_mk2.store.codec import decode_raw_document
 from vouch_mk2.store import (
     CURRENT_STATE_FORMAT,
     DecodeError,
     Store,
     StoreError,
-    decode_snapshot,
     decode_system_map,
-    encode_document,
 )
-from vouch_mk2.store.upgrade import upgrade_document
+from vouch_mk2.store.upgrade import UpgradeRefused
 from vouch_mk2.verify import (
+    ProjectionRegenerationError,
     RefusedError,
+    UpgradeResult,
     emit_context,
     emit_system_map,
     record_evidence,
     record_formal_certificate,
     run_artifact_checks,
+    upgrade_store,
 )
 
 
@@ -91,6 +91,8 @@ class _Arguments(argparse.Namespace):
     drop_qualified: bool
     approve: bool
     dry_run: bool
+    was_published: list[str]
+    never_published: list[str]
     command_argv: list[str]
 
 
@@ -152,6 +154,20 @@ def _parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="show required format steps without changing the store",
+    )
+    upgrade.add_argument(
+        "--was-published",
+        action="append",
+        default=[],
+        metavar="NAME@V",
+        help="assert that an ambiguous legacy unit was previously published",
+    )
+    upgrade.add_argument(
+        "--never-published",
+        action="append",
+        default=[],
+        metavar="NAME@V",
+        help="assert that an ambiguous legacy unit was never published",
     )
     context = commands.add_parser(
         "emit-context", help="emit deterministic agent context"
@@ -554,6 +570,12 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
         print("vouch-mk2: record-evidence requires -- <argv...>", file=sys.stderr)
         return 2
     try:
+        with Store.open(namespace.root, read_only=True) as store:
+            store.read_snapshot()
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    try:
         completed = subprocess.run(
             command_argv,
             check=False,
@@ -674,21 +696,20 @@ def _format_counts(rows: tuple[tuple[str, int], ...]) -> str:
     return ",".join(f"{status}={count}" for status, count in rows)
 
 
-def _prepare_upgrade(raw: bytes) -> tuple[bytes, list[tuple[int, int]]]:
-    document = decode_raw_document(raw)
-    upgraded, steps = upgrade_document(document)
-    encoded = encode_document(upgraded)
-    decode_snapshot(encoded)
-    return encoded, steps
-
-
-def _present_upgrade(steps: list[tuple[int, int]]) -> None:
-    if not steps:
-        print(f"already at format {CURRENT_STATE_FORMAT}")
-        return
-    for from_format, to_format in steps:
-        print(f"{from_format} -> {to_format}")
-    print(f"state format: {CURRENT_STATE_FORMAT}")
+def _present_upgrade(result: UpgradeResult, *, dry_run: bool) -> None:
+    prefix = "dry-run: " if dry_run else ""
+    if not result.steps:
+        suffix = "" if dry_run else "; projections regenerated"
+        print(f"{prefix}already at format {CURRENT_STATE_FORMAT}{suffix}")
+    else:
+        for from_format, to_format in result.steps:
+            print(f"{prefix}{from_format} -> {to_format}")
+        for ref, was_published in result.assertions:
+            assertion = "was-published" if was_published else "never-published"
+            print(f"{prefix}assert {assertion} {ref}")
+        print(f"{prefix}state format: {CURRENT_STATE_FORMAT}")
+    if dry_run:
+        print("dry-run: no changes written")
 
 
 def _expected_lock_digest(spec: str) -> str | None:
@@ -749,6 +770,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         drop_qualified=False,
         approve=False,
         dry_run=False,
+        was_published=[],
+        never_published=[],
         command_argv=[],
     )
     parsed = parser.parse_args(arguments, namespace=namespace)
@@ -891,22 +914,48 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_formal_command(parsed.root, record=parsed.record)
 
     if parsed.command == "upgrade":
+        was_published = set(parsed.was_published)
+        never_published = set(parsed.never_published)
+        conflicts = sorted(was_published & never_published)
+        if conflicts:
+            parser.error(
+                "conflicting --was-published and --never-published assertion(s): "
+                + ", ".join(conflicts)
+            )
+        assertions = {
+            **{ref: True for ref in was_published},
+            **{ref: False for ref in never_published},
+        }
         try:
-            if parsed.dry_run:
-                with Store.open(parsed.root, read_only=True) as store:
-                    _encoded, steps = _prepare_upgrade(store.read_state_bytes())
-            else:
-                with Store.open(parsed.root) as store:
-                    with store.write_locked():
-                        encoded, steps = _prepare_upgrade(store.read_state_bytes())
-                        if steps:
-                            store.replace_state_bytes(encoded)
-                            emit_system_map(store)
-                            emit_context(store, None)
+            with Store.open(parsed.root, read_only=parsed.dry_run) as store:
+                result = upgrade_store(
+                    store,
+                    dry_run=parsed.dry_run,
+                    published_once=assertions,
+                )
+        except UpgradeRefused as error:
+            print(
+                f"vouch-mk2: upgrade refused: {error}; provide "
+                "--was-published NAME@V or --never-published NAME@V",
+                file=sys.stderr,
+            )
+            return 2
+        except ProjectionRegenerationError as error:
+            state_outcome = (
+                f"state upgraded to format {CURRENT_STATE_FORMAT}"
+                if error.state_upgraded
+                else f"state already at format {CURRENT_STATE_FORMAT}"
+            )
+            print(
+                f"vouch-mk2: {state_outcome}; projection regeneration failed: "
+                f"{error.projection_error} — run 'vouch-mk2 generate'",
+                file=sys.stderr,
+            )
+            return 2
         except Exception as error:
             print(f"vouch-mk2: upgrade failed: {error}", file=sys.stderr)
             return 2
-        _present_upgrade(steps)
+        _present_upgrade(result, dry_run=parsed.dry_run)
         return 0
 
     if parsed.command == "generate":

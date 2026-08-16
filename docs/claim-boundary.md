@@ -38,15 +38,17 @@ Lifecycle writes use the reflected CLI verbs (`vouch-mk2 specify`,
 `vouch-mk2 record-evidence`, and the rest of the typed command set). Each opens
 one store and holds its writer lock across `decide` → `apply` → commit,
 including `record-formal-certificate` through the revision it reports. Writers
-wait on a blocking exclusive lock. Read-only handles never acquire that lock;
-generated projections read without it and hold it only while replacing generated
-files. Their orphan-temp cleanup is opportunistic and skipped when a writer holds
-the lock. The MCP transport remains read-only; these verbs do not add a remote
-mutation path.
+wait on a blocking exclusive lock. Read-only handles never acquire that lock.
+Standalone projection generation reads unlocked and holds the writer lock only
+while replacing generated files; upgrade holds its outer writer lock through
+regeneration. Orphan-temp cleanup is opportunistic and skipped when a writer
+holds the lock. The MCP transport remains read-only; these verbs do not add a
+remote mutation path.
 
-Every `state.json` declares an integer `state_format`, and strict reads accept
-exactly the current format. Older stores require the explicit, lock-protected
-`vouch-mk2 upgrade` path; newer stores are refused as written by a newer Vouch.
+Format 1 and later declare `state_format`; absence denotes legacy format 0.
+Strict reads accept exactly the current format. Older stores require the explicit,
+lock-protected `vouch-mk2 upgrade` path; newer stores are refused as written by a
+newer Vouch.
 
 For `record-evidence`, the exact mk2 claim is: "the recorded outcome is the exit
 status of a process this verb spawned, at the time it spawned it". The child
