@@ -14,6 +14,7 @@ from vouch_mk2.core.model import (
     EvidenceEvent,
     LaunchCriteria,
     ReleaseArchetype,
+    Tier,
     UnitRef,
 )
 from vouch_mk2.ir.schema import Verdict
@@ -176,6 +177,11 @@ class AnchorModeSet:
 
 
 @dataclass(frozen=True, slots=True)
+class TierSet:
+    tier: Tier
+
+
+@dataclass(frozen=True, slots=True)
 class FormalCertificateRecorded:
     certificate_digest: str
 
@@ -247,6 +253,7 @@ type Event = (
     | EvidenceRecorded
     | AnchorAdvanced
     | AnchorModeSet
+    | TierSet
     | FormalCertificateRecorded
     | DeploymentStarted
     | VerificationStarted

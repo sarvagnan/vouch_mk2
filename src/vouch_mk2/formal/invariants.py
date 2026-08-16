@@ -9,6 +9,7 @@ from vouch_mk2.core import (
     DeviationStatus,
     ReleaseState,
     Snapshot,
+    Tier,
     UnitStatus,
     blocking_deviations,
 )
@@ -150,6 +151,7 @@ def _criteria_before_progression(relation: Relation) -> tuple[str, ...]:
 _CONFIGURATION_COMMANDS = frozenset(
     {
         mk2.CMD_SET_ANCHOR_MODE,
+        mk2.CMD_SET_TIER,
         mk2.CMD_ADVANCE_ANCHOR,
         mk2.CMD_RECORD_FORMAL_CERTIFICATE,
     }
@@ -338,6 +340,25 @@ def _one_active_record_per_name(relation: Relation) -> tuple[str, ...]:
     return tuple(violations)
 
 
+def _tier_never_lowers_after_commitment(relation: Relation) -> tuple[str, ...]:
+    """mk2 M11, defined by DECISIONS.md D-12."""
+    representatives = _representatives(relation)
+    order = tuple(Tier)
+    violations: list[str] = []
+    for source, command, target in relation.transitions:
+        before = representatives[source]
+        after = representatives[target]
+        committed = any(
+            unit.status is not UnitStatus.SPECIFIED for unit in before.units
+        )
+        if committed and order.index(after.tier) < order.index(before.tier):
+            violations.append(
+                f"{command}: tier lowered from {before.tier.value!r} to "
+                f"{after.tier.value!r} after work was committed"
+            )
+    return tuple(violations)
+
+
 INVARIANTS: tuple[Invariant, ...] = (
     Invariant(
         "M1.no-direct-republication",
@@ -388,5 +409,10 @@ INVARIANTS: tuple[Invariant, ...] = (
         "M10.one-active-record-per-name",
         "mk2 D-9: at most one active record exists per name and history is inert.",
         _one_active_record_per_name,
+    ),
+    Invariant(
+        "M11.tier-never-lowers-after-commitment",
+        "mk2 D-12: assurance tier cannot lower after any unit leaves specified.",
+        _tier_never_lowers_after_commitment,
     ),
 )

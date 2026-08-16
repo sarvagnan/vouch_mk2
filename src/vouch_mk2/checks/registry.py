@@ -12,6 +12,11 @@ from vouch_mk2.checks.organizational import (
     check_protective_closure_truthfulness,
 )
 from vouch_mk2.checks.results import CheckReport, CheckResult
+from vouch_mk2.checks.tier import (
+    check_tier_controls,
+    check_tier_evidence_required,
+    check_tier_high_attestation,
+)
 from vouch_mk2.checks.standing import (
     check_amended_deviations_complete,
     check_blocked_status_coherent,
@@ -125,6 +130,8 @@ MECHANICAL_CHECKS: Mapping[str, CheckEvaluator] = {
     ),
     mk2.CHECK_RELEASE_CLOSURE_RECORDS: check_release_closure_records,
     mk2.CHECK_RELEASE_BOUND_UNITS_ROSTERED: check_release_bound_units_rostered,
+    mk2.CHECK_TIER_EVIDENCE_REQUIRED: check_tier_evidence_required,
+    mk2.CHECK_TIER_HIGH_ATTESTATION: check_tier_high_attestation,
 }
 
 ORGANIZATIONAL_CHECKS: Mapping[str, CheckEvaluator] = {
@@ -133,6 +140,7 @@ ORGANIZATIONAL_CHECKS: Mapping[str, CheckEvaluator] = {
     mk2.ORG_INDEPENDENCE: check_independence,
     mk2.ORG_CAUSAL_RED_HISTORY: check_causal_red_history,
     mk2.ORG_PROTECTIVE_CLOSURE_TRUTHFULNESS: check_protective_closure_truthfulness,
+    mk2.ORG_TIER_CONTROLS: check_tier_controls,
 }
 
 

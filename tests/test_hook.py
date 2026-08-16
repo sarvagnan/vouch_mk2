@@ -90,6 +90,7 @@ def test_hook_pass_and_fail_are_warn_only(
     output = capsys.readouterr().out
     assert f"vouch: {verdict}" in output
     assert "mechanical FAIL rows" in output
+    assert "tier=lightweight" in output
     assert f"check --root {root}" in output
 
 

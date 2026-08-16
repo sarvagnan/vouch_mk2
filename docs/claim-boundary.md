@@ -29,7 +29,8 @@ evaluator that ran, or the run fails.
 | Deviation blocking | a unit with any open deviation cannot advance; `NAME@VERSION` binding | 1 |
 | Claim-shape obligations | completion claims re-check units + criteria digest + roster; negative outcomes require criteria + outcome deviations; protective closures require trigger + roster snapshot + `no_completion_claim`, and are never blocked by contaminated state | 1 |
 | Evidence-chain validity and ordering | canonical-JSON hash chain; red-before-first-green ordering; anchor monotonicity (prior head remains an ancestor) | 1–2 |
-| Projection freshness | regenerate-and-byte-compare in CI; staleness is a FAIL, never a broken commit | 1 |
+| Tier-scoped evidence requirements | the authoritative snapshot tier selects IR-bound chain, anchor, and high-attestation checks; no config authority exists | 1–2 |
+| Projection freshness | `check.map-freshness` and `check.context-freshness` regenerate and byte-compare in CI; staleness is a FAIL, never a broken commit | 1 |
 | Registry completeness | a check declared in the IR without an evaluator fails CI on the mk2 repo itself | 1 |
 | Formal invariants over the bounded model | checker consumes the same transition relation the runtime executes; independently authored invariants with private mutation witnesses; `unknown`/timeout is never a pass | 1 |
 
@@ -44,6 +45,7 @@ These are exclusions, not omissions. Reports on a Vouch-governed project state t
 | Independence between real persons | identity comparison is a format heuristic (the 0.6 commit-author lesson), never proof of distinct people |
 | Causal red history | an anchored chain proves ordering and anchor timing; no anchor mode proves *why* the red occurred |
 | Protective-closure truthfulness | a closure record proves a trigger and roster snapshot were recorded, not that the trigger was real or the response appropriate |
+| Residual assurance-tier controls | `org.tier-controls` lists active cells without full coverage, distinguishes partial from unchecked residuals, and reports waived/no-obligation cells separately |
 | Semantic test quality | mutation-testing orchestration and statistical-oracle execution are ecosystem-specific and need judgment Vouch cannot supply |
 | Behavioral equivalence of model and reality | the formal certificate binds the model run under a finite abstraction, not the implementation's full behavior |
 | Forge enforcement | required checks and branch protection are forge-side; a pull request can modify the workflow file; hooks are warn-only fragments |

@@ -104,7 +104,8 @@ def hook_message(edit_target: str) -> str:
     )
     return (
         f"vouch: {report.composed().value} ({failures} mechanical FAIL rows) "
-        f"— run `vouch-mk2 check --root {root}` for detail"
+        f"tier={snapshot.tier.value} — "
+        f"run `vouch-mk2 check --root {root}` for detail"
     )
 
 
@@ -114,4 +115,3 @@ __all__ = [
     "hook_message",
     "resolve_root",
 ]
-

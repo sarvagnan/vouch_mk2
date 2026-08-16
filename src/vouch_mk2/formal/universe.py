@@ -32,6 +32,7 @@ from vouch_mk2.core import (
     RetireRelease,
     RollBack,
     SetAnchorMode,
+    SetTier,
     SetReleaseCriteria,
     SpecifyUnit,
     StartDeploy,
@@ -39,6 +40,7 @@ from vouch_mk2.core import (
     StartWork,
     Supersede,
     Snapshot,
+    Tier,
     Unit,
     UnitRef,
     UnitStatus,
@@ -50,6 +52,7 @@ class Universe:
     name: str
     commands: tuple[Command, ...]
     initial: Snapshot
+    invariant_ids: tuple[str, ...] = ()
 
 
 _B = UnitRef(name="b", version="v1")
@@ -154,12 +157,14 @@ HISTORY_V1_INITIAL = Snapshot(
             version="v1",
             status=UnitStatus.SUPERSEDED,
             acceptance_pack_version="p1",
+            published_once=True,
         ),
         Unit(
             name="u",
             version="v2",
             status=UnitStatus.PUBLISHED,
             acceptance_pack_version="p2",
+            published_once=True,
         ),
         Unit(
             name="w",
@@ -235,4 +240,17 @@ HISTORY_V1 = Universe(
     initial=HISTORY_V1_INITIAL,
 )
 
-UNIVERSES: tuple[Universe, ...] = (CORE_V1, HISTORY_V1)
+TIER_V1 = Universe(
+    name="tier-v1",
+    commands=(
+        SetTier(Tier.LIGHTWEIGHT),
+        SetTier(Tier.STANDARD),
+        SetTier(Tier.HIGH),
+        SpecifyUnit(name="tier-unit", version="v1"),
+        FreezeAcceptance(name="tier-unit", pack_version="pack-v1"),
+    ),
+    initial=Snapshot(tier=Tier.HIGH),
+    invariant_ids=("M11.tier-never-lowers-after-commitment",),
+)
+
+UNIVERSES: tuple[Universe, ...] = (CORE_V1, HISTORY_V1, TIER_V1)

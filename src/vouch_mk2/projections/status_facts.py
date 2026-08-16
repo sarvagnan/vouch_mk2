@@ -17,6 +17,7 @@ class StatusFacts:
     evidence_chains: int
     anchored_current: int
     anchor_mode: str
+    tier: str
     formal_certificate_recorded: bool
     next_action_count: int
 
@@ -42,6 +43,7 @@ def status_facts(
             head.anchored == head.head for head in snapshot.evidence_heads
         ),
         anchor_mode=snapshot.anchor_mode.value,
+        tier=snapshot.tier.value,
         formal_certificate_recorded=bool(snapshot.formal_certificate_digest),
         next_action_count=len(actions),
     )

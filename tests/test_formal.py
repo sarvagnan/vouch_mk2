@@ -7,10 +7,11 @@ from pathlib import Path
 import pytest
 
 import vouch_mk2.verify as verify_module
-from vouch_mk2.core import Accepted, RecordFormalCertificate, Snapshot, apply, decide
+from vouch_mk2.core import Accepted, RecordFormalCertificate, Snapshot, Tier, apply, decide
 from vouch_mk2.formal import (
     CORE_V1,
     HISTORY_V1,
+    TIER_V1,
     FormalRun,
     passed,
     run_formal,
@@ -50,8 +51,8 @@ def test_core_v1_closes_exhaustively_with_stable_counts(
 ) -> None:
     core = formal_run.universe(CORE_V1.name)
     assert core.universe_name == CORE_V1.name == "core-v1"
-    assert core.state_count == 96_266
-    assert core.transition_count == 525_474
+    assert core.state_count == 109_130
+    assert core.transition_count == 599_226
     assert len(set(core.relation.states)) == core.state_count
     assert len(set(core.relation.transitions)) == core.transition_count
     assert passed(formal_run)
@@ -64,17 +65,63 @@ def test_history_v1_closes_exhaustively_with_stable_counts(
 ) -> None:
     history = formal_run.universe(HISTORY_V1.name)
     assert history.universe_name == HISTORY_V1.name == "history-v1"
-    assert history.state_count == 6_816 > 0
-    assert history.transition_count == 17_554 > 0
+    assert history.state_count == 7_120 > 0
+    assert history.transition_count == 18_380 > 0
     assert len(set(history.relation.states)) == history.state_count
     assert len(set(history.relation.transitions)) == history.transition_count
     assert all(verdict.held for verdict in history.invariants)
+    _regression_tier_v1_covers_legal_lowering_and_committed_refusals(formal_run)
 
 
-def test_m10_holds_in_both_universes_and_w10_discriminates(
+def _regression_tier_v1_covers_legal_lowering_and_committed_refusals(
+    formal_run: FormalRun,
+) -> None:
+    from vouch_mk2.core import Refused, SetTier, Unit, UnitStatus
+
+    tier = formal_run.universe(TIER_V1.name)
+    assert tier.universe_name == TIER_V1.name == "tier-v1"
+    assert tier.state_count == 9
+    assert tier.transition_count == 30
+    representatives = dict(tier.relation.representatives)
+    lowering = [
+        (representatives[source], representatives[target])
+        for source, command, target in tier.relation.transitions
+        if command == mk2.CMD_SET_TIER
+        and representatives[source].tier is Tier.HIGH
+        and representatives[target].tier is Tier.LIGHTWEIGHT
+    ]
+    assert any(
+        len(before.units) == 1
+        and before.units[0].status is UnitStatus.SPECIFIED
+        for before, _after in lowering
+    )
+    assert not any(
+        any(unit.status is not UnitStatus.SPECIFIED for unit in before.units)
+        for before, _after in lowering
+    )
+    committed = Snapshot(
+        tier=Tier.HIGH,
+        units=(
+            Unit(
+                "tier-unit",
+                "v1",
+                UnitStatus.ACCEPTANCE_FROZEN,
+                acceptance_pack_version="pack-v1",
+            ),
+        ),
+    )
+    for target in (Tier.STANDARD, Tier.LIGHTWEIGHT):
+        decision = decide(committed, SetTier(target))
+        assert isinstance(decision, Refused)
+        assert decision.violations[0].code == "tier.lowering-refused"
+
+
+def test_m10_m11_hold_in_their_certified_universes_and_witnesses_discriminate(
     formal_run: FormalRun,
 ) -> None:
     for universe in formal_run.universes:
+        if universe.universe_name == TIER_V1.name:
+            continue
         m10 = next(
             verdict
             for verdict in universe.invariants
@@ -89,6 +136,21 @@ def test_m10_holds_in_both_universes_and_w10_discriminates(
     )
     assert w10.invariant_id == "M10.one-active-record-per-name"
     assert w10.discriminated
+    for universe in formal_run.universes:
+        m11 = next(
+            verdict
+            for verdict in universe.invariants
+            if verdict.invariant_id == "M11.tier-never-lowers-after-commitment"
+        )
+        assert m11.held
+        assert not m11.violations
+    w11 = next(
+        verdict
+        for verdict in formal_run.witnesses
+        if verdict.witness_id == "W11.tier-lowering"
+    )
+    assert w11.invariant_id == "M11.tier-never-lowers-after-commitment"
+    assert w11.discriminated
 
 
 def test_core_v1_has_no_truthful_terminal_states(formal_run: FormalRun) -> None:
@@ -107,15 +169,21 @@ def test_state_fingerprint_ignores_only_revision() -> None:
     assert state_fingerprint(baseline) != state_fingerprint(
         replace(baseline, formal_certificate_digest="f" * 64)
     )
+    assert state_fingerprint(baseline) != state_fingerprint(
+        replace(baseline, tier=Tier.HIGH)
+    )
 
 
 def test_every_invariant_has_one_private_discriminating_witness(
     formal_run: FormalRun,
 ) -> None:
     for universe in formal_run.universes:
-        assert {verdict.invariant_id for verdict in universe.invariants} == {
-            invariant.invariant_id for invariant in INVARIANTS
-        }
+        expected = (
+            {"M11.tier-never-lowers-after-commitment"}
+            if universe.universe_name == TIER_V1.name
+            else {invariant.invariant_id for invariant in INVARIANTS}
+        )
+        assert {verdict.invariant_id for verdict in universe.invariants} == expected
     assert {verdict.invariant_id for verdict in formal_run.witnesses} == {
         invariant.invariant_id for invariant in INVARIANTS
     }
@@ -152,6 +220,7 @@ def test_formal_artifact_encodings_are_stable_and_certificate_is_strict(
     assert {row[0] for row in certificate.universes} == {
         CORE_V1.name,
         HISTORY_V1.name,
+        TIER_V1.name,
     }
     assert {
         row[0]: row[2:] for row in certificate.universes

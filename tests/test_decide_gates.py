@@ -99,8 +99,104 @@ def test_publication_gate_record_is_carried_and_all_pass() -> None:
         "gate.dod.pack-frozen",
         "gate.dod.dependencies-satisfied",
         "gate.dod.no-blocking-deviations",
+        "gate.dod.tier-evidence",
     }
     assert all(c.verdict is Verdict.PASS for c in event.gate.checks)
+    _regression_tier_evidence_gate_refuses_standard_and_high_publication()
+    _regression_publication_provenance_survives_lifecycle_status_changes()
+    _regression_high_attestation_scopes_to_superseded_publication_provenance()
+
+
+def _regression_tier_evidence_gate_refuses_standard_and_high_publication() -> None:
+    from vouch_mk2.core import EvidenceHead, Tier
+
+    standard = Snapshot(
+        tier=Tier.STANDARD,
+        units=(unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE),),
+    )
+    assert refused_codes(standard, Publish("u")) == ("gate.dod.tier-evidence",)
+
+    unanchored = Snapshot(
+        tier=Tier.HIGH,
+        units=(unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE),),
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+    )
+    decision = decide(unanchored, Publish("u"))
+    assert isinstance(decision, Refused)
+    assert decision.violations[0].code == "gate.dod.tier-evidence"
+    assert "anchor" in decision.violations[0].detail
+    assert "certificate" in decision.violations[0].detail
+
+    ready = Snapshot(
+        tier=Tier.HIGH,
+        units=unanchored.units,
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "a" * 64),),
+        formal_certificate_digest="f" * 64,
+    )
+    assert isinstance(decide(ready, Publish("u")), Accepted)
+
+
+def _regression_publication_provenance_survives_lifecycle_status_changes() -> None:
+    from vouch_mk2.checks import run_checks
+    from vouch_mk2.core import SetTier, Supersede, Tier
+    from vouch_mk2.ir import mk2
+
+    snapshot = Snapshot(units=(unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE),))
+    snapshot = accepted(snapshot, Publish("u"))
+    published = snapshot.unit("u")
+    assert published is not None and published.published_once
+    snapshot = accepted(snapshot, SetTier(Tier.STANDARD))
+
+    def evidence_verdict(state: Snapshot) -> Verdict:
+        return next(
+            row.verdict
+            for row in run_checks(state).mechanical
+            if row.check_id == mk2.CHECK_TIER_EVIDENCE_REQUIRED
+        )
+
+    assert evidence_verdict(snapshot) is Verdict.FAIL
+    snapshot = accepted(
+        snapshot,
+        OpenDeviation("d1", DeviationType.PACK_DEFECT, published.ref()),
+    )
+    assert snapshot.unit("u") is not None
+    assert snapshot.unit("u").published_once  # type: ignore[union-attr]
+    assert evidence_verdict(snapshot) is Verdict.FAIL
+    snapshot = accepted(snapshot, RejectDeviation("d1"))
+    snapshot = accepted(snapshot, CloseDeviation("d1"))
+    snapshot = accepted(snapshot, BeginReverify("u"))
+    assert evidence_verdict(snapshot) is Verdict.FAIL
+    snapshot = accepted(snapshot, Supersede("u"))
+    assert snapshot.unit("u") is not None
+    assert snapshot.unit("u").published_once  # type: ignore[union-attr]
+    assert evidence_verdict(snapshot) is Verdict.FAIL
+
+
+def _regression_high_attestation_scopes_to_superseded_publication_provenance() -> None:
+    from vouch_mk2.checks import run_checks
+    from vouch_mk2.core import EvidenceHead, Tier
+    from vouch_mk2.ir import mk2
+
+    snapshot = Snapshot(
+        tier=Tier.HIGH,
+        units=(
+            Unit(
+                "u",
+                "v1",
+                UnitStatus.SUPERSEDED,
+                acceptance_pack_version="p1",
+                published_once=True,
+            ),
+        ),
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+    )
+    row = next(
+        result
+        for result in run_checks(snapshot).mechanical
+        if result.check_id == mk2.CHECK_TIER_HIGH_ATTESTATION
+    )
+    assert row.verdict is Verdict.FAIL
+    assert "anchor" in row.detail and "certificate" in row.detail
 
 
 def test_d046_publication_with_unsatisfied_dependency_is_refused() -> None:

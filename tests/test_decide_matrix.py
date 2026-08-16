@@ -108,6 +108,7 @@ PURE_ARTIFACT_RESULTS = tuple(
         mk2.CHECK_BUNDLE_INVENTORIES,
         mk2.CHECK_FORMAL_CERTIFICATE,
         mk2.CHECK_MAP_FRESHNESS,
+        mk2.CHECK_CONTEXT_FRESHNESS,
     )
 )
 
@@ -273,6 +274,7 @@ def snapshot_key(snapshot: Snapshot) -> tuple[object, ...]:
             for head in snapshot.evidence_heads
         ),
         snapshot.anchor_mode.value,
+        snapshot.tier.value,
         snapshot.formal_certificate_digest,
         tuple((d.deviation_id, d.status.value) for d in snapshot.deviations),
         tuple(
@@ -506,6 +508,7 @@ def test_reachable_multi_unit_release_snapshots_pass_standing_checks() -> None:
                 for head in snapshot.evidence_heads
             ),
             snapshot.anchor_mode.value,
+            snapshot.tier.value,
             snapshot.formal_certificate_digest,
         )
 

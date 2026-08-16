@@ -133,7 +133,7 @@ def test_mcp_remaining_read_tools_return_structured_objects(tmp_path: Path) -> N
     assert structured[0]["passed"] is True
     assert structured[1]["actions"] == []
     assert "status" in structured[2]
-    assert structured[3]["map_format"] == 1
+    assert structured[3]["map_format"] == 2
 
 
 

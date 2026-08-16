@@ -59,6 +59,12 @@ class RequirementLevel(Enum):
     WAIVED = "waived"
 
 
+class Coverage(Enum):
+    FULL = "full"
+    PARTIAL = "partial"
+    NONE = "none"
+
+
 class ConditionKind(Enum):
     """Closed set of predicates an applicability rule may cite.
 
@@ -164,6 +170,10 @@ class TierCell:
     level: RequirementLevel
     scope: str = ""
     detail: str = ""
+    mechanical_checks: tuple[str, ...] = ()
+    mechanical_evidence: tuple[str, ...] = ()
+    coverage: Coverage = Coverage.NONE
+    residual: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,5 +389,32 @@ def validate(ir: PolicyIr) -> tuple[Violation, ...]:
     control_ids = [t.control_id for t in ir.tier_requirements]
     if len(set(control_ids)) != len(control_ids):
         out.add("tier.duplicate-control", "duplicate control ids")
+    for requirement in ir.tier_requirements:
+        for tier_name, cell in (
+            ("lightweight", requirement.lightweight),
+            ("standard", requirement.standard),
+            ("high", requirement.high),
+        ):
+            if len(set(cell.mechanical_checks)) != len(cell.mechanical_checks):
+                out.add(
+                    "tier.duplicate-check-binding",
+                    f"{requirement.control_id!r}/{tier_name}: duplicate check ids",
+                )
+            for check_id in cell.mechanical_checks:
+                obligation = obligations_by_id.get(check_id)
+                if obligation is None:
+                    out.add(
+                        "tier.unknown-check-binding",
+                        f"{requirement.control_id!r}/{tier_name}: {check_id!r}",
+                    )
+                elif obligation.scope not in {
+                    ObligationScope.STANDING_CHECK,
+                    ObligationScope.ARTIFACT_CHECK,
+                }:
+                    out.add(
+                        "tier.check-binding-scope-misuse",
+                        f"{requirement.control_id!r}/{tier_name}: {check_id!r} "
+                        f"has scope {obligation.scope.value!r}",
+                    )
 
     return tuple(out.found)

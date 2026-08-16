@@ -35,6 +35,9 @@ class StateLimitExceeded(Exception):
     """Exploration exceeded its explicit bound; no partial run is returned."""
 
 
+_STATE_LIMIT = 250_000
+
+
 def state_fingerprint(snapshot: Snapshot) -> str:
     """Return a deterministic fingerprint of all state except ``revision``."""
     units = tuple(
@@ -43,6 +46,7 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             unit.version,
             unit.status.value,
             unit.acceptance_pack_version,
+            unit.published_once,
             tuple(unit.depends_on),
         )
         for unit in sorted(snapshot.units, key=lambda item: item.name)
@@ -102,6 +106,7 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             ("releases", releases),
             ("evidence_heads", heads),
             ("anchor_mode", snapshot.anchor_mode.value),
+            ("tier", snapshot.tier.value),
             ("formal_certificate_digest", snapshot.formal_certificate_digest),
         )
     )
@@ -127,9 +132,9 @@ def explore(universe: Universe) -> Relation:
             transitions.add((source, command.ir_command, target))
             if target in representatives:
                 continue
-            if len(representatives) >= 100_000:
+            if len(representatives) >= _STATE_LIMIT:
                 raise StateLimitExceeded(
-                    f"universe {universe.name!r} exceeded 100000 states"
+                    f"universe {universe.name!r} exceeded {_STATE_LIMIT} states"
                 )
             representatives[target] = target_snapshot
             frontier.append(target)

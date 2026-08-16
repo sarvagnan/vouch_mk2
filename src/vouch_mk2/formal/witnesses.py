@@ -14,6 +14,7 @@ from vouch_mk2.core import (
     EvidenceHead,
     ReleaseState,
     Snapshot,
+    Tier,
     Unit,
     UnitRef,
     UnitStatus,
@@ -409,6 +410,28 @@ def _mutate_m10(relation: Relation) -> Relation:
     return _replace_representative(relation, old, corrupted)
 
 
+def _mutate_m11(relation: Relation) -> Relation:
+    _fingerprint, snapshot = _first_snapshot(
+        relation,
+        lambda item: any(
+            unit.status is not UnitStatus.SPECIFIED for unit in item.units
+        ),
+    )
+    before = replace(snapshot, tier=Tier.HIGH)
+    after = replace(before, tier=Tier.LIGHTWEIGHT)
+    mutated, source = _with_representative(relation, before)
+    mutated, target = _with_representative(mutated, after)
+    return replace(
+        mutated,
+        transitions=tuple(
+            sorted(
+                set(mutated.transitions)
+                | {(source, mk2.CMD_SET_TIER, target)}
+            )
+        ),
+    )
+
+
 WITNESSES: tuple[Witness, ...] = (
     Witness("W1.direct-republication", "M1.no-direct-republication", "Forge invalidated -> published.", _mutate_m1),
     Witness("W2.blocked-published", "M2.published-units-gated", "Attach an open deviation to a published unit.", _mutate_m2),
@@ -420,6 +443,7 @@ WITNESSES: tuple[Witness, ...] = (
     Witness("W8.release-not-withdrawn", "M8.amendment-withdraws-releases", "Keep an amendment-affected release prepared.", _mutate_m8),
     Witness("W9.anchor-rotation", "M9.anchor-monotonic", "Rotate an anchor to an unrelated digest.", _mutate_m9),
     Witness("W10.second-active-record", "M10.one-active-record-per-name", "Add a second active version for an existing name.", _mutate_m10),
+    Witness("W11.tier-lowering", "M11.tier-never-lowers-after-commitment", "Forge a tier-lowering transition after work is committed.", _mutate_m11),
 )
 
 

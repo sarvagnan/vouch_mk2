@@ -25,12 +25,17 @@ from vouch_mk2.ir.schema import (
     ClaimShape,
     ClosedVocabulary,
     ConditionKind,
+    Coverage,
     IrIdentity,
     Obligation,
     ObligationScope,
     PolicyIr,
+    RequirementLevel,
     StateMachine,
     StateSet,
+    Tier,
+    TierCell,
+    TierRequirement,
     Transition,
 )
 
@@ -68,6 +73,7 @@ CMD_BIND_BUNDLE = "bind-bundle"
 CMD_RECORD_EVIDENCE = "record-evidence"
 CMD_ADVANCE_ANCHOR = "advance-anchor"
 CMD_SET_ANCHOR_MODE = "set-anchor-mode"
+CMD_SET_TIER = "set-tier"
 CMD_RECORD_FORMAL_CERTIFICATE = "record-formal-certificate"
 
 # Deviation lifecycle commands.
@@ -82,6 +88,7 @@ GATE_DOR_NO_BLOCKING_DEVIATIONS = "gate.dor.no-blocking-deviations"
 GATE_DOD_PACK_FROZEN = "gate.dod.pack-frozen"
 GATE_DOD_DEPENDENCIES_SATISFIED = "gate.dod.dependencies-satisfied"
 GATE_DOD_NO_BLOCKING_DEVIATIONS = "gate.dod.no-blocking-deviations"
+GATE_DOD_TIER_EVIDENCE = "gate.dod.tier-evidence"
 GATE_UNBLOCK_NO_BLOCKING_DEVIATIONS = "gate.unblock.no-blocking-deviations"
 GATE_REVERIFY_PACK_RECORDED = "gate.reverify.pack-recorded"
 GATE_RELEASE_CRITERIA_BEFORE_PROGRESSION = (
@@ -122,6 +129,8 @@ CHECK_RELEASE_CRITERIA_BEFORE_PROGRESSION = (
 )
 CHECK_RELEASE_CLOSURE_RECORDS = "check.release-closure-records"
 CHECK_RELEASE_BOUND_UNITS_ROSTERED = "check.release-bound-units-rostered"
+CHECK_TIER_EVIDENCE_REQUIRED = "check.tier.evidence-required"
+CHECK_TIER_HIGH_ATTESTATION = "check.tier.high-attestation"
 
 # Phase 5 I/O-side artifact checks.
 CHECK_EVIDENCE_CHAINS = "check.evidence-chains"
@@ -129,6 +138,7 @@ CHECK_EVIDENCE_ANCHORS = "check.evidence-anchors"
 CHECK_BUNDLE_INVENTORIES = "check.bundle-inventories"
 CHECK_FORMAL_CERTIFICATE = "check.formal-certificate"
 CHECK_MAP_FRESHNESS = "check.map-freshness"
+CHECK_CONTEXT_FRESHNESS = "check.context-freshness"
 
 # Permanently NOT_CHECKED organizational claims (docs/claim-boundary.md).
 ORG_ACCEPTANCE_OWNERSHIP = "org.acceptance-ownership"
@@ -136,6 +146,9 @@ ORG_INTENT_VALIDATION = "org.intent-validation"
 ORG_INDEPENDENCE = "org.independence"
 ORG_CAUSAL_RED_HISTORY = "org.causal-red-history"
 ORG_PROTECTIVE_CLOSURE_TRUTHFULNESS = "org.protective-closure-truthfulness"
+ORG_TIER_CONTROLS = "org.tier-controls"
+
+TIER_EVIDENCE_CONTROL = "harness-recorded-red-green"
 
 _DOR_GATES = (
     GATE_DOR_PACK_RECORDED,
@@ -146,6 +159,7 @@ _DOD_GATES = (
     GATE_DOD_PACK_FROZEN,
     GATE_DOD_DEPENDENCIES_SATISFIED,
     GATE_DOD_NO_BLOCKING_DEVIATIONS,
+    GATE_DOD_TIER_EVIDENCE,
 )
 
 _UNIT_STATES = (
@@ -407,6 +421,14 @@ _OBLIGATIONS = (
         ),
     ),
     Obligation(
+        obligation_id=GATE_DOD_TIER_EVIDENCE,
+        scope=ObligationScope.TRANSITION_GATE,
+        description=(
+            "Publication satisfies the snapshot tier's IR-bound evidence, anchor, "
+            "and formal-certificate requirements."
+        ),
+    ),
+    Obligation(
         obligation_id=GATE_UNBLOCK_NO_BLOCKING_DEVIATIONS,
         scope=ObligationScope.TRANSITION_GATE,
         description=(
@@ -559,6 +581,22 @@ _OBLIGATIONS = (
         description="Every release-bound unit appears in at least one release roster.",
     ),
     Obligation(
+        obligation_id=CHECK_TIER_EVIDENCE_REQUIRED,
+        scope=ObligationScope.STANDING_CHECK,
+        description=(
+            "Tier-scoped published-unit evidence-chain requirements from the "
+            "assurance matrix."
+        ),
+    ),
+    Obligation(
+        obligation_id=CHECK_TIER_HIGH_ATTESTATION,
+        scope=ObligationScope.STANDING_CHECK,
+        description=(
+            "Tier-scoped external anchoring and formal-certificate requirements "
+            "from the assurance matrix."
+        ),
+    ),
+    Obligation(
         obligation_id=CHECK_EVIDENCE_CHAINS,
         scope=ObligationScope.ARTIFACT_CHECK,
         description="Evidence heads resolve to coherent content-addressed chains.",
@@ -589,6 +627,13 @@ _OBLIGATIONS = (
         description="A committed system map exactly matches the authoritative snapshot.",
     ),
     Obligation(
+        obligation_id=CHECK_CONTEXT_FRESHNESS,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description=(
+            "A generated agent context exactly matches the authoritative snapshot."
+        ),
+    ),
+    Obligation(
         obligation_id=ORG_ACCEPTANCE_OWNERSHIP,
         scope=ObligationScope.ORGANIZATIONAL,
         description="Acceptance ownership is real.",
@@ -612,6 +657,13 @@ _OBLIGATIONS = (
         obligation_id=ORG_PROTECTIVE_CLOSURE_TRUTHFULNESS,
         scope=ObligationScope.ORGANIZATIONAL,
         description="Protective-closure truthfulness.",
+    ),
+    Obligation(
+        obligation_id=ORG_TIER_CONTROLS,
+        scope=ObligationScope.ORGANIZATIONAL,
+        description=(
+            "Tier-matrix controls that mk2 cannot mechanically evaluate."
+        ),
     ),
 )
 
@@ -660,6 +712,7 @@ _VOCABULARIES = (
         values=("tests-failed", "tests-passed"),
     ),
     ClosedVocabulary(name="anchor-modes", values=("none", "ci")),
+    ClosedVocabulary(name="tiers", values=tuple(tier.value for tier in Tier)),
 )
 
 _CLAIM_RULES = (
@@ -680,6 +733,221 @@ _CLAIM_RULES = (
     ),
 )
 
+
+def _required(
+    scope: str = "",
+    detail: str = "",
+    mechanical_checks: tuple[str, ...] = (),
+    mechanical_evidence: tuple[str, ...] = (),
+    coverage: Coverage = Coverage.NONE,
+    residual: str = "",
+) -> TierCell:
+    return TierCell(
+        level=RequirementLevel.REQUIRED,
+        scope=scope,
+        detail=detail,
+        mechanical_checks=mechanical_checks,
+        mechanical_evidence=mechanical_evidence,
+        coverage=coverage,
+        residual=residual,
+    )
+
+
+def _risk(scope: str = "", detail: str = "", residual: str = "") -> TierCell:
+    return TierCell(
+        level=RequirementLevel.RISK_TRIGGERED,
+        scope=scope,
+        detail=detail,
+        coverage=Coverage.NONE,
+        residual=residual,
+    )
+
+
+_WAIVED = TierCell(level=RequirementLevel.WAIVED)
+_CHAIN_CHECKS = (CHECK_EVIDENCE_ANCHORS, CHECK_TIER_EVIDENCE_REQUIRED)
+_HIGH_ATTESTATION_CHECKS = _CHAIN_CHECKS + (CHECK_TIER_HIGH_ATTESTATION,)
+
+_TIER_REQUIREMENTS = (
+    TierRequirement(
+        control_id="typed-contracts",
+        description="Typed contracts, declared classes, purity checks",
+        lightweight=_required(
+            mechanical_checks=(CHECK_REGISTRY_COMPLETE,),
+            mechanical_evidence=("pyrefly strict", "import-linter"),
+            coverage=Coverage.PARTIAL,
+            residual="declared classes are human reviewed",
+        ),
+        standard=_required(
+            mechanical_checks=(CHECK_REGISTRY_COMPLETE,),
+            mechanical_evidence=("pyrefly strict", "import-linter"),
+            coverage=Coverage.PARTIAL,
+            residual="declared classes are human reviewed",
+        ),
+        high=_required(
+            mechanical_checks=(CHECK_REGISTRY_COMPLETE,),
+            mechanical_evidence=("pyrefly strict", "import-linter"),
+            coverage=Coverage.PARTIAL,
+            residual="declared classes are human reviewed",
+        ),
+    ),
+    TierRequirement(
+        control_id="acceptance-frozen-before-implementation",
+        description="Acceptance frozen before implementation",
+        lightweight=_required(
+            scope="critical-behavior",
+            mechanical_evidence=("acceptance pack digest bound at freeze",),
+            coverage=Coverage.PARTIAL,
+            residual="frozen BEFORE implementation is human attested",
+        ),
+        standard=_required(
+            mechanical_evidence=("acceptance pack digest bound at freeze",),
+            coverage=Coverage.PARTIAL,
+            residual="frozen BEFORE implementation is human attested",
+        ),
+        high=_required(
+            detail="independently reviewed",
+            mechanical_evidence=("acceptance pack digest bound at freeze",),
+            coverage=Coverage.PARTIAL,
+            residual="frozen BEFORE implementation is human attested",
+        ),
+    ),
+    TierRequirement(
+        control_id="independence-minimum",
+        description="Independence (minimum model)",
+        lightweight=_required(
+            detail="Model 3",
+            residual="the required independence model is human attested",
+        ),
+        standard=_required(
+            scope="critical-behavior",
+            detail="Model 1/2 for critical (per-unit override in ledger)",
+            residual="the required independence model is human attested",
+        ),
+        high=_required(
+            detail="Model 1/2 throughout, named human adjudicator",
+            residual="the required independence model is human attested",
+        ),
+    ),
+    TierRequirement(
+        control_id=TIER_EVIDENCE_CONTROL,
+        description="Harness-recorded red→green→refactor",
+        lightweight=_required(
+            detail="chain optional (ordering only, no causal claim)",
+            mechanical_evidence=("record-evidence ordering and outcome gates",),
+            coverage=Coverage.FULL,
+        ),
+        standard=_required(
+            detail="chained, CI-signed anchor",
+            mechanical_checks=_CHAIN_CHECKS,
+            coverage=Coverage.FULL,
+        ),
+        high=_required(
+            detail="chained, external append-only anchor",
+            mechanical_checks=_HIGH_ATTESTATION_CHECKS,
+            coverage=Coverage.FULL,
+        ),
+    ),
+    TierRequirement(
+        control_id="real-boundary-tests",
+        description="Real-boundary tests (observations and actions)",
+        lightweight=_required(residual="boundary selection and test adequacy are human reviewed"),
+        standard=_required(residual="boundary selection and test adequacy are human reviewed"),
+        high=_required(
+            detail="plus fault injection",
+            residual="boundary selection, test adequacy, and fault injection are human reviewed",
+        ),
+    ),
+    TierRequirement(
+        control_id="replay-manifests-content-addressing",
+        description="Replay, manifests, content addressing",
+        lightweight=_required(
+            scope="transforms-only",
+            residual="replay completeness and content-addressing coverage are human reviewed",
+        ),
+        standard=_required(residual="replay completeness and content-addressing coverage are human reviewed"),
+        high=_required(residual="replay completeness and content-addressing coverage are human reviewed"),
+    ),
+    TierRequirement(
+        control_id="mutation-testing",
+        description="Mutation testing",
+        lightweight=_WAIVED,
+        standard=_risk(
+            scope="critical-logic",
+            residual="mutation scope and surviving-mutant adjudication are human reviewed",
+        ),
+        high=_required(
+            detail="all required mutants",
+            residual="mutation scope and surviving-mutant adjudication are human reviewed",
+        ),
+    ),
+    TierRequirement(
+        control_id="approval-gated-actions",
+        description="Approval-gated actions",
+        lightweight=_WAIVED,
+        standard=_risk(
+            detail="ledger approval_required",
+            residual="approval triggers and authorization policy are human reviewed",
+        ),
+        high=_required(residual="approval triggers and authorization policy are human reviewed"),
+    ),
+    TierRequirement(
+        control_id="security-evidence",
+        description="Security evidence",
+        lightweight=_WAIVED,
+        standard=_risk(
+            detail="when triggered, the high-tier blocking outcomes apply",
+            residual="security triggers and required blocking outcomes are human reviewed",
+        ),
+        high=_required(
+            detail=(
+                "unresolved high-severity threats, leaked secrets, unbound "
+                "dependencies, or missing authorization tests block release"
+            ),
+            residual="security evidence and required blocking outcomes are human reviewed",
+        ),
+    ),
+    TierRequirement(
+        control_id="system-map-gates",
+        description="System map: both gates, full content, owned verifiers",
+        lightweight=_required(residual="gate completeness, content adequacy, and verifier ownership are human reviewed"),
+        standard=_required(residual="gate completeness, content adequacy, and verifier ownership are human reviewed"),
+        high=_required(residual="gate completeness, content adequacy, and verifier ownership are human reviewed"),
+    ),
+    TierRequirement(
+        control_id="release-map-in-bundle",
+        description="Release map content-addressed in bundle",
+        lightweight=_required(residual="release-map bundle inclusion is human reviewed"),
+        standard=_required(residual="release-map bundle inclusion is human reviewed"),
+        high=_required(residual="release-map bundle inclusion is human reviewed"),
+    ),
+    TierRequirement(
+        control_id="map-delivered-externally",
+        description="Map delivered externally",
+        lightweight=_required(detail="per archetype", residual="external delivery is human attested"),
+        standard=_required(detail="per archetype", residual="external delivery is human attested"),
+        high=_required(detail="per archetype", residual="external delivery is human attested"),
+    ),
+    TierRequirement(
+        control_id="archetype-q-machinery",
+        description=(
+            "Archetype-Q machinery (sealed procedure, exposure controls, held-out "
+            "case variants)"
+        ),
+        lightweight=_required(
+            detail="bound to archetype, never tier",
+            residual="sealed procedure, exposure controls, and held-out variants are human reviewed",
+        ),
+        standard=_required(
+            detail="bound to archetype, never tier",
+            residual="sealed procedure, exposure controls, and held-out variants are human reviewed",
+        ),
+        high=_required(
+            detail="bound to archetype, never tier",
+            residual="sealed procedure, exposure controls, and held-out variants are human reviewed",
+        ),
+    ),
+)
+
 MK2 = PolicyIr(
     identity=IrIdentity(
         name="vouch-mk2-lifecycle",
@@ -689,6 +957,7 @@ MK2 = PolicyIr(
     machines=(_UNIT, _DEVIATION, _RELEASE_O),
     claim_rules=_CLAIM_RULES,
     obligations=_OBLIGATIONS,
+    tier_requirements=_TIER_REQUIREMENTS,
     state_sets=_STATE_SETS,
     vocabularies=_VOCABULARIES,
 )

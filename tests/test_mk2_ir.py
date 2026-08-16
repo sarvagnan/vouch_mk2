@@ -11,6 +11,7 @@ from vouch_mk2.core import (
     EvidenceKind,
     EvidenceOutcome,
     ReleaseState,
+    Tier,
     UnitStatus,
 )
 from vouch_mk2.core.decide import GATE_EVALUATORS, RELEASE_GATE_EVALUATORS
@@ -172,9 +173,10 @@ def test_core_enums_conform_to_ir() -> None:
     assert {mode.value for mode in AnchorMode} == set(
         MK2.vocabulary("anchor-modes").values
     )
+    assert {tier.value for tier in Tier} == set(MK2.vocabulary("tiers").values)
 
 
-def test_artifact_obligations_are_exactly_five_and_never_gates() -> None:
+def test_artifact_obligations_are_exactly_six_and_never_gates() -> None:
     artifact_ids = {
         obligation.obligation_id
         for obligation in MK2.obligations
@@ -186,6 +188,7 @@ def test_artifact_obligations_are_exactly_five_and_never_gates() -> None:
         "check.bundle-inventories",
         "check.formal-certificate",
         "check.map-freshness",
+        "check.context-freshness",
     }
     bound = {
         gate

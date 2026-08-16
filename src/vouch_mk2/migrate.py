@@ -28,6 +28,7 @@ from vouch_mk2.core import (
     ReleaseArchetype,
     ReleaseState,
     Snapshot,
+    Tier,
     Unit,
     UnitRef,
     UnitStatus,
@@ -103,6 +104,7 @@ class LedgerDocument:
     units: tuple[_LedgerUnit, ...]
     deviations: tuple[_LedgerDeviation, ...]
     releases: tuple[_LedgerRelease, ...]
+    tier: Tier
     warnings: tuple[str, ...]
     dropped: tuple[str, ...]
 
@@ -330,7 +332,7 @@ def _record_drop(dropped: list[str], path: str, value: object) -> None:
 
 def _decode_project(
     value: object, warnings: list[str], dropped: list[str]
-) -> None:
+) -> Tier:
     path = "ledger.project"
     fields = _fields(
         value,
@@ -353,7 +355,6 @@ def _decode_project(
     )
     for field in (
         "claim_version",
-        "assurance_tier",
         "independence_model",
         "runner_identity",
         "orchestration_identity",
@@ -363,6 +364,13 @@ def _decode_project(
     ):
         if field in fields:
             _string(fields[field], _child(path, field))
+    tier_value = _string(fields["assurance_tier"], f"{path}.assurance_tier")
+    try:
+        tier = Tier(tier_value)
+    except ValueError as error:
+        raise DecodeError(
+            f"{path}.assurance_tier: unknown enum value {tier_value!r}"
+        ) from error
     _strings(fields["schema_dialects"], f"{path}.schema_dialects")
     events = _array(fields["methodology_events"], f"{path}.methodology_events")
     for index, raw in enumerate(events):
@@ -378,8 +386,9 @@ def _decode_project(
         for field in _METHODOLOGY_FIELDS - {"sequence"}:
             _string(event[field], _child(event_path, field))
     for field in sorted(fields):
-        if field in _PROJECT_FIELDS:
+        if field in _PROJECT_FIELDS and field != "assurance_tier":
             _record_drop(dropped, _child(path, field), fields[field])
+    return tier
 
 
 def _decode_unit(
@@ -639,7 +648,7 @@ def read_ledger(data: bytes) -> LedgerDocument:
         _LEDGER_FIELDS,
         warnings,
     )
-    _decode_project(ledger["project"], warnings, dropped)
+    tier = _decode_project(ledger["project"], warnings, dropped)
     units = tuple(
         _decode_unit(raw, index, warnings, dropped)
         for index, raw in enumerate(_array(ledger["units"], "ledger.units"))
@@ -661,6 +670,7 @@ def read_ledger(data: bytes) -> LedgerDocument:
         units=units,
         deviations=deviations,
         releases=releases,
+        tier=tier,
         warnings=tuple(warnings),
         dropped=tuple(dropped),
     )
@@ -805,12 +815,19 @@ def plan_migration(
     doc: LedgerDocument,
     anchor_mode: AnchorMode,
     *,
+    config_tier: Tier | None = None,
     drop_qualified: bool,
 ) -> MigrationPlan:
     """Map D-8 fields into one revision-1 candidate without performing I/O."""
     warnings = list(doc.warnings)
     dropped = list(doc.dropped)
     refusals: list[str] = []
+    if config_tier is not None and config_tier is not doc.tier:
+        refusals.append(
+            "assurance tier authorities disagree: "
+            f"config={config_tier.value!r}, ledger={doc.tier.value!r}; "
+            "candidate refused without selecting either authority"
+        )
     units = tuple(
         Unit(
             unit.name,
@@ -818,6 +835,7 @@ def plan_migration(
             unit.status,
             unit.depends_on,
             unit.acceptance_pack_version,
+            unit.status in {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND},
         )
         for unit in doc.units
     )
@@ -902,6 +920,7 @@ def plan_migration(
         releases=tuple(releases),
         evidence_heads=(),
         anchor_mode=anchor_mode,
+        tier=doc.tier,
         formal_certificate_digest="",
     )
     refusals.extend(
@@ -1093,6 +1112,27 @@ def _read_config_anchor(data: bytes) -> AnchorMode:
         return AnchorMode(mode)
     except ValueError as error:
         raise DecodeError(f"anchor.mode: unknown enum value {mode!r}") from error
+
+
+def _read_config_tier(data: bytes) -> Tier | None:
+    """Decode either known 0.6 config tier spelling, refusing ambiguity."""
+    root = _object(_decode_json(data), "")
+    values: list[str] = []
+    if "tier" in root:
+        values.append(_string(root["tier"], "tier"))
+    if "assurance_tier" in root:
+        values.append(_string(root["assurance_tier"], "assurance_tier"))
+    if not values:
+        return None
+    if len(set(values)) != 1:
+        raise DecodeError(
+            "config tier fields disagree: "
+            f"tier={values[0]!r}, assurance_tier={values[1]!r}"
+        )
+    try:
+        return Tier(values[0])
+    except ValueError as error:
+        raise DecodeError(f"config tier: unknown enum value {values[0]!r}") from error
 
 
 __all__ = [

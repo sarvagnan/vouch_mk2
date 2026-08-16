@@ -284,7 +284,9 @@ entry is mk2's recorded discrepancy for its own semantics.
   `map_generator_identity` (0.6 map machinery), the `retroactive` closure flag (reported).
   A 0.6 `invalidated` release maps as-is (same state).
 - **Project block:** `anchor.mode` comes from `.vouch/config.json` if present (else
-  `none`) → snapshot `anchor_mode` (D-4). Everything else (`claim_version`, tier,
+  `none`) → snapshot `anchor_mode` (D-4). D-12 supersedes this decision for tier:
+  ledger `assurance_tier` maps to snapshot `tier`, and a supplied config tier must
+  agree or migration is refused. Everything else (`claim_version`,
   independence model, runner/orchestration identities, `methodology_events`,
   `next_actions`) is outside the mk2 core snapshot: `next_actions` are re-derived
   (never migrated), the rest are carried in the migration report only.
@@ -349,7 +351,7 @@ entry is mk2's recorded discrepancy for its own semantics.
   CI runs `check --ci` against it **from the vendored lock**, not from `uv`. Every
   mechanical row is then a true statement about this repository (registry completeness,
   certificate recompute, map freshness, empty-but-audited chains and bundles), and the
-  five organizational rows are printed `NOT_CHECKED` verbatim.
+  six organizational rows are printed `NOT_CHECKED` verbatim.
 - The store's `state.json`, objects, `map.json`, and `vouch-context.md` are committed
   and re-verified on every push; the certificate must be re-recorded whenever
   `formal/` changes (the checker version bumps), and map freshness FAILS if the
@@ -418,14 +420,67 @@ entry is mk2's recorded discrepancy for its own semantics.
     no causal claim — the matrix's own words).
   - `high`: additionally every published unit's chain must be anchored (not merely
     present) and a formal certificate must be recorded (`check.tier.high-attestation`).
-  - The remaining matrix rows appear as organizational NOT_CHECKED lines whose detail
-    names the tier and the control ("standard: mutation testing risk-triggered — not
-    mechanically checkable"), so a report never implies a control was checked because a
-    tier was declared.
+  - `gate.dod.tier-evidence` enforces those same IR cells before either publication
+    edge is accepted; `published_once` preserves the obligation after later lifecycle
+    status changes.
+  - Active cells without full coverage appear in `org.tier-controls`: partial rows name
+    their mechanical evidence and exact residual, unchecked rows name the remaining
+    requirement, and waived cells are reported separately as no-obligation clauses.
 - **The tier requirements themselves move from the 0.6 transcription into the mk2 IR** as
   first-class data (`TierRequirement` rows already exist in the schema); the mk2 checks
   read the matrix rather than hardcoding tier→control, so the doc-binding test can bind
-  the matrix to the checks that consume it.
+  the matrix to the checks that consume it. The mechanical row is
+  `harness-recorded-red-green`, whose per-tier cells bind
+  `check.evidence-anchors`, `check.tier.evidence-required`, and (at high)
+  `check.tier.high-attestation`; every other row is surfaced by
+  `org.tier-controls`.
+
+The matrix coverage metadata is bound below. `mechanical=none` means mk2 has no
+mechanical coverage for that cell; `residual=none` means the cell is either fully
+covered or waived.
+
+- typed-contracts/lightweight: level=required | coverage=partial | mechanical=pyrefly strict, import-linter, check.registry-complete | residual=declared classes are human reviewed
+- typed-contracts/standard: level=required | coverage=partial | mechanical=pyrefly strict, import-linter, check.registry-complete | residual=declared classes are human reviewed
+- typed-contracts/high: level=required | coverage=partial | mechanical=pyrefly strict, import-linter, check.registry-complete | residual=declared classes are human reviewed
+- acceptance-frozen-before-implementation/lightweight: level=required | coverage=partial | mechanical=acceptance pack digest bound at freeze | residual=frozen BEFORE implementation is human attested
+- acceptance-frozen-before-implementation/standard: level=required | coverage=partial | mechanical=acceptance pack digest bound at freeze | residual=frozen BEFORE implementation is human attested
+- acceptance-frozen-before-implementation/high: level=required | coverage=partial | mechanical=acceptance pack digest bound at freeze | residual=frozen BEFORE implementation is human attested
+- independence-minimum/lightweight: level=required | coverage=none | mechanical=none | residual=the required independence model is human attested
+- independence-minimum/standard: level=required | coverage=none | mechanical=none | residual=the required independence model is human attested
+- independence-minimum/high: level=required | coverage=none | mechanical=none | residual=the required independence model is human attested
+- harness-recorded-red-green/lightweight: level=required | coverage=full | mechanical=record-evidence ordering and outcome gates | residual=none
+- harness-recorded-red-green/standard: level=required | coverage=full | mechanical=check.evidence-anchors, check.tier.evidence-required | residual=none
+- harness-recorded-red-green/high: level=required | coverage=full | mechanical=check.evidence-anchors, check.tier.evidence-required, check.tier.high-attestation | residual=none
+- real-boundary-tests/lightweight: level=required | coverage=none | mechanical=none | residual=boundary selection and test adequacy are human reviewed
+- real-boundary-tests/standard: level=required | coverage=none | mechanical=none | residual=boundary selection and test adequacy are human reviewed
+- real-boundary-tests/high: level=required | coverage=none | mechanical=none | residual=boundary selection, test adequacy, and fault injection are human reviewed
+- replay-manifests-content-addressing/lightweight: level=required | coverage=none | mechanical=none | residual=replay completeness and content-addressing coverage are human reviewed
+- replay-manifests-content-addressing/standard: level=required | coverage=none | mechanical=none | residual=replay completeness and content-addressing coverage are human reviewed
+- replay-manifests-content-addressing/high: level=required | coverage=none | mechanical=none | residual=replay completeness and content-addressing coverage are human reviewed
+- mutation-testing/lightweight: level=waived | coverage=none | mechanical=none | residual=none
+- mutation-testing/standard: level=risk-triggered | coverage=none | mechanical=none | residual=mutation scope and surviving-mutant adjudication are human reviewed
+- mutation-testing/high: level=required | coverage=none | mechanical=none | residual=mutation scope and surviving-mutant adjudication are human reviewed
+- approval-gated-actions/lightweight: level=waived | coverage=none | mechanical=none | residual=none
+- approval-gated-actions/standard: level=risk-triggered | coverage=none | mechanical=none | residual=approval triggers and authorization policy are human reviewed
+- approval-gated-actions/high: level=required | coverage=none | mechanical=none | residual=approval triggers and authorization policy are human reviewed
+- security-evidence/lightweight: level=waived | coverage=none | mechanical=none | residual=none
+- security-evidence/standard: level=risk-triggered | coverage=none | mechanical=none | residual=security triggers and required blocking outcomes are human reviewed
+- security-evidence/high: level=required | coverage=none | mechanical=none | residual=security evidence and required blocking outcomes are human reviewed
+- system-map-gates/lightweight: level=required | coverage=none | mechanical=none | residual=gate completeness, content adequacy, and verifier ownership are human reviewed
+- system-map-gates/standard: level=required | coverage=none | mechanical=none | residual=gate completeness, content adequacy, and verifier ownership are human reviewed
+- system-map-gates/high: level=required | coverage=none | mechanical=none | residual=gate completeness, content adequacy, and verifier ownership are human reviewed
+- release-map-in-bundle/lightweight: level=required | coverage=none | mechanical=none | residual=release-map bundle inclusion is human reviewed
+- release-map-in-bundle/standard: level=required | coverage=none | mechanical=none | residual=release-map bundle inclusion is human reviewed
+- release-map-in-bundle/high: level=required | coverage=none | mechanical=none | residual=release-map bundle inclusion is human reviewed
+- map-delivered-externally/lightweight: level=required | coverage=none | mechanical=none | residual=external delivery is human attested
+- map-delivered-externally/standard: level=required | coverage=none | mechanical=none | residual=external delivery is human attested
+- map-delivered-externally/high: level=required | coverage=none | mechanical=none | residual=external delivery is human attested
+- archetype-q-machinery/lightweight: level=required | coverage=none | mechanical=none | residual=sealed procedure, exposure controls, and held-out variants are human reviewed
+- archetype-q-machinery/standard: level=required | coverage=none | mechanical=none | residual=sealed procedure, exposure controls, and held-out variants are human reviewed
+- archetype-q-machinery/high: level=required | coverage=none | mechanical=none | residual=sealed procedure, exposure controls, and held-out variants are human reviewed
+- **Formal binding.** M11 `M11.tier-never-lowers-after-commitment` checks the runtime
+  relation, and private witness W11 `W11.tier-lowering` forges exactly the forbidden
+  lowering edge.
 - **Rejected:** a tier in `.vouch/config.json` (0.6's shape — the D045 defect itself);
   and enforcing the full 13-row matrix mechanically (would require faking checks mk2
   cannot perform — the vacuous-coverage class).

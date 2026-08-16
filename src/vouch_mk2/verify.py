@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import assert_never
 
 from vouch_mk2.checks import CheckResult, compose
+from vouch_mk2.checks.tier import tier_check_applies
 from vouch_mk2.core import (
     Accepted,
     AnchorMode,
@@ -199,6 +200,15 @@ def _check_evidence_anchors(
 ) -> CheckResult:
     match snapshot.anchor_mode:
         case AnchorMode.NONE:
+            if tier_check_applies(snapshot, mk2.CHECK_EVIDENCE_ANCHORS):
+                return CheckResult(
+                    check_id=mk2.CHECK_EVIDENCE_ANCHORS,
+                    verdict=Verdict.FAIL,
+                    detail=(
+                        f"{snapshot.tier.value} tier requires evidence anchoring; "
+                        "anchor mode is none"
+                    ),
+                )
             return CheckResult(
                 check_id=mk2.CHECK_EVIDENCE_ANCHORS,
                 verdict=Verdict.NOT_APPLICABLE,
@@ -415,6 +425,34 @@ def _check_map_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
     )
 
 
+def _check_context_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
+    committed = store.read_generated("vouch-context.md")
+    if committed is None:
+        if store.read_generated("map.json") is None:
+            return CheckResult(mk2.CHECK_CONTEXT_FRESHNESS, Verdict.PASS, "")
+        return CheckResult(
+            mk2.CHECK_CONTEXT_FRESHNESS,
+            Verdict.FAIL,
+            "vouch-context.md is absent: regenerate with `vouch-mk2 generate`",
+        )
+    expected = agent_context(snapshot).encode("utf-8")
+    if committed == expected:
+        return CheckResult(mk2.CHECK_CONTEXT_FRESHNESS, Verdict.PASS, "")
+    try:
+        committed.decode("utf-8")
+    except UnicodeDecodeError as error:
+        return CheckResult(
+            mk2.CHECK_CONTEXT_FRESHNESS,
+            Verdict.FAIL,
+            f"vouch-context.md is undecodable: {error}",
+        )
+    return CheckResult(
+        mk2.CHECK_CONTEXT_FRESHNESS,
+        Verdict.FAIL,
+        "vouch-context.md is stale: regenerate with `vouch-mk2 generate`",
+    )
+
+
 def run_artifact_checks(store: Store, snapshot: Snapshot) -> tuple[CheckResult, ...]:
     """Run all IR-declared artifact checks, reusing one parent walk per head."""
     walks = tuple(_walk_chain(store, head) for head in snapshot.evidence_heads)
@@ -426,6 +464,7 @@ def run_artifact_checks(store: Store, snapshot: Snapshot) -> tuple[CheckResult, 
                 _check_bundle_inventories(store, snapshot),
                 _check_formal_certificate(store, snapshot),
                 _check_map_freshness(store, snapshot),
+                _check_context_freshness(store, snapshot),
             ),
             key=lambda result: result.check_id,
         )

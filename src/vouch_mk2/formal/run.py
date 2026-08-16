@@ -44,7 +44,22 @@ class FormalRun:
 def _run_universe(universe: Universe) -> UniverseRun:
     relation = explore(universe)
     invariant_verdicts: list[InvariantVerdict] = []
-    for invariant in INVARIANTS:
+    selected = (
+        INVARIANTS
+        if not universe.invariant_ids
+        else tuple(
+            invariant
+            for invariant in INVARIANTS
+            if invariant.invariant_id in universe.invariant_ids
+        )
+    )
+    if universe.invariant_ids and {
+        invariant.invariant_id for invariant in selected
+    } != set(universe.invariant_ids):
+        raise LookupError(
+            f"universe {universe.name!r} names unknown invariant ids"
+        )
+    for invariant in selected:
         violations = invariant.check(relation)
         invariant_verdicts.append(
             InvariantVerdict(

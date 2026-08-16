@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CHECKER_VERSION = "formal-checker-v2"
+CHECKER_VERSION = "formal-checker-v3"
 
 type CertifiedUniverse = tuple[str, str, int, int]
 type CertifiedInvariant = tuple[str, str, bool]

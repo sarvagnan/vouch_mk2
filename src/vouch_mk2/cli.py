@@ -19,6 +19,7 @@ from vouch_mk2.lock import build_lock, lock_digest, running_lock_bytes
 from vouch_mk2.migrate import (
     MigrationRefused,
     _read_config_anchor,
+    _read_config_tier,
     apply_migration,
     plan_migration,
     read_ledger,
@@ -166,7 +167,7 @@ def _parser() -> argparse.ArgumentParser:
     migrate.add_argument(
         "--config",
         default=None,
-        help="optional 0.6 config.json carrying anchor.mode",
+        help="optional 0.6 config.json carrying anchor.mode and its legacy tier",
     )
     migrate.add_argument(
         "--drop-qualified",
@@ -361,18 +362,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             if ledger_data is None:
                 raise StoreError(f"{parsed.ledger}: 0.6 ledger does not exist")
             document = read_ledger(ledger_data)
-            if parsed.anchor_mode is not None:
-                anchor_mode = AnchorMode(parsed.anchor_mode)
-            elif parsed.config is not None:
+            config_anchor: AnchorMode | None = None
+            config_tier = None
+            if parsed.config is not None:
                 config_data = read_regular_nofollow(parsed.config, "0.6 config")
                 if config_data is None:
                     raise StoreError(f"{parsed.config}: 0.6 config does not exist")
-                anchor_mode = _read_config_anchor(config_data)
+                config_anchor = _read_config_anchor(config_data)
+                config_tier = _read_config_tier(config_data)
+            if parsed.anchor_mode is not None:
+                anchor_mode = AnchorMode(parsed.anchor_mode)
+            elif config_anchor is not None:
+                anchor_mode = config_anchor
             else:
                 anchor_mode = AnchorMode.NONE
             plan = plan_migration(
                 document,
                 anchor_mode,
+                config_tier=config_tier,
                 drop_qualified=parsed.drop_qualified,
             )
             validation = validate_candidate(plan.candidate)
@@ -423,11 +430,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             with Store.open(parsed.root) as store:
                 data = emit_system_map(store)
+                emit_context(store, None)
             _map, source_digest = decode_system_map(data)
         except StoreError as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)
             return 2
-        print(f"map.json written (source state {source_digest})")
+        print(
+            f"map.json and vouch-context.md written "
+            f"(source state {source_digest})"
+        )
         return 0
 
     if parsed.command == "emit-context":
@@ -464,6 +475,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"evidence_chains: {facts.evidence_chains}")
         print(f"anchored_current: {facts.anchored_current}")
         print(f"anchor_mode: {facts.anchor_mode}")
+        print(f"tier: {facts.tier}")
         recorded = "true" if facts.formal_certificate_recorded else "false"
         print(f"formal_certificate_recorded: {recorded}")
         print(f"next_action_count: {facts.next_action_count}")

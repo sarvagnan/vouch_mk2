@@ -94,6 +94,7 @@ def _populated_snapshot() -> Snapshot:
 def _baseline_document() -> dict[str, object]:
     return {
         "anchor_mode": "none",
+        "tier": "lightweight",
         "evidence_heads": [],
         "formal_certificate_digest": "",
         "revision": 1,
@@ -104,6 +105,7 @@ def _baseline_document() -> dict[str, object]:
                 "status": "specified",
                 "depends_on": [],
                 "acceptance_pack_version": "",
+                "published_once": False,
             }
         ],
         "deviations": [
@@ -151,6 +153,19 @@ def _json_bytes(document: dict[str, object]) -> bytes:
 def test_snapshot_round_trip_identity() -> None:
     snapshot = _populated_snapshot()
     assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
+    _regression_unit_published_once_is_a_strict_required_boolean()
+
+
+def _regression_unit_published_once_is_a_strict_required_boolean() -> None:
+    document = _baseline_document()
+    units = cast(list[object], document["units"])
+    unit = cast(dict[str, object], units[0])
+    del unit["published_once"]
+    with pytest.raises(DecodeError, match=r"units\[0\]\.published_once: missing"):
+        decode_snapshot(_json_bytes(document))
+    unit["published_once"] = "false"
+    with pytest.raises(DecodeError, match=r"published_once: expected boolean"):
+        decode_snapshot(_json_bytes(document))
 
 
 def test_snapshot_encoding_is_byte_stable_and_canonical() -> None:
@@ -312,20 +327,20 @@ def test_negative_revision_names_revision_path() -> None:
 
 
 def test_duplicate_json_keys_are_refused_at_every_level() -> None:
-    top = b'{"anchor_mode":"none","evidence_heads":[],"formal_certificate_digest":"","revision":0,"revision":9,"units":[],"deviations":[],"releases":[]}'
+    top = b'{"anchor_mode":"none","tier":"lightweight","evidence_heads":[],"formal_certificate_digest":"","revision":0,"revision":9,"units":[],"deviations":[],"releases":[]}'
     with pytest.raises(DecodeError, match="duplicate object key 'revision'"):
         decode_snapshot(top)
     nested = (
-        b'{"anchor_mode":"none","evidence_heads":[],"formal_certificate_digest":"","revision":0,"deviations":[],"releases":[],"units":[{"name":"a","name":"b",'
+        b'{"anchor_mode":"none","tier":"lightweight","evidence_heads":[],"formal_certificate_digest":"","revision":0,"deviations":[],"releases":[],"units":[{"name":"a","name":"b",'
         b'"version":"1","status":"specified","depends_on":[],'
-        b'"acceptance_pack_version":""}]}'
+        b'"acceptance_pack_version":"","published_once":false}]}'
     )
     with pytest.raises(DecodeError, match="duplicate object key 'name'"):
         decode_snapshot(nested)
 
 
 def test_non_utf8_encodings_are_refused() -> None:
-    document = '{"anchor_mode":"none","evidence_heads":[],"formal_certificate_digest":"","revision":3,"units":[],"deviations":[],"releases":[]}'
+    document = '{"anchor_mode":"none","tier":"lightweight","evidence_heads":[],"formal_certificate_digest":"","revision":3,"units":[],"deviations":[],"releases":[]}'
     for encoding in ("utf-16", "utf-32"):
         with pytest.raises(DecodeError, match="must be UTF-8"):
             decode_snapshot(document.encode(encoding))
@@ -386,6 +401,11 @@ def test_unknown_anchor_mode_is_refused() -> None:
     document["anchor_mode"] = "command"
     with pytest.raises(DecodeError, match="anchor_mode"):
         decode_snapshot(_json_bytes(document))
+
+    tierless = _baseline_document()
+    del tierless["tier"]
+    with pytest.raises(DecodeError, match="tier"):
+        decode_snapshot(_json_bytes(tierless))
 
 
 @pytest.mark.parametrize(
@@ -536,3 +556,23 @@ def test_bundle_inventory_strict_fields_and_digest() -> None:
     entries[0]["extra"] = True
     with pytest.raises(DecodeError, match="extra"):
         decode_bundle_inventory(_json_bytes(document))
+
+
+def test_system_map_refuses_two_contradictory_tiers_and_format_one() -> None:
+    # Review F3: map.tier and map.status_facts.tier are one fact; format 1 is gone.
+    import json
+
+    from vouch_mk2.core.model import Snapshot, Tier
+    from vouch_mk2.projections import system_map
+    from vouch_mk2.store import decode_system_map, encode_system_map
+
+    encoded = encode_system_map(system_map(Snapshot(revision=1, tier=Tier.STANDARD)), "a" * 64)
+    document = json.loads(encoded)
+    assert document["map_format"] == 2
+    document["map"]["status_facts"]["tier"] = "high"
+    with pytest.raises(DecodeError, match="status_facts.tier"):
+        decode_system_map(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+    document = json.loads(encoded)
+    document["map_format"] = 1
+    with pytest.raises(DecodeError, match="format 1"):
+        decode_system_map(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")

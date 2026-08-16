@@ -80,6 +80,7 @@ ARTIFACT_RESULTS = tuple(
         mk2.CHECK_BUNDLE_INVENTORIES,
         mk2.CHECK_FORMAL_CERTIFICATE,
         mk2.CHECK_MAP_FRESHNESS,
+        mk2.CHECK_CONTEXT_FRESHNESS,
     )
 )
 
@@ -398,7 +399,7 @@ def test_organizational_checks_are_always_not_checked_with_detail() -> None:
     )
     for snapshot in snapshots:
         report = run_checks(snapshot)
-        assert len(report.organizational) == 5
+        assert len(report.organizational) == 6
         assert all(
             found.verdict is Verdict.NOT_CHECKED and found.detail
             for found in report.organizational
@@ -593,3 +594,37 @@ def test_duplicate_artifact_results_fail_completeness() -> None:
     meta = result(report, mk2.CHECK_REGISTRY_COMPLETE)
     assert meta.verdict is Verdict.FAIL
     assert "duplicated" in meta.detail
+
+
+def test_tier_evidence_obligation_follows_a_published_unit_through_status_changes() -> None:
+    # Review F1(b): the obligation is provenance-scoped (published_once), so an
+    # accepted OpenDeviation (-> blocked) or Supersede cannot make it disappear.
+    from vouch_mk2.core import Accepted, apply, decide
+    from vouch_mk2.core.commands import OpenDeviation, Supersede
+    from vouch_mk2.core.model import DeviationType, Snapshot, Tier, Unit, UnitRef, UnitStatus
+    from vouch_mk2.ir import mk2
+    from vouch_mk2.ir.schema import Verdict
+
+    def verdict(snapshot: Snapshot) -> Verdict:
+        report = run_checks(snapshot)
+        return next(r for r in report.mechanical if r.check_id == mk2.CHECK_TIER_EVIDENCE_REQUIRED).verdict
+
+    published = Snapshot(
+        revision=1,
+        tier=Tier.STANDARD,
+        units=(Unit("u", "v1", UnitStatus.PUBLISHED, acceptance_pack_version="p", published_once=True),),
+    )
+    assert verdict(published) is Verdict.FAIL
+    for command in (
+        OpenDeviation("DEV-x", DeviationType.PACK_DEFECT, UnitRef("u", "v1")),
+        Supersede("u"),
+    ):
+        decision = decide(published, command)
+        assert isinstance(decision, Accepted), command
+        after = apply(published, decision.events)
+        unit = after.unit("u")
+        assert unit is not None and unit.status is not UnitStatus.PUBLISHED
+        assert verdict(after) is Verdict.FAIL, command
+    # And a unit that was never published is not caught by the widened scope.
+    never = Snapshot(revision=1, tier=Tier.STANDARD, units=(Unit("u", "v1", UnitStatus.BLOCKED, acceptance_pack_version="p"),))
+    assert verdict(never) is Verdict.PASS

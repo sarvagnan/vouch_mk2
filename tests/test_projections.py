@@ -203,6 +203,42 @@ def test_system_map_complete_round_trip() -> None:
     projected = system_map(snapshot)
     data = encode_system_map(projected, "a" * 64)
     assert decode_system_map(data) == (projected, "a" * 64)
+    _regression_system_map_v2_refuses_v1_and_contradictory_tiers()
+    _regression_system_map_projects_publication_provenance()
+
+
+def _regression_system_map_v2_refuses_v1_and_contradictory_tiers() -> None:
+    data = encode_system_map(system_map(_populated_snapshot()), "a" * 64)
+    document = json.loads(data)
+    document["map_format"] = 1
+    legacy = json.dumps(
+        document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    with pytest.raises(DecodeError, match="format 1 is no longer supported"):
+        decode_system_map(legacy)
+
+    document["map_format"] = 2
+    document["map"]["status_facts"]["tier"] = "high"
+    contradictory = json.dumps(
+        document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    with pytest.raises(DecodeError, match=r"status_facts\.tier: must equal map\.tier"):
+        decode_system_map(contradictory)
+
+
+def _regression_system_map_projects_publication_provenance() -> None:
+    snapshot = Snapshot(
+        units=(
+            Unit(
+                "u",
+                "v1",
+                UnitStatus.SUPERSEDED,
+                acceptance_pack_version="p1",
+                published_once=True,
+            ),
+        )
+    )
+    assert system_map(snapshot).units[0].published_once
 
 
 def test_system_map_producer_edges_reverse_three_unit_chain() -> None:
@@ -267,6 +303,36 @@ def test_done_with_unsatisfied_dependency_has_no_publish() -> None:
         )
     )
     assert mk2.CMD_PUBLISH not in _commands(snapshot, "unit", "u")
+    _regression_publish_next_action_obeys_tier_evidence_gate()
+
+
+def _regression_publish_next_action_obeys_tier_evidence_gate() -> None:
+    from vouch_mk2.core import Tier
+
+    unit = Unit(
+        "u", "v1", UnitStatus.DONE_PENDING_ACCEPTANCE, acceptance_pack_version="p1"
+    )
+    standard = Snapshot(tier=Tier.STANDARD, units=(unit,))
+    assert mk2.CMD_PUBLISH not in _commands(standard, "unit", "u")
+    standard_ready = Snapshot(
+        tier=Tier.STANDARD,
+        units=(unit,),
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+    )
+    assert mk2.CMD_PUBLISH in _commands(standard_ready, "unit", "u")
+    high_unready = Snapshot(
+        tier=Tier.HIGH,
+        units=(unit,),
+        evidence_heads=standard_ready.evidence_heads,
+    )
+    assert mk2.CMD_PUBLISH not in _commands(high_unready, "unit", "u")
+    high_ready = Snapshot(
+        tier=Tier.HIGH,
+        units=(unit,),
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "a" * 64),),
+        formal_certificate_digest="f" * 64,
+    )
+    assert mk2.CMD_PUBLISH in _commands(high_ready, "unit", "u")
 
 
 def test_blocked_with_open_deviation_has_adjudications_but_no_recovery() -> None:
@@ -478,6 +544,9 @@ def test_map_freshness_passes_then_detects_stale_and_undecodable(
         )
         assert corrupt.verdict is Verdict.FAIL
         assert "undecodable" in corrupt.detail
+    _regression_context_freshness_requires_context_with_map_and_detects_drift(
+        tmp_path
+    )
 
 
 def test_absent_map_freshness_is_pass(tmp_path: Path) -> None:
@@ -487,6 +556,80 @@ def test_absent_map_freshness_is_pass(tmp_path: Path) -> None:
             _artifact_result(store, snapshot, mk2.CHECK_MAP_FRESHNESS)
             is Verdict.PASS
         )
+
+
+def _regression_context_freshness_requires_context_with_map_and_detects_drift(
+    tmp_path: Path,
+) -> None:
+    with Store.init(str(tmp_path / "context-store")) as store:
+        snapshot = store.read_snapshot()
+        assert (
+            _artifact_result(store, snapshot, mk2.CHECK_CONTEXT_FRESHNESS)
+            is Verdict.PASS
+        )
+        emit_system_map(store)
+        absent = next(
+            result
+            for result in run_artifact_checks(store, snapshot)
+            if result.check_id == mk2.CHECK_CONTEXT_FRESHNESS
+        )
+        assert absent.verdict is Verdict.FAIL
+        assert "absent" in absent.detail
+
+        emit_context(store, None)
+        assert (
+            _artifact_result(store, snapshot, mk2.CHECK_CONTEXT_FRESHNESS)
+            is Verdict.PASS
+        )
+        store.commit(Snapshot(revision=1))
+        stale = next(
+            result
+            for result in run_artifact_checks(store, store.read_snapshot())
+            if result.check_id == mk2.CHECK_CONTEXT_FRESHNESS
+        )
+        assert stale.verdict is Verdict.FAIL
+        assert "stale" in stale.detail
+
+        store.write_generated("vouch-context.md", b"\xff")
+        corrupt = next(
+            result
+            for result in run_artifact_checks(store, store.read_snapshot())
+            if result.check_id == mk2.CHECK_CONTEXT_FRESHNESS
+        )
+        assert corrupt.verdict is Verdict.FAIL
+        assert "undecodable" in corrupt.detail
+
+
+def _regression_tier_control_coverage_reports_partial_none_full_and_waived() -> None:
+    from vouch_mk2.checks.tier import check_tier_controls
+    from vouch_mk2.core import Tier
+    from vouch_mk2.ir.schema import Coverage, RequirementLevel
+
+    for requirement in mk2.MK2.tier_requirements:
+        for tier in Tier:
+            cell = requirement.cell(tier)
+            if requirement.control_id in {
+                "typed-contracts",
+                "acceptance-frozen-before-implementation",
+            }:
+                assert cell.coverage is Coverage.PARTIAL
+                assert cell.residual
+            elif requirement.control_id == mk2.TIER_EVIDENCE_CONTROL:
+                assert cell.coverage is Coverage.FULL
+                assert not cell.residual
+            else:
+                assert cell.coverage is Coverage.NONE
+                if cell.level is not RequirementLevel.WAIVED:
+                    assert cell.residual
+
+    light = check_tier_controls(Snapshot(tier=Tier.LIGHTWEIGHT)).detail
+    assert "PARTIALLY CHECKED (mechanical: pyrefly strict, import-linter" in light
+    assert "residual: declared classes are human reviewed" in light
+    assert "waived at lightweight: Mutation testing" in light
+    assert "Mutation testing [mutation-testing] is waived — NOT CHECKED" not in light
+    standard = check_tier_controls(Snapshot(tier=Tier.STANDARD)).detail
+    assert "trigger evaluation NOT CHECKED" in standard
+    assert "Harness-recorded red" not in standard
 
 
 def test_generated_store_allowlist_symlink_refusal_and_temp_cleanup(
@@ -520,6 +663,7 @@ def test_agent_context_is_deterministic_and_sources_all_org_details() -> None:
     ):
         result = check(snapshot)
         assert f"- {result.check_id}: {result.detail}" in first
+    _regression_tier_control_coverage_reports_partial_none_full_and_waived()
 
 
 def test_emit_context_absent_equal_and_different_targets_use_sidecar(

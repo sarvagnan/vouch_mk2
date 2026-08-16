@@ -30,6 +30,7 @@ from vouch_mk2.core.model import (
     ReleaseArchetype,
     ReleaseState,
     Snapshot,
+    Tier,
     Unit,
     UnitRef,
     UnitStatus,
@@ -62,6 +63,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
     """Encode every Snapshot field as stable canonical JSON plus one newline."""
     document = {
         "anchor_mode": snapshot.anchor_mode.value,
+        "tier": snapshot.tier.value,
         "formal_certificate_digest": snapshot.formal_certificate_digest,
         "deviations": [
             {
@@ -140,6 +142,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
                 "acceptance_pack_version": unit.acceptance_pack_version,
                 "depends_on": list(unit.depends_on),
                 "name": unit.name,
+                "published_once": unit.published_once,
                 "status": unit.status.value,
                 "version": unit.version,
             }
@@ -258,10 +261,11 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "source_state_digest: expected 64 lowercase hexadecimal characters"
         )
     document = {
-        "map_format": 1,
+        "map_format": 2,
         "source_state_digest": source_state_digest,
         "map": {
             "anchor_mode": map.anchor_mode,
+            "tier": map.tier,
             "deviations": [
                 {
                     "amendment_version": deviation.amendment_version,
@@ -315,6 +319,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "revision": map.revision,
             "status_facts": {
                 "anchor_mode": map.status_facts.anchor_mode,
+                "tier": map.status_facts.tier,
                 "anchored_current": map.status_facts.anchored_current,
                 "deviation_counts": _count_objects(
                     map.status_facts.deviation_counts
@@ -333,6 +338,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
                     "blocking_deviation_ids": list(unit.blocking_deviation_ids),
                     "depends_on": list(unit.depends_on),
                     "name": unit.name,
+                    "published_once": unit.published_once,
                     "status": unit.status,
                     "version": unit.version,
                 }
@@ -417,7 +423,14 @@ def _enum_value[
 
 
 _UNIT_FIELDS = frozenset(
-    {"name", "version", "status", "depends_on", "acceptance_pack_version"}
+    {
+        "name",
+        "version",
+        "status",
+        "depends_on",
+        "acceptance_pack_version",
+        "published_once",
+    }
 )
 _UNIT_REF_FIELDS = frozenset({"name", "version"})
 _DEVIATION_FIELDS = frozenset(
@@ -484,6 +497,7 @@ _SNAPSHOT_FIELDS = frozenset(
         "releases",
         "evidence_heads",
         "anchor_mode",
+        "tier",
         "formal_certificate_digest",
     }
 )
@@ -499,6 +513,7 @@ _SYSTEM_MAP_FIELDS = frozenset(
         "releases",
         "evidence_heads",
         "anchor_mode",
+        "tier",
         "formal_certificate_digest",
         "next_actions",
         "status_facts",
@@ -511,6 +526,7 @@ _SYSTEM_MAP_UNIT_FIELDS = frozenset(
         "status",
         "depends_on",
         "acceptance_pack_version",
+        "published_once",
         "blocking_deviation_ids",
     }
 )
@@ -525,6 +541,7 @@ _STATUS_FACTS_FIELDS = frozenset(
         "evidence_chains",
         "anchored_current",
         "anchor_mode",
+        "tier",
         "formal_certificate_recorded",
         "next_action_count",
     }
@@ -557,6 +574,9 @@ def _decode_unit(value: object, path: str) -> Unit:
         acceptance_pack_version=_string(
             obj["acceptance_pack_version"],
             _child(path, "acceptance_pack_version"),
+        ),
+        published_once=_boolean(
+            obj["published_once"], _child(path, "published_once")
         ),
     )
 
@@ -949,6 +969,7 @@ def decode_snapshot(data: bytes) -> Snapshot:
         releases=releases,
         evidence_heads=evidence_heads,
         anchor_mode=_enum_value(obj["anchor_mode"], "anchor_mode", AnchorMode),
+        tier=_enum_value(obj["tier"], "tier", Tier),
         formal_certificate_digest=_digest(
             obj["formal_certificate_digest"],
             "formal_certificate_digest",
@@ -1003,6 +1024,7 @@ def _decode_system_map_unit(value: object, path: str) -> SystemMapUnit:
         acceptance_pack_version=_string(
             obj["acceptance_pack_version"], f"{path}.acceptance_pack_version"
         ),
+        published_once=_boolean(obj["published_once"], f"{path}.published_once"),
         blocking_deviation_ids=_strings(
             obj["blocking_deviation_ids"], f"{path}.blocking_deviation_ids"
         ),
@@ -1093,6 +1115,7 @@ def _decode_status_facts(value: object, path: str) -> StatusFacts:
         anchor_mode=_enum_value(
             obj["anchor_mode"], f"{path}.anchor_mode", AnchorMode
         ).value,
+        tier=_enum_value(obj["tier"], f"{path}.tier", Tier).value,
         formal_certificate_recorded=_boolean(
             obj["formal_certificate_recorded"],
             f"{path}.formal_certificate_recorded",
@@ -1137,8 +1160,8 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         _decode_json(data, "system map"), "", _SYSTEM_MAP_DOCUMENT_FIELDS
     )
     map_format = _integer(document["map_format"], "map_format")
-    if map_format != 1:
-        raise DecodeError("map_format: expected 1")
+    if map_format != 2:
+        raise DecodeError("map_format: expected 2; format 1 is no longer supported")
     source_state_digest = _digest(
         document["source_state_digest"], "source_state_digest"
     )
@@ -1210,6 +1233,7 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         anchor_mode=_enum_value(
             obj["anchor_mode"], "map.anchor_mode", AnchorMode
         ).value,
+        tier=_enum_value(obj["tier"], "map.tier", Tier).value,
         formal_certificate_digest=_digest(
             obj["formal_certificate_digest"],
             "map.formal_certificate_digest",
@@ -1218,6 +1242,11 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         next_actions=actions,
         status_facts=_decode_status_facts(obj["status_facts"], "map.status_facts"),
     )
+    if map.status_facts.tier != map.tier:
+        raise DecodeError(
+            "map.status_facts.tier: must equal map.tier "
+            f"({map.status_facts.tier!r} != {map.tier!r})"
+        )
     if encode_system_map(map, source_state_digest) != data:
         raise DecodeError("$: non-canonical system map encoding")
     return map, source_state_digest

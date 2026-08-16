@@ -23,6 +23,7 @@ class SystemMapUnit:
     status: str
     depends_on: tuple[str, ...]
     acceptance_pack_version: str
+    published_once: bool
     blocking_deviation_ids: tuple[str, ...]
 
 
@@ -57,6 +58,7 @@ class SystemMap:
     releases: tuple[SystemMapRelease, ...]
     evidence_heads: tuple[EvidenceHead, ...]
     anchor_mode: str
+    tier: str
     formal_certificate_digest: str
     next_actions: tuple[NextAction, ...]
     status_facts: StatusFacts
@@ -73,6 +75,7 @@ def system_map(snapshot: Snapshot) -> SystemMap:
                     status=unit.status.value,
                     depends_on=unit.depends_on,
                     acceptance_pack_version=unit.acceptance_pack_version,
+                    published_once=unit.published_once,
                     blocking_deviation_ids=tuple(
                         sorted(
                             deviation.deviation_id
@@ -133,6 +136,7 @@ def system_map(snapshot: Snapshot) -> SystemMap:
             sorted(snapshot.evidence_heads, key=lambda head: head.unit_name)
         ),
         anchor_mode=snapshot.anchor_mode.value,
+        tier=snapshot.tier.value,
         formal_certificate_digest=snapshot.formal_certificate_digest,
         next_actions=actions,
         status_facts=status_facts(snapshot, actions),

@@ -18,7 +18,7 @@ happens into the dogfood store — which the anchoring machinery makes tamper-ev
 | Implementation | Codex implements against a frozen pack it cannot edit | implementer |
 | Green evidence | the same tests pass; recorded live | harness at completion |
 | Deviation | a review finding that contradicts the PACK (not merely an implementation bug), adjudicated amend/reject by the owner; unit blocked meanwhile | reviewer opens, owner adjudicates |
-| Publish | the real DoD gates: pack recorded, deps satisfied, no blockers, red-before-green chain | `decide()` |
+| Publish | the real DoD gates: pack recorded, deps satisfied, no blockers, and tier evidence (`gate.dod.tier-evidence`) | `decide()` |
 | Release | a tagged mk2 version with launch criteria (gates, certificate re-recorded, walkthrough) | operator |
 
 ## Independence model

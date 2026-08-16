@@ -15,6 +15,7 @@ from vouch_mk2.core.model import (
     DeviationType,
     EvidenceEvent,
     LaunchCriteria,
+    Tier,
     UnitRef,
 )
 from vouch_mk2.ir import mk2
@@ -148,6 +149,12 @@ class SetAnchorMode:
 
 
 @dataclass(frozen=True, slots=True)
+class SetTier:
+    ir_command: ClassVar[str] = mk2.CMD_SET_TIER
+    tier: Tier
+
+
+@dataclass(frozen=True, slots=True)
 class RecordFormalCertificate:
     ir_command: ClassVar[str] = mk2.CMD_RECORD_FORMAL_CERTIFICATE
     certificate_digest: str
@@ -228,6 +235,7 @@ type Command = (
     | RecordEvidence
     | AdvanceAnchor
     | SetAnchorMode
+    | SetTier
     | RecordFormalCertificate
     | ReleaseTransitionCommand
 )

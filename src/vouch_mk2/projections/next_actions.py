@@ -82,10 +82,28 @@ def _dependencies_satisfied(snapshot: Snapshot, unit: Unit) -> bool:
 
 
 def _publication_gates_pass(snapshot: Snapshot, unit: Unit) -> bool:
+    evidence = next(
+        requirement
+        for requirement in mk2.MK2.tier_requirements
+        if requirement.control_id == mk2.TIER_EVIDENCE_CONTROL
+    ).cell(snapshot.tier)
+    head = snapshot.evidence_head(unit.name)
+    tier_evidence_passes = (
+        mk2.CHECK_TIER_EVIDENCE_REQUIRED not in evidence.mechanical_checks
+        or head is not None
+    ) and (
+        mk2.CHECK_TIER_HIGH_ATTESTATION not in evidence.mechanical_checks
+        or (
+            head is not None
+            and head.anchored != "GENESIS"
+            and bool(snapshot.formal_certificate_digest)
+        )
+    )
     return (
         bool(unit.acceptance_pack_version)
         and _dependencies_satisfied(snapshot, unit)
         and not blocking_deviations(snapshot, unit)
+        and tier_evidence_passes
     )
 
 

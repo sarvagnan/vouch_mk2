@@ -8,7 +8,7 @@ import pytest
 from pytest import CaptureFixture
 
 from vouch_mk2.cli import main
-from vouch_mk2.core import AnchorMode, UnitRef, UnitStatus
+from vouch_mk2.core import AnchorMode, Tier, UnitRef, UnitStatus
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.migrate import (
@@ -65,6 +65,12 @@ def test_fixture_maps_all_units_and_requires_explicit_qualified_drop() -> None:
 
     dropped = _fixture_plan()
     assert len(dropped.candidate.units) == 9
+    assert dropped.candidate.tier is Tier.HIGH
+    assert all(
+        unit.published_once
+        == (unit.status in {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND})
+        for unit in dropped.candidate.units
+    )
     assert dropped.refusals == ()
     assert {release.release_id for release in dropped.candidate.releases} == {
         "risk-resilient-2026.2"
@@ -184,10 +190,17 @@ def test_fixture_warning_and_validation_inventory_is_honest() -> None:
         for result in validate_candidate(plan.candidate)
         if result.verdict is Verdict.FAIL
     )
-    assert tuple(result.check_id for result in failures) == (
+    assert {result.check_id for result in failures} == {
         mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE,
+        mk2.CHECK_TIER_EVIDENCE_REQUIRED,
+        mk2.CHECK_TIER_HIGH_ATTESTATION,
+    }
+    amended = next(
+        result
+        for result in failures
+        if result.check_id == mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE
     )
-    assert "legacy-risk-score" in failures[0].detail
+    assert "legacy-risk-score" in amended.detail
     report = render_diff(plan, validate_candidate(plan.candidate))
     from vouch_mk2.projections import escape_markdown
 
@@ -256,7 +269,12 @@ def test_approve_commits_revision_one_reports_predicted_fail_and_refuses_rerun(
         for line in check_output.splitlines()
         if line.startswith("FAIL")
     }
-    assert fail_ids == {mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE}
+    assert fail_ids == {
+        mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE,
+        mk2.CHECK_EVIDENCE_ANCHORS,
+        mk2.CHECK_TIER_EVIDENCE_REQUIRED,
+        mk2.CHECK_TIER_HIGH_ATTESTATION,
+    }
     assert check_output.rstrip().endswith("composed: FAIL")
 
     before = report.read_bytes()
@@ -316,6 +334,52 @@ def test_cli_anchor_mode_overrides_config(
     capsys.readouterr()
     with Store.open(str(configured_target / ".vouch")) as store:
         assert store.read_snapshot().anchor_mode is AnchorMode.CI
+
+    disagreeing = tmp_path / "disagreeing.json"
+    disagreeing.write_text('{"anchor":{"mode":"ci"},"tier":"lightweight"}')
+    assert (
+        main(
+            [
+                "migrate",
+                "--ledger",
+                str(FIXTURE),
+                "--config",
+                str(disagreeing),
+                "--drop-qualified",
+            ]
+        )
+        == 1
+    )
+    assert "authorities disagree" in capsys.readouterr().out
+    _regression_config_tier_present_null_or_wrong_type_is_refused(
+        tmp_path, capsys
+    )
+
+
+def _regression_config_tier_present_null_or_wrong_type_is_refused(
+    tmp_path: Path,
+    capsys: CaptureFixture[str],
+) -> None:
+    for field in ("tier", "assurance_tier"):
+        for label, value in (("null", None), ("wrong-type", 7)):
+            config = tmp_path / f"{field}-{label}.json"
+            config.write_text(json.dumps({field: value}), encoding="utf-8")
+            assert (
+                main(
+                    [
+                        "migrate",
+                        "--ledger",
+                        str(FIXTURE),
+                        "--config",
+                        str(config),
+                        "--drop-qualified",
+                    ]
+                )
+                == 1
+            )
+            captured = capsys.readouterr()
+            assert field in captured.err
+            assert "expected string" in captured.err
 
 
 def test_empty_string_criteria_are_refused(tmp_path: Path) -> None:

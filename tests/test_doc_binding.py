@@ -8,6 +8,7 @@ from vouch_mk2.cli import _parser
 from vouch_mk2.formal.invariants import INVARIANTS
 from vouch_mk2.formal.witnesses import WITNESSES
 from vouch_mk2.ir import mk2
+from vouch_mk2.ir.schema import Tier
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,9 +24,42 @@ def _docs() -> tuple[Path, ...]:
 
 def test_documented_check_ids_are_declared_ir_obligations() -> None:
     text = _read((ROOT / "README.md",) + _docs())
-    documented = set(re.findall(r"check\.[a-z0-9-]+", text))
+    documented = set(re.findall(r"check(?:\.[a-z0-9-]+)+", text))
     declared = {obligation.obligation_id for obligation in mk2.MK2.obligations}
     assert documented <= declared
+    decisions = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
+    d12 = decisions.split("## D-12", 1)[1]
+    evidence = next(
+        requirement
+        for requirement in mk2.MK2.tier_requirements
+        if requirement.control_id == mk2.TIER_EVIDENCE_CONTROL
+    )
+    bound = {
+        check_id
+        for cell in (evidence.lightweight, evidence.standard, evidence.high)
+        for check_id in cell.mechanical_checks
+    }
+    assert bound == {
+        mk2.CHECK_EVIDENCE_ANCHORS,
+        mk2.CHECK_TIER_EVIDENCE_REQUIRED,
+        mk2.CHECK_TIER_HIGH_ATTESTATION,
+    }
+    assert mk2.TIER_EVIDENCE_CONTROL in d12
+    assert bound <= set(re.findall(r"check(?:\.[a-z0-9-]+)+", d12))
+    assert mk2.ORG_TIER_CONTROLS in d12
+    for requirement in mk2.MK2.tier_requirements:
+        for tier in Tier:
+            cell = requirement.cell(tier)
+            mechanical = ", ".join(
+                cell.mechanical_evidence + cell.mechanical_checks
+            ) or "none"
+            residual = cell.residual or "none"
+            binding = (
+                f"{requirement.control_id}/{tier.value}: "
+                f"level={cell.level.value} | coverage={cell.coverage.value} | "
+                f"mechanical={mechanical} | residual={residual}"
+            )
+            assert binding in d12
 
 
 def test_documented_formal_ids_exist_in_catalogs() -> None:

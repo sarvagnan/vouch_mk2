@@ -148,6 +148,7 @@ def _status_object(facts: StatusFacts) -> dict[str, object]:
         "evidence_chains": facts.evidence_chains,
         "anchored_current": facts.anchored_current,
         "anchor_mode": facts.anchor_mode,
+        "tier": facts.tier,
         "formal_certificate_recorded": facts.formal_certificate_recorded,
         "next_action_count": facts.next_action_count,
     }

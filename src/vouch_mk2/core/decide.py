@@ -40,6 +40,7 @@ from vouch_mk2.core.commands import (
     RollBack,
     SetReleaseCriteria,
     SetAnchorMode,
+    SetTier,
     SpecifyUnit,
     StartDeploy,
     StartVerification,
@@ -81,6 +82,7 @@ from vouch_mk2.core.events import (
     UnitSuperseded,
     VerificationStarted,
     WorkStarted,
+    TierSet,
 )
 from vouch_mk2.core.invariants import (
     evidence_kind_outcome_coherent,
@@ -97,6 +99,7 @@ from vouch_mk2.core.model import (
     ReleaseArchetype,
     ReleaseState,
     Snapshot,
+    Tier,
     Unit,
     UnitStatus,
     blocking_deviations,
@@ -256,6 +259,41 @@ def _gate_no_blocking_deviations(ctx: _GateContext) -> tuple[Violation, ...]:
     )
 
 
+def _tier_evidence_checks(snapshot: Snapshot) -> frozenset[str]:
+    requirement = next(
+        requirement
+        for requirement in mk2.MK2.tier_requirements
+        if requirement.control_id == mk2.TIER_EVIDENCE_CONTROL
+    )
+    return frozenset(requirement.cell(snapshot.tier).mechanical_checks)
+
+
+def _gate_tier_evidence(ctx: _GateContext) -> tuple[Violation, ...]:
+    checks = _tier_evidence_checks(ctx.snapshot)
+    reasons: list[str] = []
+    head = ctx.snapshot.evidence_head(ctx.unit.name)
+    if mk2.CHECK_TIER_EVIDENCE_REQUIRED in checks and head is None:
+        reasons.append("an evidence head is required")
+    if mk2.CHECK_TIER_HIGH_ATTESTATION in checks:
+        if head is None:
+            reasons.append("an anchored evidence head is required")
+        elif head.anchored == "GENESIS":
+            reasons.append("the evidence head remains at the GENESIS anchor")
+        if not ctx.snapshot.formal_certificate_digest:
+            reasons.append("a formal certificate is required")
+    if not reasons:
+        return ()
+    return (
+        Violation(
+            code=mk2.GATE_DOD_TIER_EVIDENCE,
+            detail=(
+                f"{ctx.snapshot.tier.value} publication of unit "
+                f"{ctx.unit.name!r} refused: {'; '.join(reasons)}"
+            ),
+        ),
+    )
+
+
 GATE_EVALUATORS: Mapping[str, Callable[[_GateContext], tuple[Violation, ...]]] = {
     mk2.GATE_DOR_PACK_RECORDED: _gate_pack_recorded,
     mk2.GATE_DOR_DEPENDENCIES_EXIST: _gate_dependencies_exist,
@@ -263,6 +301,7 @@ GATE_EVALUATORS: Mapping[str, Callable[[_GateContext], tuple[Violation, ...]]] =
     mk2.GATE_DOD_PACK_FROZEN: _gate_pack_recorded,
     mk2.GATE_DOD_DEPENDENCIES_SATISFIED: _gate_dependencies_satisfied,
     mk2.GATE_DOD_NO_BLOCKING_DEVIATIONS: _gate_no_blocking_deviations,
+    mk2.GATE_DOD_TIER_EVIDENCE: _gate_tier_evidence,
     mk2.GATE_UNBLOCK_NO_BLOCKING_DEVIATIONS: _gate_no_blocking_deviations,
     mk2.GATE_REVERIFY_PACK_RECORDED: _gate_pack_recorded,
 }
@@ -802,6 +841,19 @@ def _decide_set_anchor_mode(command: SetAnchorMode) -> Decision:
     return Accepted(events=(AnchorModeSet(command.mode),))
 
 
+def _decide_set_tier(snapshot: Snapshot, command: SetTier) -> Decision:
+    order = tuple(Tier)
+    lowering = order.index(command.tier) < order.index(snapshot.tier)
+    if lowering and any(
+        unit.status is not UnitStatus.SPECIFIED for unit in snapshot.units
+    ):
+        return _refuse(
+            "tier.lowering-refused",
+            "assurance tier cannot lower once any unit is beyond specified",
+        )
+    return Accepted(events=(TierSet(command.tier),))
+
+
 def _decide_record_formal_certificate(
     command: RecordFormalCertificate,
 ) -> Decision:
@@ -1118,6 +1170,8 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             return _decide_advance_anchor(snapshot, command)
         case SetAnchorMode():
             return _decide_set_anchor_mode(command)
+        case SetTier():
+            return _decide_set_tier(snapshot, command)
         case RecordFormalCertificate():
             return _decide_record_formal_certificate(command)
         case OpenDeviation():
@@ -1193,6 +1247,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
     releases = snapshot.releases
     evidence_heads = snapshot.evidence_heads
     anchor_mode = snapshot.anchor_mode
+    tier = snapshot.tier
     formal_certificate_digest = snapshot.formal_certificate_digest
     match event:
         case UnitSpecified(name=name, version=version, depends_on=depends_on):
@@ -1222,7 +1277,12 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
         case UnitMarkedDone(name=name):
             units = _with_status(snapshot, name, UnitStatus.DONE_PENDING_ACCEPTANCE)
         case UnitPublished(name=name):
-            units = _with_status(snapshot, name, UnitStatus.PUBLISHED)
+            unit = _existing(snapshot, name)
+            units = _with_unit(
+                units,
+                name,
+                replace(unit, status=UnitStatus.PUBLISHED, published_once=True),
+            )
         case UnitSuperseded(name=name):
             units = _with_status(snapshot, name, UnitStatus.SUPERSEDED)
         case UnitReleaseBound(name=name):
@@ -1330,6 +1390,8 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             )
         case AnchorModeSet(mode=mode):
             anchor_mode = mode
+        case TierSet(tier=next_tier):
+            tier = next_tier
         case FormalCertificateRecorded(certificate_digest=certificate_digest):
             formal_certificate_digest = certificate_digest
         case DeploymentStarted(release_id=release_id):
@@ -1391,6 +1453,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
         releases=releases,
         evidence_heads=evidence_heads,
         anchor_mode=anchor_mode,
+        tier=tier,
         formal_certificate_digest=formal_certificate_digest,
     )
 
@@ -1442,5 +1505,6 @@ def apply(snapshot: Snapshot, events: tuple[Event, ...]) -> Snapshot:
         releases=current.releases,
         evidence_heads=current.evidence_heads,
         anchor_mode=current.anchor_mode,
+        tier=current.tier,
         formal_certificate_digest=current.formal_certificate_digest,
     )

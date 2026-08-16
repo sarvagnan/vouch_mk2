@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from vouch_mk2.ir.schema import Tier
+
 
 class UnitStatus(Enum):
     SPECIFIED = "specified"
@@ -124,6 +126,7 @@ class Unit:
     status: UnitStatus
     depends_on: tuple[str, ...] = ()
     acceptance_pack_version: str = ""
+    published_once: bool = False
 
     def ref(self) -> UnitRef:
         return UnitRef(name=self.name, version=self.version)
@@ -194,6 +197,7 @@ class Snapshot:
     releases: tuple[Release, ...] = ()
     evidence_heads: tuple[EvidenceHead, ...] = ()
     anchor_mode: AnchorMode = AnchorMode.NONE
+    tier: Tier = Tier.LIGHTWEIGHT
     formal_certificate_digest: str = ""
 
     def unit(self, name: str) -> Unit | None:

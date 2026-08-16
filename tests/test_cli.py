@@ -149,6 +149,7 @@ def test_cli_json_matches_text_composition_and_lists_organizational_ids(
         mk2.ORG_INDEPENDENCE,
         mk2.ORG_CAUSAL_RED_HISTORY,
         mk2.ORG_PROTECTIVE_CLOSURE_TRUTHFULNESS,
+        mk2.ORG_TIER_CONTROLS,
     }
 
 
@@ -173,6 +174,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_BUNDLE_INVENTORIES,
         mk2.CHECK_FORMAL_CERTIFICATE,
         mk2.CHECK_MAP_FRESHNESS,
+        mk2.CHECK_CONTEXT_FRESHNESS,
     ):
         assert check_id in text
     assert main(["check", "--ci", "--json", "--root", str(root)]) == 0
@@ -185,6 +187,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_BUNDLE_INVENTORIES,
         mk2.CHECK_FORMAL_CERTIFICATE,
         mk2.CHECK_MAP_FRESHNESS,
+        mk2.CHECK_CONTEXT_FRESHNESS,
     } <= ids
 
 
@@ -196,8 +199,9 @@ def test_cli_projection_commands_and_generate_then_check(
 
     assert main(["generate", "--root", str(root)]) == 0
     generated = capsys.readouterr().out
-    assert "map.json written (source state " in generated
+    assert "map.json and vouch-context.md written (source state " in generated
     assert (root / "map.json").is_file()
+    assert (root / "vouch-context.md").is_file()
 
     assert main(["check", "--ci", "--root", str(root)]) == 0
     assert mk2.CHECK_MAP_FRESHNESS in capsys.readouterr().out
@@ -265,8 +269,11 @@ def test_cli_formal_reports_closed_relation_and_discriminators(
     init_store(root)
     assert main(["formal", "--record", "--root", str(root)]) == 0
     output = capsys.readouterr().out
-    assert "states: 96266" in output
-    assert "transitions: 525474" in output
+    assert "states: 109130" in output
+    assert "transitions: 599226" in output
+    assert "universe: tier-v1" in output
+    assert "states: 9" in output
+    assert "transitions: 30" in output
     assert "PASS  M1.no-direct-republication" in output
     assert "PASS  M9.anchor-monotonic" in output
     assert "DISCRIMINATED     W1.direct-republication" in output
@@ -305,7 +312,7 @@ def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: 
 
 def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[str]) -> None:
     # D-10: mk2's own committed store must pass check --ci with zero mechanical
-    # NOT_CHECKED and all five organizational rows visibly NOT_CHECKED.
+    # NOT_CHECKED and all six organizational rows visibly NOT_CHECKED.
     root = Path(__file__).resolve().parents[1] / ".vouch"
     assert (root / "state.json").exists(), "the dogfood store must be committed"
     assert main(["check", "--ci", "--root", str(root)]) == 0
@@ -317,4 +324,4 @@ def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[
     ]
     assert mechanical_not_checked == []
     org_rows = [line for line in out.splitlines() if line.startswith("NOT-CHECKED") and "org." in line]
-    assert len(org_rows) == 5
+    assert len(org_rows) == 6
