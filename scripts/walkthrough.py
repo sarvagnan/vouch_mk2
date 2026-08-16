@@ -85,7 +85,22 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--lock", required=True)
     parser.add_argument("--keep", default=None, help="keep the scratch project here")
+    parser.add_argument(
+        "--assert-no-network",
+        action="store_true",
+        help="first prove the environment denies a plain HTTP request; exit 1 if it does not",
+    )
     args = parser.parse_args()
+    if args.assert_no_network:
+        import urllib.request
+
+        try:
+            urllib.request.urlopen("http://example.com", timeout=3)
+        except Exception:  # any failure means the network is denied, which is the point
+            print("[walkthrough] network denied: ok")
+        else:
+            print("[walkthrough] network REACHABLE — sandbox ineffective")
+            return 1
     lock = os.path.abspath(args.lock)
     scratch = args.keep or tempfile.mkdtemp(prefix="vouch-walkthrough-")
     project = os.path.join(scratch, "project")

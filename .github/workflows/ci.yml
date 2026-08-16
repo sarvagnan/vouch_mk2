@@ -53,13 +53,9 @@ jobs:
           python "$RUNNER_TEMP/vouch.lock" check --ci --root .vouch | tee "$RUNNER_TEMP/dogfood.txt"
           ! grep -E '^NOT-CHECKED +check\.' "$RUNNER_TEMP/dogfood.txt"
       - name: DoD walkthrough from the vendored lock with NO network
-        # unshare -n gives the step an empty network namespace: any attempt to
-        # reach the network fails at socket level. The walkthrough drives the
-        # whole lifecycle through the lock as a subprocess with PYTHONPATH="".
+        # unshare -n gives the step an empty network namespace. The walkthrough
+        # first PROVES the namespace denies a plain HTTP request
+        # (--assert-no-network), then drives the whole lifecycle through the
+        # lock as a subprocess with PYTHONPATH="".
         shell: bash
-        run: |
-          sudo unshare -n -- env PATH="$PATH" python3 -c "import urllib.request,sys
-try:
-    urllib.request.urlopen('http://example.com', timeout=3); sys.exit('network reachable — sandbox ineffective')
-except Exception: print('network denied: ok')"
-          sudo unshare -n -- env PATH="$PATH" python3 scripts/walkthrough.py --lock "$RUNNER_TEMP/vouch.lock"
+        run: sudo unshare -n -- env PATH="$PATH" python3 scripts/walkthrough.py --assert-no-network --lock "$RUNNER_TEMP/vouch.lock"

@@ -359,3 +359,36 @@ entry is mk2's recorded discrepancy for its own semantics.
   implementation, evidence recorded live) is a genuine option that D-10 did NOT settle;
   it is proposed as **D-11** (bead `vouch_mk2-dvz`, user decision pending) with D045 as
   the pilot unit.
+
+## D-11 — Adopt prospective self-hosting: mk2 governs its own forward development
+
+**Status:** decided 2026-08-15 (user decision; pilot).
+
+- **The inconsistency, stated plainly.** Vouch's thesis is that a system is built as units
+  with contracts frozen before code and evidence recorded live. The plan itself says the
+  Phase 1 tests are written "against the IR", demands closure witnesses "from the first
+  commit", and makes `check --ci` "on the mk2 repo itself" a definition-of-done item. Yet
+  the tool embodying the method was built through nine phases without a single unit in a
+  ledger. That was not a foundational design choice recorded anywhere; the plan enumerated
+  WHAT to build precisely and HOW to build it only as review disciplines, and the
+  build followed its letter. D-10 rationalized the deferral after the fact. This entry
+  corrects the record: the omission was a gap, and this decision closes it going forward.
+- **Decision.** From this point on, every increment to mk2 goes through mk2's own unit
+  lifecycle in the dogfood store (`.vouch/`), per `docs/self-hosting-tradeoff.md`:
+  pack (spec + acceptance tests) frozen BEFORE implementation; red evidence recorded from
+  the failing acceptance tests before any implementation; the implementer (Codex) cannot
+  edit the pack (Model 2 asymmetry, mechanical); review findings that contradict the pack
+  are DEVIATIONS adjudicated by the user; publication through the real DoD gates; mk2
+  versions released with launch criteria. Retroactive self-hosting stays rejected (D-10).
+- **Scope: a pilot with a stop rule.** The first unit is NOT D045 as originally proposed
+  but the external-review remediation `ingress-invariants@1` (below) — more urgent, and a
+  purer test of the method on correctness work. D045 follows. Wholesale adoption is
+  decided after the pilot shows what the friction costs on this repo. **Stop rule:** if a
+  unit cannot reach `published` through the real gates without hand-editing the store or
+  bending a gate, that is a finding about the method or about mk2 — record it and rule.
+- **What stays NOT_CHECKED:** independence between the pack author (Fable) and the
+  implementer (Codex) is a format heuristic (two models, two vendors), not proof of
+  distinct persons; the claim boundary already says so and self-hosting does not change it.
+- **Infrastructure the pilot forces, accepted as in-scope:** re-versioning through
+  `decide()` (retiring D-9's seeded state), and a pytest→`record_evidence` adapter so red
+  and green evidence is recorded by the harness, never hand-typed.
