@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_evidence_semantics.py -q","kind":"red","outcome":"tests-failed","parent":"GENESIS","recorded_at":"2026-08-17T08:40:51+00:00","sequence":1,"unit":{"name":"evidence-semantics","version":"1"}}

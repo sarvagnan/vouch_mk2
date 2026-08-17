@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "vouch_mk2",
+  "project_id": "5f6f53e4-2426-4637-a777-4ca94e9d8511"
+}
