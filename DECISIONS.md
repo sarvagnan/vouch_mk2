@@ -741,3 +741,28 @@ state" obligation D-16 already states.
 - **Python (B4).** 3.14 stays; it is stated in README, the quickstart, `init`'s output, the
   generated workflow (`actions/setup-python` with 3.14), and a bootstrap message in the lock that
   says "Vouch requires Python 3.14+" instead of a `SyntaxError` on older interpreters.
+
+**D-17 amendment (2026-08-17, batch-A ruling O-1, user decision):** evidence binds the digest of
+the pack's **executable entries** (the test files an implementer's harness runs), not the whole
+inventory. The spec stays byte-bound in the inventory for tamper visibility, but a prose-only
+amendment does not void RED: `gate.dod.current-pack-green` and `check.evidence-chains` compare
+against the current pack's *test-set digest*; any change to a test file still voids prior
+evidence for it. Rationale: RED proves the tests can fail against pre-implementation code — a
+fact about the tests, not the prose. Rejected: re-recording RED after every amendment (forces
+REDs that cannot honestly exist once the tree is green); leaving the unit unpublished (every
+dependent inherits the failure).
+
+**D-14 amendment (2026-08-17, batch-A ruling O-3, user decision):** `rebind-pack` — for a
+published or release-bound unit whose bound pack files must change **only to adapt to a changed
+shared interface** (behavior unchanged; e.g. a record type gained a field), a recorded event
+that replaces the unit's pack inventory (old digest → new digest, with a stated reason), carries
+the evidence chain forward, requires a fresh **GREEN** on the new test-set digest before
+`check.evidence-chains` passes for the unit (a RED is not required — it would be meaningless for
+an adaptation), and is listed by name in `check.pack-bound`'s detail ("rebound after publication:
+…", like late binding); FAIL at `high` unless the rebound unit has that GREEN. Not legal below
+`published`. Rejected: narrowing what is bound (weakens D-14 for every project to solve a
+self-hosting problem); a standing exception (permanent and growing).
+
+**Method rule (batch-A note O-2):** a pack amendment edits the requirement text in place *and*
+records the amendment note; it never appends a contradiction to a requirement that still reads
+the old way.
