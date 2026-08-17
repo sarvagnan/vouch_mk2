@@ -701,3 +701,34 @@ pack.
   record with an empty chain — which is also the sanctioned escape from a poisoned chain.
 - **Rejected:** a `reset-evidence` command (an append-only chain must not be rewritten; the new
   version IS the reset, and it is visible).
+
+## D-18 — CI policy, tier granularity, and CI anchoring (adoption reviews, batch B)
+
+**Status:** decided 2026-08-17 (user adopted the recommendations).
+
+- **`--ci` semantics (B2 → option iv).** A recorded per-store setting `ci_policy: ledger | strict`
+  set by one command (`set-ci-policy`), default **strict** for new stores (`init`); `check --ci`
+  prints which policy it enforced. `strict`: every unit that has left `specified` must be terminal
+  (published / release-bound / superseded / retired) or carry an explicit, recorded, table-visible
+  exception (`mark-open-in-ci --name U --reason …`, cleared by `clear-open-in-ci`); otherwise
+  `check.ci-policy` FAILs naming the units. `ledger`: today's behavior, and the report says so.
+  Change-scoping (only units touched by a diff) is deferred until the event log can attribute
+  events to a branch. Rejected: silent ledger-only (green would keep meaning "coherent", never
+  "done"); scoping on pack files alone (blind to implementation-only changes).
+- **Tier granularity (B3 → keep global, measure first).** The tier stays a single store-level
+  fact through the first real project (bd4.4). If that project shows the ceremony cost the reviews
+  predict, the recorded next step is a **raise-only** per-unit `critical` mark (global tier as the
+  floor; never lowers a unit below it, so D-12's lowering rule survives), not a per-unit tier.
+  Rejected now: per-unit tiers ("non-critical" is itself an organizational claim; every check
+  grows a per-unit branch; reports mean less).
+- **CI anchoring (B5 → option a).** The generated workflow, after the project's own tests pass,
+  runs `advance-anchor` for every unit whose head CI observed and pushes a bot commit of
+  `.vouch/` (state + regenerated projections) with `[skip ci]`, recording the workflow run id
+  (from the D-16 event log's run-id claim); on pull requests from forks it does nothing and the
+  anchor rows stay honestly NOT_CHECKED until merge. What an anchor then claims: "advanced by
+  workflow run N" — verifiable against the run URL, not asserted. Rejected: an observation
+  artifact imported later (a second trust root); dropping the CI meaning (would make `ci` mode a
+  rename of today's convention).
+- **Python (B4).** 3.14 stays; it is stated in README, the quickstart, `init`'s output, the
+  generated workflow (`actions/setup-python` with 3.14), and a bootstrap message in the lock that
+  says "Vouch requires Python 3.14+" instead of a `SyntaxError` on older interpreters.
