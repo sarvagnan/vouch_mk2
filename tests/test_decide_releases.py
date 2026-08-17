@@ -445,11 +445,14 @@ def test_release_standing_checks_pass_on_legal_snapshots() -> None:
     for evaluator in (
         check_release_escape_property,
         check_release_rosters_resolve,
-        check_release_criteria_before_progression,
         check_release_closure_records,
         check_release_bound_units_rostered,
     ):
         assert evaluator(prepared).verdict is Verdict.PASS
+    assert (
+        check_release_criteria_before_progression(prepared).verdict
+        is Verdict.NOT_APPLICABLE
+    )
 
     progressed = accepted(prepared, SetReleaseCriteria("r1", CRITERIA))
     progressed = accepted(progressed, StartDeploy("r1"))

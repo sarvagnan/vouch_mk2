@@ -134,6 +134,14 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             ("evidence_heads", heads),
             ("anchor_mode", snapshot.anchor_mode.value),
             ("tier", snapshot.tier.value),
+            ("ci_policy", snapshot.ci_policy.value),
+            (
+                "ci_exceptions",
+                tuple(
+                    (item.unit_name, item.reason)
+                    for item in snapshot.ci_exceptions
+                ),
+            ),
             ("formal_certificate_digest", snapshot.formal_certificate_digest),
         )
     )

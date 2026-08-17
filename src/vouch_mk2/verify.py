@@ -33,7 +33,10 @@ from vouch_mk2.core import (
     fold_evidence_pack_summaries,
 )
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
+from vouch_mk2.formal.explore import emit_tables
+from vouch_mk2.formal.invariants import INVARIANTS
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
+from vouch_mk2.formal.universe import UNIVERSES
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict, Violation
@@ -242,6 +245,14 @@ def _is_red(kind: EvidenceKind) -> bool:
 def _check_evidence_chains(
     snapshot: Snapshot, walks: tuple[_ChainWalk, ...]
 ) -> CheckResult:
+    if not walks:
+        return CheckResult(
+            check_id=mk2.CHECK_EVIDENCE_CHAINS,
+            verdict=Verdict.NOT_APPLICABLE,
+            detail=(
+                "IR applicability rule not met: subjects-present: evidence-heads"
+            ),
+        )
     failures: list[str] = []
     notices: list[str] = []
     for walk in walks:
@@ -389,10 +400,22 @@ def _check_evidence_anchors(
 
 
 def _check_bundle_inventories(store: Store, snapshot: Snapshot) -> CheckResult:
+    subjects = tuple(
+        release
+        for release in snapshot.releases
+        if release.bundle_inventory_digest
+    )
+    if not subjects:
+        return CheckResult(
+            check_id=mk2.CHECK_BUNDLE_INVENTORIES,
+            verdict=Verdict.NOT_APPLICABLE,
+            detail=(
+                "IR applicability rule not met: subjects-present: "
+                "bound-bundle-inventories"
+            ),
+        )
     failures: list[str] = []
-    for release in snapshot.releases:
-        if not release.bundle_inventory_digest:
-            continue
+    for release in subjects:
         try:
             decode_bundle_inventory(
                 store.get_object(
@@ -480,13 +503,23 @@ def _check_pack_files_match(
             detail="no project root; pass --project",
         )
     project_root = os.path.abspath(project)
+    subjects = tuple(
+        unit
+        for unit in snapshot.units
+        if unit.status is not UnitStatus.SUPERSEDED
+        and unit.acceptance_pack_digest
+    )
+    if not subjects:
+        return CheckResult(
+            check_id=mk2.CHECK_PACK_FILES_MATCH,
+            verdict=Verdict.NOT_APPLICABLE,
+            detail=(
+                "IR applicability rule not met: subjects-present: "
+                "active-bound-pack-units"
+            ),
+        )
     failures: list[str] = []
-    for unit in sorted(snapshot.units, key=lambda item: item.ref().label()):
-        if (
-            unit.status is UnitStatus.SUPERSEDED
-            or not unit.acceptance_pack_digest
-        ):
-            continue
+    for unit in sorted(subjects, key=lambda item: item.ref().label()):
         try:
             inventory = decode_pack_inventory(
                 store.get_object(
@@ -587,9 +620,15 @@ def _formal_failure(detail: str) -> CheckResult:
 
 
 def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
+    if snapshot.tier is not Tier.HIGH:
+        return CheckResult(
+            mk2.CHECK_FORMAL_CERTIFICATE,
+            Verdict.NOT_APPLICABLE,
+            f"IR applicability rule not met: tier-at-least: high (current: {snapshot.tier.value})",
+        )
     digest = snapshot.formal_certificate_digest
     if not digest:
-        return CheckResult(mk2.CHECK_FORMAL_CERTIFICATE, Verdict.PASS, "")
+        return _formal_failure("high tier requires a recorded formal certificate")
     try:
         certificate = decode_formal_certificate(
             store.get_object(ArtifactKind.FORMAL_CERTIFICATE, digest)
@@ -597,42 +636,36 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
     except StoreError as error:
         return _formal_failure(f"missing/corrupt formal certificate: {error}")
 
-    fresh = run_formal()
-    expected, _data = build_certificate(fresh)
-    if certificate.checker_version != expected.checker_version:
+    if certificate.checker_version != CHECKER_VERSION:
         return _formal_failure("checker_version mismatch")
-    if certificate.tables_digest != expected.tables_digest:
-        return _formal_failure("tables_digest mismatch")
-    if certificate.universes != expected.universes:
-        recorded_universes = {row[0]: row for row in certificate.universes}
-        expected_universes = {row[0]: row for row in expected.universes}
-        divergent = sorted(
-            name
-            for name in set(recorded_universes) | set(expected_universes)
-            if recorded_universes.get(name) != expected_universes.get(name)
+    current_tables = encode_formal_tables(emit_tables())
+    current_tables_digest = digest_of(ArtifactKind.FORMAL_TABLES, current_tables)
+    if certificate.tables_digest != current_tables_digest:
+        return _formal_failure("tables_digest mismatch with current emitted policy tables")
+    try:
+        recorded_tables = store.get_object(
+            ArtifactKind.FORMAL_TABLES, certificate.tables_digest
         )
+    except StoreError as error:
+        return _formal_failure(f"recorded formal tables missing/corrupt: {error}")
+    if recorded_tables != current_tables:
+        return _formal_failure("recorded formal tables differ from current emitted tables")
+    expected_universe_names = {universe.name for universe in UNIVERSES}
+    recorded_universe_names = {row[0] for row in certificate.universes}
+    if (
+        recorded_universe_names != expected_universe_names
+        or len(certificate.universes) != len(recorded_universe_names)
+    ):
         return _formal_failure(
-            f"formal universe relation mismatch: {divergent!r} disagree with recomputation"
+            "formal universe registry mismatch: "
+            f"recorded={tuple(sorted(recorded_universe_names))!r}, "
+            f"current={tuple(sorted(expected_universe_names))!r}"
         )
-    if certificate.invariants != expected.invariants:
-        recorded = {
-            (universe_name, invariant_id): held
-            for universe_name, invariant_id, held in certificate.invariants
-        }
-        recomputed = {
-            (universe_name, invariant_id): held
-            for universe_name, invariant_id, held in expected.invariants
-        }
-        divergent = tuple(
-            sorted(
-                key
-                for key in set(recorded) | set(recomputed)
-                if recorded.get(key) is not recomputed.get(key)
+    for name, _relation_digest, state_count, transition_count in certificate.universes:
+        if state_count < 1 or transition_count < 1:
+            return _formal_failure(
+                f"formal universe {name!r} records an empty relation"
             )
-        )
-        return _formal_failure(
-            f"invariant verdict mismatch: {divergent!r} disagree with recomputation"
-        )
     failed_invariant = next(
         (
             (universe_name, invariant_id)
@@ -643,8 +676,31 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
     )
     if failed_invariant is not None:
         return _formal_failure(f"invariant {failed_invariant!r} did not hold")
-    if certificate.witnesses != expected.witnesses:
-        return _formal_failure("witness verdict mismatch")
+    all_invariant_ids = {invariant.invariant_id for invariant in INVARIANTS}
+    expected_invariant_rows = {
+        (universe.name, invariant_id)
+        for universe in UNIVERSES
+        for invariant_id in (
+            universe.invariant_ids
+            if universe.invariant_ids
+            else tuple(sorted(all_invariant_ids))
+        )
+    }
+    recorded_invariant_rows = {
+        (universe_name, invariant_id)
+        for universe_name, invariant_id, _held in certificate.invariants
+    }
+    if (
+        recorded_invariant_rows != expected_invariant_rows
+        or len(certificate.invariants) != len(recorded_invariant_rows)
+    ):
+        return _formal_failure("invariant registry mismatch")
+    expected_invariant_ids = all_invariant_ids
+    recorded_witness_ids = {
+        invariant_id for _witness_id, invariant_id, _discriminated in certificate.witnesses
+    }
+    if recorded_witness_ids != expected_invariant_ids:
+        return _formal_failure("witness registry mismatch")
     failed_witness = next(
         (
             witness_id
@@ -655,7 +711,18 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
     )
     if failed_witness:
         return _formal_failure(f"witness {failed_witness!r} did not discriminate")
-    return CheckResult(mk2.CHECK_FORMAL_CERTIFICATE, Verdict.PASS, "")
+    return CheckResult(
+        mk2.CHECK_FORMAL_CERTIFICATE,
+        Verdict.NOT_CHECKED,
+        detail=(
+            "cheap certificate verification passed: certificate object digest, "
+            "checker version, current recorded policy tables, and the certificate's "
+            "formal universe/invariant/witness tables were verified structurally; "
+            "NOT CHECKED without bounded exploration: relation digests and counts, "
+            "invariant truth, and mutation-witness discrimination — run "
+            "`vouch-mk2 formal --record --root ROOT` to re-explore and record them"
+        ),
+    )
 
 
 def _check_map_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
@@ -691,7 +758,11 @@ def _check_context_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
     committed = store.read_generated("vouch-context.md")
     if committed is None:
         if store.read_generated("map.json") is None:
-            return CheckResult(mk2.CHECK_CONTEXT_FRESHNESS, Verdict.PASS, "")
+            return CheckResult(
+                mk2.CHECK_CONTEXT_FRESHNESS,
+                Verdict.NOT_APPLICABLE,
+                "IR applicability rule not met: subjects-present: generated-context",
+            )
         return CheckResult(
             mk2.CHECK_CONTEXT_FRESHNESS,
             Verdict.FAIL,
@@ -903,8 +974,12 @@ def record_formal_certificate(store: Store, run: FormalRun | None = None) -> str
         decision = decide(snapshot, RecordFormalCertificate(digest))
         if not isinstance(decision, Accepted):
             raise RefusedError(decision.violations)
+        formal_objects = (
+            (ArtifactKind.FORMAL_CERTIFICATE, data),
+            (ArtifactKind.FORMAL_TABLES, encode_formal_tables(run.tables)),
+        )
         store.commit(
             apply(snapshot, decision.events),
-            objects=((ArtifactKind.FORMAL_CERTIFICATE, data),),
+            objects=formal_objects,
         )
     return digest

@@ -2,6 +2,7 @@
 
 Rebuild of Vouch (`../vouch`) as a typed policy engine with one authoritative
 snapshot, content-addressed artifacts, pure projections, and thin adapters.
+Vouch requires Python 3.14 or newer.
 
 Start here: [`docs/quickstart.md`](docs/quickstart.md) is the executable lifecycle walkthrough;
 [`docs/commands.md`](docs/commands.md) is the generated command reference.
@@ -48,7 +49,7 @@ Evidence base: dual independent reviews of the Vouch 0.6.2 history — 70 record
   inventories.
 - `src/vouch_mk2/formal/` — the model checker: the relation is emitted by
   executing `decide()` over the empty `core-v1` and seeded-history `history-v1`
-  universes; ten hand-authored invariants with private mutation witnesses;
+  universes; eleven hand-authored invariants with private mutation witnesses;
   recomputed content-addressed certificates bind both relations.
 - `src/vouch_mk2/projections/` — canonical system map, binding next actions,
   status facts, and deterministic agent-context generation.

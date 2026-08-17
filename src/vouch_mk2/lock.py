@@ -11,8 +11,14 @@ import zipfile
 from vouch_mk2.store import ArtifactKind, StoreError, digest_of
 
 
-SHEBANG = b"#!/usr/bin/env python3\n"
-_MAIN = b"from vouch_mk2.cli import main; raise SystemExit(main())\n"
+SHEBANG = b"#!/usr/bin/env python3\n# Vouch requires Python 3.14+\n"
+_MAIN = (
+    b"import sys\n"
+    b"if sys.version_info < (3, 14):\n"
+    b"    raise SystemExit('Vouch requires Python 3.14+')\n"
+    b"from vouch_mk2.cli import main\n"
+    b"raise SystemExit(main())\n"
+)
 _ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 _ZIP_EXTERNAL_ATTR = 0o100644 << 16
 _COMPRESSLEVEL = 9

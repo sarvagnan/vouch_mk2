@@ -20,6 +20,8 @@ from vouch_mk2.core.model import (
     BundleInventory,
     ClosureRecord,
     ClosureTriggerKind,
+    CiException,
+    CiPolicy,
     Deviation,
     DeviationStatus,
     DeviationType,
@@ -197,6 +199,21 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
             }
             for unit in snapshot.units
         ],
+        **(
+            {"ci_policy": snapshot.ci_policy.value}
+            if snapshot.ci_policy is not CiPolicy.LEDGER
+            else {}
+        ),
+        **(
+            {
+                "ci_exceptions": [
+                    {"name": item.unit_name, "reason": item.reason}
+                    for item in snapshot.ci_exceptions
+                ]
+            }
+            if snapshot.ci_exceptions
+            else {}
+        ),
     }
     return _canonical_json(document)
 
@@ -382,6 +399,18 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
         "map": {
             "anchor_mode": map.anchor_mode,
             "tier": map.tier,
+            **(
+                {"ci_policy": map.ci_policy}
+                if map.ci_policy != CiPolicy.LEDGER.value
+                else {}
+            ),
+            **(
+                {
+                    "ci_exceptions": [list(row) for row in map.ci_exceptions]
+                }
+                if map.ci_exceptions
+                else {}
+            ),
             "deviations": [
                 {
                     "amendment_version": deviation.amendment_version,
@@ -445,6 +474,20 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "status_facts": {
                 "anchor_mode": map.status_facts.anchor_mode,
                 "tier": map.status_facts.tier,
+                **(
+                    {"ci_policy": map.status_facts.ci_policy}
+                    if map.status_facts.ci_policy != CiPolicy.LEDGER.value
+                    else {}
+                ),
+                **(
+                    {
+                        "ci_exceptions": [
+                            list(row) for row in map.status_facts.ci_exceptions
+                        ]
+                    }
+                    if map.status_facts.ci_exceptions
+                    else {}
+                ),
                 "anchored_current": map.status_facts.anchored_current,
                 "deviation_counts": _count_objects(
                     map.status_facts.deviation_counts
@@ -665,6 +708,7 @@ _PACK_REBOUND_FIELDS = frozenset(
         "evidence_head_sequence",
     }
 )
+_CI_EXCEPTION_FIELDS = frozenset({"name", "reason"})
 _FORMAL_CERTIFICATE_FIELDS = frozenset(
     {
         "checker_version",
@@ -674,6 +718,7 @@ _FORMAL_CERTIFICATE_FIELDS = frozenset(
         "witnesses",
     }
 )
+_FORMAL_RELATION_FIELDS = frozenset({"initial", "states", "transitions"})
 _SNAPSHOT_FIELDS = frozenset(
     {
         "revision",
@@ -687,6 +732,7 @@ _SNAPSHOT_FIELDS = frozenset(
         "state_format",
     }
 )
+_SNAPSHOT_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions"})
 _SYSTEM_MAP_DOCUMENT_FIELDS = frozenset(
     {"map_format", "source_state_digest", "map"}
 )
@@ -705,6 +751,7 @@ _SYSTEM_MAP_FIELDS = frozenset(
         "status_facts",
     }
 )
+_SYSTEM_MAP_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions"})
 _SYSTEM_MAP_UNIT_FIELDS = frozenset(
     {
         "name",
@@ -741,6 +788,7 @@ _STATUS_FACTS_FIELDS = frozenset(
         "unbound_pack_units",
     }
 )
+_STATUS_FACTS_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions"})
 
 
 def _digest(value: object, path: str, *, allow_empty: bool = False) -> str:
@@ -1213,6 +1261,37 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
     return inventory
 
 
+def decode_formal_relation(data: bytes) -> Relation:
+    obj = _fields(
+        _decode_json(data, "formal relation"),
+        "",
+        _FORMAL_RELATION_FIELDS,
+    )
+    states = _strings(obj["states"], "states")
+    transitions: list[tuple[str, str, str]] = []
+    for index, raw in enumerate(_array(obj["transitions"], "transitions")):
+        path = f"transitions[{index}]"
+        row = _array(raw, path)
+        if len(row) != 3:
+            raise DecodeError(f"{path}: expected three-item array")
+        transitions.append(
+            (
+                _string(row[0], f"{path}[0]"),
+                _string(row[1], f"{path}[1]"),
+                _string(row[2], f"{path}[2]"),
+            )
+        )
+    relation = Relation(
+        states=states,
+        transitions=tuple(transitions),
+        initial=_string(obj["initial"], "initial"),
+        representatives=(),
+    )
+    if encode_formal_relation(relation) != data:
+        raise DecodeError("$: non-canonical formal relation encoding")
+    return relation
+
+
 def decode_formal_certificate(data: bytes) -> FormalCertificate:
     obj = _fields(
         _decode_json(data, "formal certificate"),
@@ -1298,7 +1377,7 @@ def decode_snapshot(data: bytes) -> Snapshot:
         raise DecodeError(
             f"state_format: format {state_format} was written by a newer vouch"
         )
-    obj = _fields(raw, "", _SNAPSHOT_FIELDS)
+    obj = _fields(raw, "", _SNAPSHOT_FIELDS, _SNAPSHOT_OPTIONAL_FIELDS)
     revision = _integer(obj["revision"], "revision")
     if revision < 0:
         raise DecodeError("revision: must be non-negative")
@@ -1380,6 +1459,31 @@ def decode_snapshot(data: bytes) -> Snapshot:
             obj["formal_certificate_digest"],
             "formal_certificate_digest",
             allow_empty=True,
+        ),
+        ci_policy=(
+            CiPolicy.LEDGER
+            if "ci_policy" not in obj
+            else _enum_value(obj["ci_policy"], "ci_policy", CiPolicy)
+        ),
+        ci_exceptions=tuple(
+            CiException(
+                unit_name=_string(
+                    row["name"], f"ci_exceptions[{index}].name"
+                ),
+                reason=_string(
+                    row["reason"], f"ci_exceptions[{index}].reason"
+                ),
+            )
+            for index, raw_exception in enumerate(
+                _array(obj.get("ci_exceptions", []), "ci_exceptions")
+            )
+            for row in (
+                _fields(
+                    raw_exception,
+                    f"ci_exceptions[{index}]",
+                    _CI_EXCEPTION_FIELDS,
+                ),
+            )
         ),
     )
     violations = validate_snapshot(snapshot)
@@ -1520,7 +1624,9 @@ def _non_negative(value: object, path: str) -> int:
 
 
 def _decode_status_facts(value: object, path: str) -> StatusFacts:
-    obj = _fields(value, path, _STATUS_FACTS_FIELDS)
+    obj = _fields(
+        value, path, _STATUS_FACTS_FIELDS, _STATUS_FACTS_OPTIONAL_FIELDS
+    )
     return StatusFacts(
         unit_counts=_decode_count_rows(
             obj["unit_counts"], f"{path}.unit_counts", UnitStatus
@@ -1541,6 +1647,16 @@ def _decode_status_facts(value: object, path: str) -> StatusFacts:
             obj["anchor_mode"], f"{path}.anchor_mode", AnchorMode
         ).value,
         tier=_enum_value(obj["tier"], f"{path}.tier", Tier).value,
+        ci_policy=(
+            CiPolicy.LEDGER.value
+            if "ci_policy" not in obj
+            else _enum_value(
+                obj["ci_policy"], f"{path}.ci_policy", CiPolicy
+            ).value
+        ),
+        ci_exceptions=_decode_ci_exception_rows(
+            obj.get("ci_exceptions", []), f"{path}.ci_exceptions"
+        ),
         formal_certificate_recorded=_boolean(
             obj["formal_certificate_recorded"],
             f"{path}.formal_certificate_recorded",
@@ -1577,6 +1693,24 @@ def _decode_producer_edges(value: object, path: str) -> tuple[tuple[str, str], .
     return tuple(edges)
 
 
+def _decode_ci_exception_rows(
+    value: object, path: str
+) -> tuple[tuple[str, str], ...]:
+    rows: list[tuple[str, str]] = []
+    for index, raw in enumerate(_array(value, path)):
+        row_path = f"{path}[{index}]"
+        row = _array(raw, row_path)
+        if len(row) != 2:
+            raise DecodeError(f"{row_path}: expected two-item array")
+        rows.append(
+            (
+                _string(row[0], f"{row_path}[0]"),
+                _string(row[1], f"{row_path}[1]"),
+            )
+        )
+    return tuple(rows)
+
+
 def _require_unique(
     values: tuple[str, ...] | tuple[tuple[str, str], ...],
     path: str,
@@ -1602,7 +1736,12 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
     source_state_digest = _digest(
         document["source_state_digest"], "source_state_digest"
     )
-    obj = _fields(document["map"], "map", _SYSTEM_MAP_FIELDS)
+    obj = _fields(
+        document["map"],
+        "map",
+        _SYSTEM_MAP_FIELDS,
+        _SYSTEM_MAP_OPTIONAL_FIELDS,
+    )
     revision = _non_negative(obj["revision"], "map.revision")
     units = tuple(
         _decode_system_map_unit(item, f"map.units[{index}]")
@@ -1671,6 +1810,16 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
             obj["anchor_mode"], "map.anchor_mode", AnchorMode
         ).value,
         tier=_enum_value(obj["tier"], "map.tier", Tier).value,
+        ci_policy=(
+            CiPolicy.LEDGER.value
+            if "ci_policy" not in obj
+            else _enum_value(
+                obj["ci_policy"], "map.ci_policy", CiPolicy
+            ).value
+        ),
+        ci_exceptions=_decode_ci_exception_rows(
+            obj.get("ci_exceptions", []), "map.ci_exceptions"
+        ),
         formal_certificate_digest=_digest(
             obj["formal_certificate_digest"],
             "map.formal_certificate_digest",
@@ -1683,6 +1832,14 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         raise DecodeError(
             "map.status_facts.tier: must equal map.tier "
             f"({map.status_facts.tier!r} != {map.tier!r})"
+        )
+    if map.status_facts.ci_policy != map.ci_policy:
+        raise DecodeError(
+            "map.status_facts.ci_policy: must equal map.ci_policy"
+        )
+    if map.status_facts.ci_exceptions != map.ci_exceptions:
+        raise DecodeError(
+            "map.status_facts.ci_exceptions: must equal map.ci_exceptions"
         )
     if encode_system_map(map, source_state_digest) != data:
         raise DecodeError("$: non-canonical system map encoding")

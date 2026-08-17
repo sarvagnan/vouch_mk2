@@ -18,8 +18,10 @@ more than that; `docs/claim-boundary.md` is the exact statement.
 
 ## 1. Initialise a project
 
-`init` creates the store (`.vouch/`), records the lock's digest in `.vouch/config.json`, and
-writes a CI workflow fragment. `self-check` verifies that the lock you are running has the
+`init` creates the store (`.vouch/`) with CI policy `strict`, records the lock's digest in
+`.vouch/config.json`, and writes a Python 3.14 CI workflow fragment. Pass
+`--tier lightweight|standard|high` to choose the initial assurance tier (the default is
+`lightweight`). `self-check` verifies that the lock you are running has the
 digest recorded in that config — it is a consistency check between two files you control,
 not proof that either is a trustworthy pin (see D-2 for what sits outside that boundary).
 
@@ -204,6 +206,13 @@ The tier governs only what Vouch can mechanically check. Everything else in the 
 appears in `check` as an organizational NOT-CHECKED row naming the tier and the control — a
 declared tier never makes a report imply a control was checked.
 
+CI policy is a separate recorded store fact. New projects start `strict`: every unit that
+has left `specified` must be published, release-bound, or superseded when `check --ci` runs.
+Use `set-ci-policy --policy ledger` for the older coherence-only behavior. A genuinely
+in-flight unit can carry a visible, reasoned exception through
+`mark-open-in-ci --name UNIT --reason REASON`; remove it with `clear-open-in-ci --name UNIT`.
+The `check.ci-policy` row names the enforced policy and lists each exception and reason.
+
 ## 7. A release
 
 Releases roster published units, carry launch criteria (all four fields are required — Vouch
@@ -232,6 +241,12 @@ python3 vouch.lock complete --root .vouch --release-id r1
 `check --ci` runs every mechanical check and exits 0 only if the composed verdict is PASS.
 `generate` writes the system map and the agent context, both of which `check` verifies for
 freshness against the state they were generated from.
+
+`check` does not re-explore the bounded formal model. At `high` it cheaply verifies the
+recorded certificate, current policy tables, and checker identity, then reports
+`NOT_CHECKED` for invariant execution and mutation-witness discrimination. Run
+`python3 vouch.lock formal --record --root .vouch` when you intend to perform and record
+that expensive exploration.
 
 ```sh
 python3 vouch.lock generate --root .vouch

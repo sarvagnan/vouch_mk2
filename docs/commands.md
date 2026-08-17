@@ -9,7 +9,7 @@ usage: vouch-mk2 check [-h] [--ci] [--json] [--root ROOT] [--project PROJECT]
 
 options:
   -h, --help         show this help message and exit
-  --ci               no-op today; makes CI intent explicit (IMPLEMENTATION-PLAN.md Phase 3)
+  --ci               enforce and name the store's recorded CI policy
   --json             emit one JSON report instead of text
   --root ROOT        store root directory (default: current directory)
   --project PROJECT  project root for acceptance-pack file verification (default: parent of --root
@@ -51,11 +51,12 @@ options:
 ## status
 
 ```text
-usage: vouch-mk2 status [-h] [--root ROOT]
+usage: vouch-mk2 status [-h] [--root ROOT] [--json]
 
 options:
   -h, --help   show this help message and exit
   --root ROOT  store root directory (default: current directory)
+  --json       emit structured invocations instead of text
 ```
 
 ## bundle-inventory
@@ -122,12 +123,15 @@ options:
 ## init
 
 ```text
-usage: vouch-mk2 init [-h] --project PROJECT [--lock LOCK_PATH]
+usage: vouch-mk2 init [-h] --project PROJECT [--tier {lightweight,standard,high}]
+                      [--lock LOCK_PATH]
 
 options:
-  -h, --help         show this help message and exit
-  --project PROJECT  target project directory
-  --lock LOCK_PATH   existing lock to vendor instead of building/copying the running code
+  -h, --help            show this help message and exit
+  --project PROJECT     target project directory
+  --tier {lightweight,standard,high}
+                        initial assurance tier (default: lightweight)
+  --lock LOCK_PATH      existing lock to vendor instead of building/copying the running code
 ```
 
 ## mcp
@@ -251,6 +255,18 @@ options:
                         project-relative executable acceptance test file (repeatable)
 ```
 
+## clear-open-in-ci
+
+```text
+usage: vouch-mk2 clear-open-in-ci [-h] --root ROOT [--json] --name NAME
+
+options:
+  -h, --help   show this help message and exit
+  --root ROOT  store root directory
+  --json       emit one JSON result instead of text
+  --name NAME
+```
+
 ## close-deviation
 
 ```text
@@ -320,6 +336,19 @@ options:
   --release-id RELEASE_ID
   --trigger TRIGGER
   --observations OBSERVATIONS
+```
+
+## mark-open-in-ci
+
+```text
+usage: vouch-mk2 mark-open-in-ci [-h] --root ROOT [--json] --name NAME --reason REASON
+
+options:
+  -h, --help       show this help message and exit
+  --root ROOT      store root directory
+  --json           emit one JSON result instead of text
+  --name NAME
+  --reason REASON
 ```
 
 ## mark-ready
@@ -474,6 +503,18 @@ options:
   --root ROOT       store root directory
   --json            emit one JSON result instead of text
   --mode {none,ci}
+```
+
+## set-ci-policy
+
+```text
+usage: vouch-mk2 set-ci-policy [-h] --root ROOT [--json] --policy {ledger,strict}
+
+options:
+  -h, --help            show this help message and exit
+  --root ROOT           store root directory
+  --json                emit one JSON result instead of text
+  --policy {ledger,strict}
 ```
 
 ## set-criteria

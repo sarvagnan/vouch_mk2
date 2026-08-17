@@ -23,12 +23,14 @@ from vouch_mk2.core.commands import (
     BindPack,
     RebindPack,
     BindBundle,
+    ClearOpenInCi,
     CloseDeviation,
     Command,
     CompleteRelease,
     FreezeAcceptance,
     MarkFailedUnrecovered,
     MarkDone,
+    MarkOpenInCi,
     MarkReady,
     OpenDeviation,
     PrepareRelease,
@@ -42,6 +44,7 @@ from vouch_mk2.core.commands import (
     RollBack,
     SetReleaseCriteria,
     SetAnchorMode,
+    SetCiPolicy,
     SetTier,
     SpecifyUnit,
     StartDeploy,
@@ -57,6 +60,7 @@ from vouch_mk2.core.events import (
     AnchorAdvanced,
     AnchorModeSet,
     BundleBound,
+    CiPolicySet,
     DeploymentStarted,
     DeviationAmended,
     DeviationClosed,
@@ -67,6 +71,8 @@ from vouch_mk2.core.events import (
     FormalCertificateRecorded,
     GateCheck,
     GateRecord,
+    OpenInCiCleared,
+    OpenInCiMarked,
     ReleaseCriteriaSet,
     ReleaseFailedUnrecovered,
     ReleaseInvalidated,
@@ -103,6 +109,7 @@ from vouch_mk2.core.model import (
     DeviationStatus,
     EvidenceHead,
     EvidenceKind,
+    CiException,
     PackRebound,
     Release,
     ReleaseArchetype,
@@ -1086,6 +1093,31 @@ def _decide_set_tier(snapshot: Snapshot, command: SetTier) -> Decision:
     return Accepted(events=(TierSet(command.tier),))
 
 
+def _decide_set_ci_policy(command: SetCiPolicy) -> Decision:
+    return Accepted(events=(CiPolicySet(command.policy),))
+
+
+def _decide_mark_open_in_ci(snapshot: Snapshot, command: MarkOpenInCi) -> Decision:
+    unit = snapshot.unit(command.name)
+    if unit is None:
+        return _refuse("unit.unknown", f"unit {command.name!r} does not exist")
+    if not command.reason.strip():
+        return _refuse(
+            "ci-policy.reason-required",
+            "mark-open-in-ci requires a non-empty reason",
+        )
+    return Accepted(events=(OpenInCiMarked(command.name, command.reason),))
+
+
+def _decide_clear_open_in_ci(snapshot: Snapshot, command: ClearOpenInCi) -> Decision:
+    if not any(item.unit_name == command.name for item in snapshot.ci_exceptions):
+        return _refuse(
+            "ci-policy.exception-missing",
+            f"unit {command.name!r} has no open-in-CI exception",
+        )
+    return Accepted(events=(OpenInCiCleared(command.name),))
+
+
 def _decide_record_formal_certificate(
     command: RecordFormalCertificate,
 ) -> Decision:
@@ -1408,6 +1440,12 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             return _decide_set_anchor_mode(command)
         case SetTier():
             return _decide_set_tier(snapshot, command)
+        case SetCiPolicy():
+            return _decide_set_ci_policy(command)
+        case MarkOpenInCi():
+            return _decide_mark_open_in_ci(snapshot, command)
+        case ClearOpenInCi():
+            return _decide_clear_open_in_ci(snapshot, command)
         case RecordFormalCertificate():
             return _decide_record_formal_certificate(command)
         case OpenDeviation():
@@ -1486,6 +1524,8 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
     evidence_heads = snapshot.evidence_heads
     anchor_mode = snapshot.anchor_mode
     tier = snapshot.tier
+    ci_policy = snapshot.ci_policy
+    ci_exceptions = snapshot.ci_exceptions
     formal_certificate_digest = snapshot.formal_certificate_digest
     match event:
         case UnitSpecified(name=name, version=version, depends_on=depends_on):
@@ -1700,6 +1740,26 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             anchor_mode = mode
         case TierSet(tier=next_tier):
             tier = next_tier
+        case CiPolicySet(policy=policy):
+            ci_policy = policy
+        case OpenInCiMarked(name=name, reason=reason):
+            ci_exceptions = tuple(
+                sorted(
+                    (
+                        item
+                        for item in ci_exceptions
+                        if item.unit_name != name
+                    ),
+                    key=lambda item: item.unit_name,
+                )
+            ) + (CiException(name, reason),)
+            ci_exceptions = tuple(
+                sorted(ci_exceptions, key=lambda item: item.unit_name)
+            )
+        case OpenInCiCleared(name=name):
+            ci_exceptions = tuple(
+                item for item in ci_exceptions if item.unit_name != name
+            )
         case FormalCertificateRecorded(certificate_digest=certificate_digest):
             formal_certificate_digest = certificate_digest
         case DeploymentStarted(release_id=release_id):
@@ -1763,6 +1823,8 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
         anchor_mode=anchor_mode,
         tier=tier,
         formal_certificate_digest=formal_certificate_digest,
+        ci_policy=ci_policy,
+        ci_exceptions=ci_exceptions,
     )
 
 
@@ -1815,4 +1877,6 @@ def apply(snapshot: Snapshot, events: tuple[Event, ...]) -> Snapshot:
         anchor_mode=current.anchor_mode,
         tier=current.tier,
         formal_certificate_digest=current.formal_certificate_digest,
+        ci_policy=current.ci_policy,
+        ci_exceptions=current.ci_exceptions,
     )

@@ -149,6 +149,8 @@ def _status_object(facts: StatusFacts) -> dict[str, object]:
         "anchored_current": facts.anchored_current,
         "anchor_mode": facts.anchor_mode,
         "tier": facts.tier,
+        "ci_policy": facts.ci_policy,
+        "ci_exceptions": [list(row) for row in facts.ci_exceptions],
         "formal_certificate_recorded": facts.formal_certificate_recorded,
         "next_action_count": facts.next_action_count,
         "unbound_pack_units": list(facts.unbound_pack_units),

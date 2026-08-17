@@ -21,6 +21,7 @@ from vouch_mk2.checks.tier import (
 from vouch_mk2.checks.standing import (
     check_amended_deviations_complete,
     check_blocked_status_coherent,
+    check_ci_policy,
     check_dependencies_exist,
     check_dependency_graph_acyclic,
     check_deviation_bindings_resolve,
@@ -130,6 +131,7 @@ MECHANICAL_CHECKS: Mapping[str, CheckEvaluator] = {
     mk2.CHECK_ONE_ACTIVE_RECORD_PER_NAME: check_one_active_record_per_name,
     mk2.CHECK_DEVIATION_BINDINGS_RESOLVE: check_deviation_bindings_resolve,
     mk2.CHECK_BLOCKED_STATUS_COHERENT: check_blocked_status_coherent,
+    mk2.CHECK_CI_POLICY: check_ci_policy,
     mk2.CHECK_PUBLISHED_UNITS_GATED: check_published_units_gated,
     mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE: check_amended_deviations_complete,
     mk2.CHECK_RELEASE_ESCAPE_PROPERTY: check_release_escape_property,
@@ -196,6 +198,8 @@ def run_checks(
     mechanical: Mapping[str, CheckEvaluator] = MECHANICAL_CHECKS,
     organizational: Mapping[str, CheckEvaluator] = ORGANIZATIONAL_CHECKS,
     artifact_results: tuple[CheckResult, ...] = (),
+    *,
+    ci: bool = False,
 ) -> CheckReport:
     """Run every supplied evaluator once, ordered by check id.
 
@@ -212,7 +216,14 @@ def run_checks(
                 snapshot, mechanical, organizational, artifact_results
             )
         else:
-            result = _guard_mechanical(check_id, mechanical[check_id](snapshot))
+            result = _guard_mechanical(
+                check_id,
+                (
+                    check_ci_policy(snapshot, enforce=ci)
+                    if check_id == mk2.CHECK_CI_POLICY
+                    else mechanical[check_id](snapshot)
+                ),
+            )
         mechanical_results.append(result)
 
     artifact_obligations = {

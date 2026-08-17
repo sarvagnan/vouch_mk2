@@ -76,6 +76,9 @@ CMD_RECORD_EVIDENCE = "record-evidence"
 CMD_ADVANCE_ANCHOR = "advance-anchor"
 CMD_SET_ANCHOR_MODE = "set-anchor-mode"
 CMD_SET_TIER = "set-tier"
+CMD_SET_CI_POLICY = "set-ci-policy"
+CMD_MARK_OPEN_IN_CI = "mark-open-in-ci"
+CMD_CLEAR_OPEN_IN_CI = "clear-open-in-ci"
 CMD_RECORD_FORMAL_CERTIFICATE = "record-formal-certificate"
 
 # Deviation lifecycle commands.
@@ -135,6 +138,7 @@ CHECK_RELEASE_BOUND_UNITS_ROSTERED = "check.release-bound-units-rostered"
 CHECK_TIER_EVIDENCE_REQUIRED = "check.tier.evidence-required"
 CHECK_TIER_HIGH_ATTESTATION = "check.tier.high-attestation"
 CHECK_PACK_BOUND = "check.pack-bound"
+CHECK_CI_POLICY = "check.ci-policy"
 
 # Phase 5 I/O-side artifact checks.
 CHECK_EVIDENCE_CHAINS = "check.evidence-chains"
@@ -533,21 +537,29 @@ _OBLIGATIONS = (
         obligation_id=CHECK_DEPENDENCIES_EXIST,
         scope=ObligationScope.STANDING_CHECK,
         description="Every unit dependency resolves to a unit in the snapshot.",
+        applicability=(Applicability(ConditionKind.SUBJECTS_PRESENT, "units"),),
     ),
     Obligation(
         obligation_id=CHECK_DEPENDENCY_GRAPH_ACYCLIC,
         scope=ObligationScope.STANDING_CHECK,
         description="The unit dependency graph contains no cycle.",
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "active-units"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_ONE_ACTIVE_RECORD_PER_NAME,
         scope=ObligationScope.STANDING_CHECK,
         description="Every unit name has at most one non-superseded record.",
+        applicability=(Applicability(ConditionKind.SUBJECTS_PRESENT, "units"),),
     ),
     Obligation(
         obligation_id=CHECK_DEVIATION_BINDINGS_RESOLVE,
         scope=ObligationScope.STANDING_CHECK,
         description="Every deviation binds the current version of an existing unit.",
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "deviations"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_BLOCKED_STATUS_COHERENT,
@@ -558,16 +570,25 @@ _OBLIGATIONS = (
             "means a unit stays blocked after its last blocker closes, until an "
             "explicit respecify or begin-reverify.)"
         ),
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "blocking-deviations"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_PUBLISHED_UNITS_GATED,
         scope=ObligationScope.STANDING_CHECK,
         description="Every published or release-bound unit still satisfies publication gates.",
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "published-units"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_AMENDED_DEVIATIONS_COMPLETE,
         scope=ObligationScope.STANDING_CHECK,
         description="Every amended deviation records its amendment and a resolving impact set.",
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "amendment-records"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_RELEASE_ESCAPE_PROPERTY,
@@ -578,21 +599,34 @@ _OBLIGATIONS = (
         obligation_id=CHECK_RELEASE_ROSTERS_RESOLVE,
         scope=ObligationScope.STANDING_CHECK,
         description="Active and succeeded release rosters resolve at their bound versions.",
+        applicability=(
+            Applicability(
+                ConditionKind.SUBJECTS_PRESENT,
+                "active-or-succeeded-releases",
+            ),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_RELEASE_CRITERIA_BEFORE_PROGRESSION,
         scope=ObligationScope.STANDING_CHECK,
         description="Every progressed release retains ledger-native launch criteria.",
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "progressed-releases"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_RELEASE_CLOSURE_RECORDS,
         scope=ObligationScope.STANDING_CHECK,
         description="Release closure records match their claim-bearing state semantics.",
+        applicability=(Applicability(ConditionKind.SUBJECTS_PRESENT, "releases"),),
     ),
     Obligation(
         obligation_id=CHECK_RELEASE_BOUND_UNITS_ROSTERED,
         scope=ObligationScope.STANDING_CHECK,
         description="Every release-bound unit appears in at least one release roster.",
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "release-bound-units"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_TIER_EVIDENCE_REQUIRED,
@@ -600,6 +634,9 @@ _OBLIGATIONS = (
         description=(
             "Tier-scoped published-unit evidence-chain requirements from the "
             "assurance matrix."
+        ),
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "published-once-units"),
         ),
     ),
     Obligation(
@@ -616,11 +653,36 @@ _OBLIGATIONS = (
         description=(
             "Tier-scoped acceptance pack versions are bound to canonical inventory objects."
         ),
+        applicability=(
+            Applicability(
+                ConditionKind.SUBJECTS_PRESENT,
+                "active-units-with-pack-versions",
+            ),
+        ),
+    ),
+    Obligation(
+        obligation_id=CHECK_CI_POLICY,
+        scope=ObligationScope.STANDING_CHECK,
+        description=(
+            "Under check --ci, the recorded policy either reports ledger-only "
+            "coherence or requires every post-specified unit to be terminal or excepted."
+        ),
+        applicability=(
+            Applicability(kind=ConditionKind.CI_MODE_IS, value="enabled"),
+            Applicability(kind=ConditionKind.CI_POLICY_IS, value="strict"),
+            Applicability(
+                kind=ConditionKind.SUBJECTS_PRESENT,
+                value="post-specified-units",
+            ),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_EVIDENCE_CHAINS,
         scope=ObligationScope.ARTIFACT_CHECK,
         description="Evidence heads resolve to coherent content-addressed chains.",
+        applicability=(
+            Applicability(kind=ConditionKind.SUBJECTS_PRESENT, value="evidence-heads"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_EVIDENCE_ANCHORS,
@@ -634,12 +696,23 @@ _OBLIGATIONS = (
         obligation_id=CHECK_BUNDLE_INVENTORIES,
         scope=ObligationScope.ARTIFACT_CHECK,
         description="Bound release inventories resolve and decode canonically.",
+        applicability=(
+            Applicability(
+                kind=ConditionKind.SUBJECTS_PRESENT,
+                value="bound-bundle-inventories",
+            ),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_FORMAL_CERTIFICATE,
         scope=ObligationScope.ARTIFACT_CHECK,
         description=(
-            "A recorded formal certificate matches a fresh exhaustive run."
+            "At high tier, a recorded formal certificate has current tables and "
+            "checker identity; exhaustive invariant and witness execution remains "
+            "the formal command's responsibility."
+        ),
+        applicability=(
+            Applicability(kind=ConditionKind.TIER_AT_LEAST, value="high"),
         ),
     ),
     Obligation(
@@ -653,6 +726,9 @@ _OBLIGATIONS = (
         description=(
             "A generated agent context exactly matches the authoritative snapshot."
         ),
+        applicability=(
+            Applicability(ConditionKind.SUBJECTS_PRESENT, "generated-context"),
+        ),
     ),
     Obligation(
         obligation_id=CHECK_PACK_FILES_MATCH,
@@ -662,6 +738,10 @@ _OBLIGATIONS = (
         ),
         applicability=(
             Applicability(kind=ConditionKind.PROJECT_ROOT_PRESENT, value="provided"),
+            Applicability(
+                kind=ConditionKind.SUBJECTS_PRESENT,
+                value="active-bound-pack-units",
+            ),
         ),
     ),
     Obligation(
@@ -744,6 +824,7 @@ _VOCABULARIES = (
     ),
     ClosedVocabulary(name="anchor-modes", values=("none", "ci")),
     ClosedVocabulary(name="tiers", values=tuple(tier.value for tier in Tier)),
+    ClosedVocabulary(name="ci-policies", values=("ledger", "strict")),
 )
 
 _CLAIM_RULES = (

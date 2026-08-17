@@ -10,6 +10,7 @@ from enum import Enum
 
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.lock import lock_digest
+from vouch_mk2.core import CiPolicy, Snapshot, Tier
 from vouch_mk2.store import Store, StoreError
 
 
@@ -49,12 +50,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
       - name: Verify vouch.lock against the recorded digest
         shell: bash
         run: python vouch.lock self-check --expect @.vouch/config.json
       - name: Vouch check
         shell: bash
-        run: python vouch.lock check --ci --root .vouch
+        run: python vouch.lock check --ci --root .vouch --project .
 """
 
 
@@ -177,7 +181,12 @@ def _preflight_owned_directory(root: str, relative: str) -> None:
             raise InitError(f"{current}: path component is not a directory")
 
 
-def init_project(project_root: str, lock_bytes: bytes) -> tuple[InitResult, ...]:
+def init_project(
+    project_root: str,
+    lock_bytes: bytes,
+    *,
+    tier: Tier = Tier.LIGHTWEIGHT,
+) -> tuple[InitResult, ...]:
     """Initialize exactly the D-7 store, lock, config, and CI workflow set.
 
     Every precondition — fresh store, sane project root, no symlinked or
@@ -219,7 +228,10 @@ def init_project(project_root: str, lock_bytes: bytes) -> tuple[InitResult, ...]
         # the store, then the files that reference it.
         _ensure_owned_directory(root, ".github/workflows")
         try:
-            store = Store.init(store_path)
+            store = Store.init(
+                store_path,
+                initial_snapshot=Snapshot(tier=tier, ci_policy=CiPolicy.STRICT),
+            )
         except StoreError as error:
             raise InitError(str(error)) from error
         store.close()

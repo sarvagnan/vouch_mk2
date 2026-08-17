@@ -242,7 +242,7 @@ def test_artifact_checks_pass_for_complete_anchored_chain(tmp_path: Path) -> Non
         by_id = {result.check_id: result for result in results}
         assert by_id[mk2.CHECK_MAP_FRESHNESS].verdict is Verdict.NOT_APPLICABLE
         assert all(
-            result.verdict is Verdict.PASS
+            result.verdict in {Verdict.PASS, Verdict.NOT_APPLICABLE}
             for result in results
             if result.check_id
             not in {
@@ -251,6 +251,7 @@ def test_artifact_checks_pass_for_complete_anchored_chain(tmp_path: Path) -> Non
                 mk2.CHECK_PACK_FILES_MATCH,
             }
         )
+        assert all(result.verdict is not Verdict.NOT_CHECKED for result in results)
 
 
 def test_corrupt_evidence_and_absent_head_fail(tmp_path: Path) -> None:

@@ -105,6 +105,8 @@ class Store:
         root: str,
         on_step: Callable[[str], None] | None = None,
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
+        *,
+        initial_snapshot: Snapshot | None = None,
     ) -> Store:
         """Create a fresh layout and open its root capability exactly once."""
         cls._validate_artifact_bound(max_artifact_bytes)
@@ -116,7 +118,9 @@ class Store:
             ) from error
         store = cls(root, on_step=on_step, max_artifact_bytes=max_artifact_bytes)
         try:
-            store._initialize_layout()
+            store._initialize_layout(
+                Snapshot() if initial_snapshot is None else initial_snapshot
+            )
         except BaseException:
             store.close()
             raise
@@ -196,8 +200,8 @@ class Store:
                     f"{operation} refused: writer lock is not held by current thread"
                 )
 
-    def _initialize_layout(self) -> None:
-        state = encode_snapshot(Snapshot())
+    def _initialize_layout(self, initial_snapshot: Snapshot) -> None:
+        state = encode_snapshot(initial_snapshot)
         self._require_within_artifact_bound(state, "initial state")
         os.mkdir("objects", 0o700, dir_fd=self._root_fd)
         objects_fd = self._open_directory("objects", self._root_fd)

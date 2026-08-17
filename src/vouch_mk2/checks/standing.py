@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 from vouch_mk2.checks.results import CheckResult
 from vouch_mk2.core.model import (
+    CiPolicy,
     DeviationStatus,
     ReleaseState,
     Snapshot,
@@ -35,9 +36,89 @@ _ACTIVE_RELEASE_STATES = frozenset(
 _PROTECTIVE_RELEASE_STATES = frozenset(
     mk2.MK2.state_set("release.protective.operational").states
 )
+_CI_TERMINAL_UNIT_STATUSES = frozenset(
+    {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND, UnitStatus.SUPERSEDED}
+)
+
+
+def _not_applicable(check_id: str, subjects: str) -> CheckResult:
+    return CheckResult(
+        check_id=check_id,
+        verdict=Verdict.NOT_APPLICABLE,
+        detail=f"IR applicability rule not met: subjects-present: {subjects}",
+    )
+
+
+def check_ci_policy(snapshot: Snapshot, *, enforce: bool = False) -> CheckResult:
+    exceptions = tuple(
+        sorted(snapshot.ci_exceptions, key=lambda item: item.unit_name)
+    )
+    exception_detail = (
+        "exceptions: "
+        + ", ".join(
+            f"{item.unit_name} ({item.reason})" for item in exceptions
+        )
+        if exceptions
+        else "exceptions: none"
+    )
+    if not enforce:
+        return CheckResult(
+            check_id=mk2.CHECK_CI_POLICY,
+            verdict=Verdict.NOT_APPLICABLE,
+            detail=(
+                "IR applicability rule not met: ci-mode-is: enabled; "
+                f"recorded CI policy is {snapshot.ci_policy.value}; {exception_detail}"
+            ),
+        )
+    if snapshot.ci_policy is CiPolicy.LEDGER:
+        return CheckResult(
+            check_id=mk2.CHECK_CI_POLICY,
+            verdict=Verdict.NOT_APPLICABLE,
+            detail=(
+                "CI policy ledger enforced; IR applicability rule not met: "
+                "ci-policy-is: strict; today's ledger-coherence behavior does "
+                f"not require terminal units; {exception_detail}"
+            ),
+        )
+    exception_names = {item.unit_name for item in exceptions}
+    subjects = tuple(
+        unit for unit in snapshot.units if unit.status is not UnitStatus.SPECIFIED
+    )
+    if not subjects:
+        return CheckResult(
+            check_id=mk2.CHECK_CI_POLICY,
+            verdict=Verdict.NOT_APPLICABLE,
+            detail=(
+                "CI policy strict enforced; IR applicability rule not met: "
+                f"subjects-present: post-specified-units; {exception_detail}"
+            ),
+        )
+    offenders = tuple(
+        sorted(
+            unit.ref().label()
+            for unit in subjects
+            if unit.status not in _CI_TERMINAL_UNIT_STATUSES
+            and unit.name not in exception_names
+        )
+    )
+    return CheckResult(
+        check_id=mk2.CHECK_CI_POLICY,
+        verdict=Verdict.FAIL if offenders else Verdict.PASS,
+        detail=(
+            "CI policy strict enforced; "
+            + (
+                f"nonterminal units without exceptions: {offenders!r}; "
+                if offenders
+                else "all post-specified units are terminal or excepted; "
+            )
+            + exception_detail
+        ),
+    )
 
 
 def check_dependencies_exist(snapshot: Snapshot) -> CheckResult:
+    if not snapshot.units:
+        return _not_applicable(mk2.CHECK_DEPENDENCIES_EXIST, "units")
     missing = tuple(
         sorted(
             (unit.name, dependency)
@@ -98,6 +179,10 @@ def check_dependency_graph_acyclic(snapshot: Snapshot) -> CheckResult:
         for unit in snapshot.units
         if unit.status is not UnitStatus.SUPERSEDED
     }
+    if not graph:
+        return _not_applicable(
+            mk2.CHECK_DEPENDENCY_GRAPH_ACYCLIC, "active-units"
+        )
     cycle = _dependency_cycle(graph)
     return CheckResult(
         check_id=mk2.CHECK_DEPENDENCY_GRAPH_ACYCLIC,
@@ -107,6 +192,10 @@ def check_dependency_graph_acyclic(snapshot: Snapshot) -> CheckResult:
 
 
 def check_one_active_record_per_name(snapshot: Snapshot) -> CheckResult:
+    if not snapshot.units:
+        return _not_applicable(
+            mk2.CHECK_ONE_ACTIVE_RECORD_PER_NAME, "units"
+        )
     names: set[str] = set()
     duplicates: set[str] = set()
     for unit in snapshot.units:
@@ -127,6 +216,10 @@ def check_one_active_record_per_name(snapshot: Snapshot) -> CheckResult:
 
 
 def check_deviation_bindings_resolve(snapshot: Snapshot) -> CheckResult:
+    if not snapshot.deviations:
+        return _not_applicable(
+            mk2.CHECK_DEVIATION_BINDINGS_RESOLVE, "deviations"
+        )
     dangling: list[str] = []
     for deviation in snapshot.deviations:
         unit = snapshot.unit_ref(deviation.unit)
@@ -150,8 +243,15 @@ def check_blocked_status_coherent(snapshot: Snapshot) -> CheckResult:
     # blocked until an explicit respecify/begin-reverify. The checkable
     # invariant is the converse: blocking deviations never bind a unit that is
     # active in the lifecycle.
+    subjects = tuple(
+        unit for unit in snapshot.units if blocking_deviations(snapshot, unit)
+    )
+    if not subjects:
+        return _not_applicable(
+            mk2.CHECK_BLOCKED_STATUS_COHERENT, "blocking-deviations"
+        )
     offenders: list[str] = []
-    for unit in sorted(snapshot.units, key=lambda candidate: candidate.name):
+    for unit in sorted(subjects, key=lambda candidate: candidate.name):
         blockers = blocking_deviations(snapshot, unit)
         if blockers and unit.status not in _BLOCKER_COHERENT_STATUSES:
             blocker_ids = tuple(sorted(d.deviation_id for d in blockers))
@@ -167,10 +267,15 @@ def check_blocked_status_coherent(snapshot: Snapshot) -> CheckResult:
 
 
 def check_published_units_gated(snapshot: Snapshot) -> CheckResult:
+    subjects = tuple(
+        unit for unit in snapshot.units if unit.status in _PUBLISHED_STATUSES
+    )
+    if not subjects:
+        return _not_applicable(
+            mk2.CHECK_PUBLISHED_UNITS_GATED, "published-units"
+        )
     offenders: list[str] = []
-    for unit in sorted(snapshot.units, key=lambda candidate: candidate.name):
-        if unit.status not in _PUBLISHED_STATUSES:
-            continue
+    for unit in sorted(subjects, key=lambda candidate: candidate.name):
         failures: list[str] = []
         if not unit.acceptance_pack_version:
             failures.append("acceptance_pack_version is empty")
@@ -207,10 +312,25 @@ def check_amended_deviations_complete(snapshot: Snapshot) -> CheckResult:
     # while the deviation is still amended, so any state-correspondence predicate
     # here would false-FAIL legal histories. That correspondence lives in
     # decide()'s amend path and its property tests.
+    subjects = tuple(
+        deviation
+        for deviation in snapshot.deviations
+        if deviation.status is DeviationStatus.AMENDED
+        or (
+            deviation.status is DeviationStatus.CLOSED
+            and (
+                deviation.amendment_version != ""
+                or deviation.impact_set != ()
+                or deviation.release_impact_set != ()
+            )
+        )
+    )
+    if not subjects:
+        return _not_applicable(
+            mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE, "amendment-records"
+        )
     offenders: list[str] = []
-    for deviation in sorted(
-        snapshot.deviations, key=lambda candidate: candidate.deviation_id
-    ):
+    for deviation in sorted(subjects, key=lambda candidate: candidate.deviation_id):
         amended = deviation.status is DeviationStatus.AMENDED
         closed_with_record = deviation.status is DeviationStatus.CLOSED and (
             deviation.amendment_version != ""
@@ -300,9 +420,14 @@ def check_release_escape_property(snapshot: Snapshot) -> CheckResult:
 def check_release_rosters_resolve(snapshot: Snapshot) -> CheckResult:
     offenders: list[str] = []
     audited = _ACTIVE_RELEASE_STATES | {ReleaseState.SUCCEEDED.value}
-    for release in snapshot.releases:
-        if release.state.value not in audited:
-            continue
+    subjects = tuple(
+        release for release in snapshot.releases if release.state.value in audited
+    )
+    if not subjects:
+        return _not_applicable(
+            mk2.CHECK_RELEASE_ROSTERS_RESOLVE, "active-or-succeeded-releases"
+        )
+    for release in subjects:
         for ref in release.includes:
             unit = snapshot.unit_ref(ref)
             if unit is None:
@@ -322,17 +447,26 @@ def check_release_criteria_before_progression(snapshot: Snapshot) -> CheckResult
     # amendment-invalidated — so RETIRED and INVALIDATED must both remain
     # at-rest legal without criteria. Every other progressed state is reachable
     # only through the criteria-gated `prepared -> deploying` edge.
+    subjects = tuple(
+        release
+        for release in snapshot.releases
+        if release.state
+        not in {
+            ReleaseState.PREPARED,
+            ReleaseState.RETIRED,
+            ReleaseState.INVALIDATED,
+        }
+    )
+    if not subjects:
+        return _not_applicable(
+            mk2.CHECK_RELEASE_CRITERIA_BEFORE_PROGRESSION,
+            "progressed-releases",
+        )
     offenders = tuple(
         sorted(
             release.release_id
-            for release in snapshot.releases
-            if release.state
-            not in {
-                ReleaseState.PREPARED,
-                ReleaseState.RETIRED,
-                ReleaseState.INVALIDATED,
-            }
-            and release.criteria is None
+            for release in subjects
+            if release.criteria is None
         )
     )
     return CheckResult(
@@ -347,6 +481,10 @@ def check_release_criteria_before_progression(snapshot: Snapshot) -> CheckResult
 
 
 def check_release_closure_records(snapshot: Snapshot) -> CheckResult:
+    if not snapshot.releases:
+        return _not_applicable(
+            mk2.CHECK_RELEASE_CLOSURE_RECORDS, "releases"
+        )
     offenders: list[str] = []
     for release in snapshot.releases:
         closure = release.closure
@@ -387,14 +525,21 @@ def check_release_closure_records(snapshot: Snapshot) -> CheckResult:
 
 
 def check_release_bound_units_rostered(snapshot: Snapshot) -> CheckResult:
+    subjects = tuple(
+        unit for unit in snapshot.units if unit.status is UnitStatus.RELEASE_BOUND
+    )
+    if not subjects:
+        return _not_applicable(
+            mk2.CHECK_RELEASE_BOUND_UNITS_ROSTERED, "release-bound-units"
+        )
     rostered = {
         ref for release in snapshot.releases for ref in release.includes
     }
     offenders = tuple(
         sorted(
             unit.ref().label()
-            for unit in snapshot.units
-            if unit.status is UnitStatus.RELEASE_BOUND and unit.ref() not in rostered
+            for unit in subjects
+            if unit.ref() not in rostered
         )
     )
     return CheckResult(

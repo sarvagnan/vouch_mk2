@@ -65,6 +65,8 @@ class SystemMap:
     evidence_heads: tuple[EvidenceHead, ...]
     anchor_mode: str
     tier: str
+    ci_policy: str
+    ci_exceptions: tuple[tuple[str, str], ...]
     formal_certificate_digest: str
     next_actions: tuple[NextAction, ...]
     status_facts: StatusFacts
@@ -151,6 +153,13 @@ def system_map(snapshot: Snapshot) -> SystemMap:
         ),
         anchor_mode=snapshot.anchor_mode.value,
         tier=snapshot.tier.value,
+        ci_policy=snapshot.ci_policy.value,
+        ci_exceptions=tuple(
+            (item.unit_name, item.reason)
+            for item in sorted(
+                snapshot.ci_exceptions, key=lambda row: row.unit_name
+            )
+        ),
         formal_certificate_digest=snapshot.formal_certificate_digest,
         next_actions=actions,
         status_facts=status_facts(snapshot, actions),

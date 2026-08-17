@@ -216,12 +216,14 @@ def test_cli_projection_commands_and_generate_then_check(
     assert mk2.CHECK_MAP_FRESHNESS in capsys.readouterr().out
 
     assert main(["next", "--root", str(root)]) == 0
-    assert capsys.readouterr().out == "no next actions\n"
+    bootstrap = capsys.readouterr().out
+    assert "specify" in bootstrap
+    assert "<UNIT_NAME>" in bootstrap
 
     assert main(["status", "--root", str(root)]) == 0
     status = capsys.readouterr().out
     assert "unit_counts: \n" in status
-    assert "next_action_count: 0\n" in status
+    assert "next_action_count: 1\n" in status
 
     assert main(["emit-context", "--root", str(root)]) == 0
     written = Path(capsys.readouterr().out.strip())
@@ -281,8 +283,8 @@ def test_cli_formal_reports_closed_relation_and_discriminators(
     assert "states: 264462" in output
     assert "transitions: 1381350" in output
     assert "universe: tier-v1" in output
-    assert "states: 75" in output
-    assert "transitions: 257" in output
+    assert "states: 294" in output
+    assert "transitions: 2024" in output
     assert "PASS  M1.no-direct-republication" in output
     assert "universe-bounded: label set exhausted for unit b: 2 labels" in output
     assert "PASS  M9.anchor-monotonic" in output
@@ -322,7 +324,8 @@ def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: 
 
 def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[str]) -> None:
     # D-10: mk2's own committed store must pass check --ci with zero mechanical
-    # NOT_CHECKED and all six organizational rows visibly NOT_CHECKED.
+    # NOT_CHECKED and every organizational row visibly NOT_CHECKED. Tier controls
+    # deliberately render one row per control so none is hidden in a long detail.
     root = Path(__file__).resolve().parents[1] / ".vouch"
     assert (root / "state.json").exists(), "the dogfood store must be committed"
     assert main(["check", "--ci", "--root", str(root)]) == 0
@@ -334,4 +337,6 @@ def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[
     ]
     assert mechanical_not_checked == []
     org_rows = [line for line in out.splitlines() if line.startswith("NOT-CHECKED") and "org." in line]
-    assert len(org_rows) == 6
+    tier_rows = [line for line in org_rows if "org.tier-controls" in line]
+    assert len(org_rows) == 5 + len(tier_rows)
+    assert len(tier_rows) > 1

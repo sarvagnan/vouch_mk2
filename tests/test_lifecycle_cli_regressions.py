@@ -786,13 +786,15 @@ def test_next_shell_line_round_trips_exact_root_and_subject_argv(
     ]
 
 
-def test_next_json_on_a_complete_snapshot_is_one_empty_document(
+def test_next_json_on_an_empty_snapshot_bootstraps_the_first_unit(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = tmp_path / "store"
     _init_store(root)
     assert main(["next", "--root", str(root), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"actions": []}
+    document = json.loads(capsys.readouterr().out)
+    assert [action["command"] for action in document["actions"]] == ["specify"]
+    assert document["actions"][0]["argv"][0] == "vouch-mk2"
 
 
 def test_next_placeholders_stay_readable_while_bound_values_are_shell_safe() -> None:

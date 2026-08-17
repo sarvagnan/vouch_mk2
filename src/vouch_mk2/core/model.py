@@ -76,6 +76,11 @@ class AnchorMode(Enum):
     CI = "ci"
 
 
+class CiPolicy(Enum):
+    LEDGER = "ledger"
+    STRICT = "strict"
+
+
 class ClosureTriggerKind(Enum):
     AMENDMENT = "amendment"
     OPERATOR = "operator"
@@ -145,6 +150,14 @@ class PackRebound:
     new_test_set_digest: str
     reason: str
     evidence_head_sequence: int
+
+
+@dataclass(frozen=True, slots=True)
+class CiException:
+    """A named unit allowed to remain nonterminal under strict CI policy."""
+
+    unit_name: str
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +273,8 @@ class Snapshot:
     anchor_mode: AnchorMode = AnchorMode.NONE
     tier: Tier = Tier.LIGHTWEIGHT
     formal_certificate_digest: str = ""
+    ci_policy: CiPolicy = CiPolicy.LEDGER
+    ci_exceptions: tuple[CiException, ...] = ()
 
     def unit(self, name: str) -> Unit | None:
         """The CURRENT record for ``name`` (D-9): the one non-superseded record

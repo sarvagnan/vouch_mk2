@@ -232,14 +232,17 @@ def test_blocked_status_coherent_passes_for_matching_blocker() -> None:
         units=(unit("u", UnitStatus.BLOCKED),),
         deviations=(deviation("d", "u"),),
     )
-    assert check_blocked_status_coherent(snapshot).verdict is Verdict.PASS
+    result = check_blocked_status_coherent(snapshot)
+    assert result.verdict is Verdict.PASS
 
 
 def test_blocked_without_blocker_is_legal_awaiting_explicit_unblock() -> None:
     # D-3 no-auto-unblock: closing the last deviation leaves the unit blocked
     # until an explicit respecify/begin-reverify, so this state is coherent.
     snapshot = Snapshot(units=(unit("u", UnitStatus.BLOCKED),))
-    assert check_blocked_status_coherent(snapshot).verdict is Verdict.PASS
+    result = check_blocked_status_coherent(snapshot)
+    assert result.verdict is Verdict.NOT_APPLICABLE
+    assert "subjects-present: blocking-deviations" in result.detail
 
 
 def test_blocked_status_coherent_fails_for_blocker_on_nonblocked_unit() -> None:
@@ -629,4 +632,4 @@ def test_tier_evidence_obligation_follows_a_published_unit_through_status_change
         assert verdict(after) is Verdict.FAIL, command
     # And a unit that was never published is not caught by the widened scope.
     never = Snapshot(revision=1, tier=Tier.STANDARD, units=(Unit("u", "v1", UnitStatus.BLOCKED, acceptance_pack_version="p"),))
-    assert verdict(never) is Verdict.PASS
+    assert verdict(never) is Verdict.NOT_APPLICABLE

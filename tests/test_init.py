@@ -128,6 +128,7 @@ def test_cli_init_with_supplied_lock_prints_four_report_lines(
         "written vouch.lock",
         "written .vouch/config.json",
         "written .github/workflows/vouch.yml",
+        "Vouch requires Python 3.14+",
     ]
 
 

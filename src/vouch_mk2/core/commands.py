@@ -12,6 +12,7 @@ from typing import ClassVar
 
 from vouch_mk2.core.model import (
     AnchorMode,
+    CiPolicy,
     DeviationType,
     EvidenceEvent,
     LaunchCriteria,
@@ -181,6 +182,31 @@ class SetTier:
 
 
 @dataclass(frozen=True, slots=True)
+class SetCiPolicy:
+    """Choose whether CI reports ledger coherence or requires terminal units."""
+
+    ir_command: ClassVar[str] = mk2.CMD_SET_CI_POLICY
+    policy: CiPolicy
+
+
+@dataclass(frozen=True, slots=True)
+class MarkOpenInCi:
+    """Record why one nonterminal unit may remain open under strict CI."""
+
+    ir_command: ClassVar[str] = mk2.CMD_MARK_OPEN_IN_CI
+    name: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClearOpenInCi:
+    """Remove a unit's recorded strict-CI exception."""
+
+    ir_command: ClassVar[str] = mk2.CMD_CLEAR_OPEN_IN_CI
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class RecordFormalCertificate:
     ir_command: ClassVar[str] = mk2.CMD_RECORD_FORMAL_CERTIFICATE
     certificate_digest: str
@@ -264,6 +290,9 @@ type Command = (
     | AdvanceAnchor
     | SetAnchorMode
     | SetTier
+    | SetCiPolicy
+    | MarkOpenInCi
+    | ClearOpenInCi
     | RecordFormalCertificate
     | ReleaseTransitionCommand
 )

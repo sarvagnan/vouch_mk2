@@ -181,8 +181,8 @@ def _regression_tier_v1_covers_legal_lowering_and_committed_refusals(
 
     tier = formal_run.universe(TIER_V1.name)
     assert tier.universe_name == TIER_V1.name == "tier-v1"
-    assert tier.state_count == 75
-    assert tier.transition_count == 257
+    assert tier.state_count == 294
+    assert tier.transition_count == 2_024
     representatives = dict(tier.relation.representatives)
     lowering = [
         (representatives[source], representatives[target])
@@ -358,13 +358,15 @@ def test_formal_artifact_encodings_are_stable_and_certificate_is_strict(
         decode_formal_certificate(noncanonical)
 
 
-def test_recorded_certificate_recomputes_and_stale_certificate_fails(
+def test_recorded_certificate_is_checked_cheaply_and_names_unexplored_properties(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     formal_run: FormalRun,
 ) -> None:
     root = tmp_path / "store"
-    with Store.init(str(root)) as store:
+    with Store.init(
+        str(root), initial_snapshot=Snapshot(tier=Tier.HIGH)
+    ) as store:
         digest = record_formal_certificate(store, formal_run)
         snapshot = store.read_snapshot()
         assert snapshot.formal_certificate_digest == digest
@@ -373,13 +375,24 @@ def test_recorded_certificate_recomputes_and_stale_certificate_fails(
         )
         assert certificate == build_certificate(formal_run)[0]
 
-        monkeypatch.setattr(verify_module, "run_formal", lambda: formal_run)
+        calls: list[str] = []
+        monkeypatch.setattr(
+            verify_module,
+            "run_formal",
+            lambda: (calls.append("explored"), formal_run)[1],
+        )
         passed_result = next(
             result
             for result in run_artifact_checks(store, snapshot)
             if result.check_id == mk2.CHECK_FORMAL_CERTIFICATE
         )
-        assert passed_result.verdict is Verdict.PASS
+        assert passed_result.verdict is Verdict.NOT_CHECKED
+        assert calls == []
+        assert "relation digests and counts" in passed_result.detail
+        assert "invariant truth" in passed_result.detail
+        assert store.get_object(
+            ArtifactKind.FORMAL_TABLES, certificate.tables_digest
+        ) == encode_formal_tables(formal_run.tables)
 
         tampered_universes = tuple(
             (
@@ -408,9 +421,8 @@ def test_recorded_certificate_recomputes_and_stale_certificate_fails(
             for result in run_artifact_checks(store, tampered_snapshot)
             if result.check_id == mk2.CHECK_FORMAL_CERTIFICATE
         )
-        assert tampered_result.verdict is Verdict.FAIL
-        assert tampered_result.detail.startswith("formal universe relation mismatch: [")
-        assert "disagree with recomputation" in tampered_result.detail
+        assert tampered_result.verdict is Verdict.NOT_CHECKED
+        assert "relation digests and counts" in tampered_result.detail
 
         stale_data = encode_formal_certificate(
             replace(certificate, checker_version="stale-checker")

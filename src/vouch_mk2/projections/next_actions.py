@@ -50,6 +50,7 @@ _DEVIATION_REASONS = {
 }
 
 _RELEASE_REASONS = {
+    mk2.CMD_BIND_BUNDLE: "Bind the release's immutable bundle inventory.",
     mk2.CMD_SET_CRITERIA: "Record launch criteria for the prepared release.",
     mk2.CMD_START_DEPLOY: "Start deployment now that launch criteria are recorded.",
     mk2.CMD_START_VERIFICATION: "Start verification of the deployed release.",
@@ -162,12 +163,24 @@ def _release_commands(snapshot: Snapshot, release_id: str) -> tuple[str, ...]:
     outgoing = _outgoing(mk2.RELEASE_O_MACHINE, release.state.value)
     match release.state:
         case ReleaseState.PREPARED:
-            command = (
+            primary = (
                 mk2.CMD_SET_CRITERIA
                 if release.criteria is None
                 else mk2.CMD_START_DEPLOY
             )
-            return (command,) if command in outgoing else ()
+            commands = tuple(
+                command
+                for command in (
+                    *(
+                        (mk2.CMD_BIND_BUNDLE,)
+                        if not release.bundle_inventory_digest
+                        else ()
+                    ),
+                    primary,
+                )
+                if command in outgoing
+            )
+            return commands
         case ReleaseState.DEPLOYING:
             return (
                 (mk2.CMD_START_VERIFICATION,)
@@ -196,6 +209,15 @@ def _release_commands(snapshot: Snapshot, release_id: str) -> tuple[str, ...]:
 def next_actions(snapshot: Snapshot) -> tuple[NextAction, ...]:
     """Return only binding work whose IR edge and current-state gates are legal."""
     actions: list[NextAction] = []
+    if not snapshot.units:
+        actions.append(
+            NextAction(
+                "unit",
+                "<UNIT_NAME>",
+                mk2.CMD_SPECIFY,
+                "Specify the first unit to bootstrap this store.",
+            )
+        )
     for unit in snapshot.units:
         for command in _unit_commands(snapshot, unit):
             actions.append(

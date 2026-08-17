@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from vouch_mk2.core.model import (
     AnchorMode,
+    CiPolicy,
     ClosureRecord,
     DeviationType,
     EvidenceEvent,
@@ -202,6 +203,22 @@ class TierSet:
 
 
 @dataclass(frozen=True, slots=True)
+class CiPolicySet:
+    policy: CiPolicy
+
+
+@dataclass(frozen=True, slots=True)
+class OpenInCiMarked:
+    name: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class OpenInCiCleared:
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class FormalCertificateRecorded:
     certificate_digest: str
 
@@ -276,6 +293,9 @@ type Event = (
     | AnchorAdvanced
     | AnchorModeSet
     | TierSet
+    | CiPolicySet
+    | OpenInCiMarked
+    | OpenInCiCleared
     | FormalCertificateRecorded
     | DeploymentStarted
     | VerificationStarted

@@ -95,7 +95,7 @@ def test_formal_verb_still_explores(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cli_module is not None
 
 
-def test_hook_and_mcp_never_explore(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hook_never_explores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # guard: holds today and must keep holding.
     _project, root = _init(tmp_path)
     import vouch_mk2.verify as verify
@@ -123,18 +123,46 @@ def test_generated_workflow_pins_python_314_and_passes_project(tmp_path: Path) -
 # ---- R4 emitted commands ----
 
 
-def test_emitted_commands_use_the_real_invocation_name(tmp_path: Path) -> None:
-    _project, root = _init(tmp_path)
+def test_lock_invocation_emits_its_own_program_name(tmp_path: Path) -> None:
+    import subprocess
+
+    project, root = _init(tmp_path)
     assert _run("specify", "--root", root, "--name", "u", "--version", "v1")[0] == 0
-    code, out = _run("next", "--root", root, "--json")
-    assert code == 0, out
-    document = json.loads(out)
+    lock = project / "vouch.lock"
+    assert lock.exists(), "init must vendor a lock"
+    result = subprocess.run(
+        [sys.executable, str(lock), "next", "--root", root, "--json"],
+        capture_output=True, text=True, timeout=600, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    document = json.loads(result.stdout)
     assert document["actions"], "expected at least one next action"
-    program = Path(sys.argv[0]).name
     for action in document["actions"]:
-        assert action["argv"][0] == program, (
-            f"emitted argv[0] is {action['argv'][0]!r}; it must be the running invocation "
-            f"name ({program!r}), not a hardcoded one"
+        assert action["argv"][0] == "vouch.lock", (
+            f"a lock-invoked store emitted {action['argv'][0]!r}; an operator must be able to "
+            "copy-paste the command they actually ran"
+        )
+
+
+def test_emitted_program_name_does_not_depend_on_unrelated_store_facts(tmp_path: Path) -> None:
+    import subprocess
+
+    project, root = _init(tmp_path)
+    # The CI policy has nothing to do with how the program was invoked.
+    assert _run("set-ci-policy", "--root", root, "--policy", "ledger")[0] == 0
+    assert _run("specify", "--root", root, "--name", "u", "--version", "v1")[0] == 0
+    lock = project / "vouch.lock"
+    result = subprocess.run(
+        [sys.executable, str(lock), "next", "--root", root, "--json"],
+        capture_output=True, text=True, timeout=600, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    document = json.loads(result.stdout)
+    assert document["actions"], "expected at least one next action"
+    for action in document["actions"]:
+        assert action["argv"][0] == "vouch.lock", (
+            f"emitted {action['argv'][0]!r} under ci_policy=ledger; the invocation name must not "
+            "depend on the CI policy or any other unrelated recorded fact"
         )
 
 

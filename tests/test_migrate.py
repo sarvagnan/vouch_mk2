@@ -276,6 +276,7 @@ def test_approve_commits_revision_one_reports_predicted_fail_and_refuses_rerun(
         mk2.CHECK_TIER_EVIDENCE_REQUIRED,
         mk2.CHECK_TIER_HIGH_ATTESTATION,
         mk2.CHECK_PACK_BOUND,
+        mk2.CHECK_FORMAL_CERTIFICATE,
     }
     assert check_output.rstrip().endswith("composed: FAIL")
 

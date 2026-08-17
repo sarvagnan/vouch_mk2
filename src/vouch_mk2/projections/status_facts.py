@@ -18,6 +18,8 @@ class StatusFacts:
     anchored_current: int
     anchor_mode: str
     tier: str
+    ci_policy: str
+    ci_exceptions: tuple[tuple[str, str], ...]
     formal_certificate_recorded: bool
     next_action_count: int
     unbound_pack_units: tuple[str, ...]
@@ -48,6 +50,13 @@ def status_facts(
         ),
         anchor_mode=snapshot.anchor_mode.value,
         tier=snapshot.tier.value,
+        ci_policy=snapshot.ci_policy.value,
+        ci_exceptions=tuple(
+            (item.unit_name, item.reason)
+            for item in sorted(
+                snapshot.ci_exceptions, key=lambda row: row.unit_name
+            )
+        ),
         formal_certificate_recorded=bool(snapshot.formal_certificate_digest),
         next_action_count=len(actions),
         unbound_pack_units=tuple(

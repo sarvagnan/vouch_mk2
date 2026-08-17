@@ -35,6 +35,7 @@ from vouch_mk2.core import (
     RecordFormalCertificate,
     Refused,
     Snapshot,
+    Tier,
     UnitRef,
     apply,
     decide,
@@ -104,17 +105,18 @@ class _Arguments(argparse.Namespace):
     command_argv: list[str]
     tree: str
     exclude: list[str]
+    tier: str
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="vouch-mk2")
+    parser = argparse.ArgumentParser(prog=os.path.basename(sys.argv[0]) or "vouch-mk2")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="run structured snapshot checks")
     check.add_argument(
         "--ci",
         action="store_true",
         help=(
-            "no-op today; makes CI intent explicit (IMPLEMENTATION-PLAN.md Phase 3)"
+            "enforce and name the store's recorded CI policy"
         ),
     )
     check.add_argument(
@@ -160,7 +162,7 @@ def _parser() -> argparse.ArgumentParser:
             default=".",
             help="store root directory (default: current directory)",
         )
-        if name == "next":
+        if name in {"next", "status"}:
             command.add_argument(
                 "--json",
                 dest="json_output",
@@ -249,6 +251,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     init.add_argument("--project", required=True, help="target project directory")
     init.add_argument(
+        "--tier",
+        choices=tuple(tier.value for tier in Tier),
+        default=Tier.LIGHTWEIGHT.value,
+        help="initial assurance tier (default: lightweight)",
+    )
+    init.add_argument(
         "--lock",
         dest="lock_path",
         default=None,
@@ -303,8 +311,12 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _format_result(result: CheckResult) -> str:
-    detail = f"  {result.detail}" if result.detail else ""
-    return f"{result.verdict.value.upper():<14} {result.check_id}{detail}"
+    details = result.detail.splitlines() or [""]
+    return "\n".join(
+        f"{result.verdict.value.upper():<14} {result.check_id}"
+        + (f"  {detail}" if detail else "")
+        for detail in details
+    )
 
 
 def _present_text(report: CheckReport) -> None:
@@ -446,9 +458,12 @@ def _add_reflected_field(
 
 def _add_lifecycle_parsers(commands: Any) -> None:
     for verb, command_type in _LIFECYCLE_COMMANDS.items():
+        documentation = (command_type.__doc__ or "").splitlines()[0]
+        if not documentation or documentation.startswith(command_type.__name__ + "("):
+            documentation = f"Record the {verb.replace('-', ' ')} command"
         parser = commands.add_parser(
             verb,
-            help=(command_type.__doc__ or f"run {verb}").splitlines()[0],
+            help=documentation,
         )
         _add_lifecycle_common(parser)
         if command_type in {
@@ -610,6 +625,9 @@ def _accepted_text(command: Command, snapshot: Snapshot) -> str:
     tier = getattr(command, "tier", None)
     if isinstance(tier, Enum):
         return f"tier: {tier.value}"
+    policy = getattr(command, "policy", None)
+    if isinstance(policy, Enum):
+        return f"ci policy: {policy.value}"
     mode = getattr(command, "mode", None)
     if isinstance(mode, Enum):
         return f"anchor mode: {mode.value}"
@@ -748,11 +766,33 @@ def _make_pack_binding_handler(command_type: _CommandClass) -> _LifecycleHandler
     return handler
 
 
+_SECRET_FLAG_FRAGMENTS = ("token", "password", "secret", "api-key", "api_key")
+_OPAQUE_SECRET = re.compile(r"(?=.{24,}$)(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9_-]+")
+
+
+def _secret_looking_command(command_argv: Sequence[str]) -> bool:
+    for index, argument in enumerate(command_argv):
+        lowered = argument.lower()
+        if any(fragment in lowered for fragment in _SECRET_FLAG_FRAGMENTS):
+            return True
+        if lowered.startswith("aws_") and "secret" in lowered:
+            return True
+        if index > 0 and _OPAQUE_SECRET.fullmatch(argument) is not None:
+            return True
+    return False
+
+
 def _record_evidence_handler(namespace: argparse.Namespace) -> int:
     command_argv = cast(list[str], namespace.command_argv)
     if not command_argv:
         print("vouch-mk2: record-evidence requires -- <argv...>", file=sys.stderr)
         return 2
+    if _secret_looking_command(command_argv):
+        print(
+            "vouch-mk2: warning: command line looks secret-bearing; it will be "
+            "stored verbatim in an immutable evidence object",
+            file=sys.stderr,
+        )
     try:
         with Store.open(namespace.root, read_only=True) as store:
             store.read_snapshot()
@@ -934,7 +974,9 @@ def _required_field_arguments(
     )
 
 
-def _structured_invocation(action: NextAction, root: str) -> _Invocation:
+def _structured_invocation(
+    action: NextAction, root: str, program_name: str = "vouch-mk2"
+) -> _Invocation:
     command_type = _LIFECYCLE_COMMANDS.get(action.command)
     if command_type is None:
         raise ValueError(f"next action names unknown command {action.command!r}")
@@ -952,7 +994,7 @@ def _structured_invocation(action: NextAction, root: str) -> _Invocation:
 
     subject_flag = "--" + subject_field.replace("_", "-")
     argv = [
-        "vouch-mk2",
+        program_name,
         action.command,
         "--root",
         root,
@@ -982,9 +1024,11 @@ def _structured_invocation(action: NextAction, root: str) -> _Invocation:
     )
 
 
-def invocation_for(action: NextAction, root: str) -> str:
+def invocation_for(
+    action: NextAction, root: str, program_name: str = "vouch-mk2"
+) -> str:
     """Render one complete, shell-safe next-action invocation."""
-    invocation = _structured_invocation(action, root)
+    invocation = _structured_invocation(action, root, program_name)
     command = " ".join(
         token if index in invocation.placeholder_indexes else shlex.quote(token)
         for index, token in enumerate(invocation.argv)
@@ -992,8 +1036,10 @@ def invocation_for(action: NextAction, root: str) -> str:
     return f"{command}  # {action.reason}"
 
 
-def _next_action_object(action: NextAction, root: str) -> dict[str, object]:
-    invocation = _structured_invocation(action, root)
+def _next_action_object(
+    action: NextAction, root: str, program_name: str = "vouch-mk2"
+) -> dict[str, object]:
+    invocation = _structured_invocation(action, root, program_name)
     return {
         "command": action.command,
         "subject_kind": action.subject_kind,
@@ -1032,6 +1078,30 @@ def _bundle_inventory_handler(namespace: argparse.Namespace) -> int:
 
 def _format_counts(rows: tuple[tuple[str, int], ...]) -> str:
     return ",".join(f"{status}={count}" for status, count in rows)
+
+
+def _status_object(facts: object) -> dict[str, object]:
+    from vouch_mk2.projections import StatusFacts
+
+    if not isinstance(facts, StatusFacts):
+        raise TypeError("status projection returned an unexpected value")
+    return {
+        "unit_counts": dict(facts.unit_counts),
+        "deviation_counts": dict(facts.deviation_counts),
+        "release_counts": dict(facts.release_counts),
+        "evidence_chains": facts.evidence_chains,
+        "anchored_current": facts.anchored_current,
+        "anchor_mode": facts.anchor_mode,
+        "tier": facts.tier,
+        "ci_policy": facts.ci_policy,
+        "ci_exceptions": [list(row) for row in facts.ci_exceptions],
+        "formal_certificate_recorded": facts.formal_certificate_recorded,
+        "next_action_count": facts.next_action_count,
+        "unbound_pack_units": list(facts.unbound_pack_units),
+        "late_bound_pack_units": list(facts.late_bound_pack_units),
+        "rebound_pack_units": list(facts.rebound_pack_units),
+        "pack_rebounds": list(facts.pack_rebounds),
+    }
 
 
 def _present_upgrade(result: UpgradeResult, *, dry_run: bool) -> None:
@@ -1121,6 +1191,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         command_argv=[],
         tree="",
         exclude=[],
+        tier=Tier.LIGHTWEIGHT.value,
     )
     parsed = parser.parse_args(arguments, namespace=namespace)
     if not isinstance(parsed, _Arguments):
@@ -1139,8 +1210,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             source_root = os.path.dirname(os.path.dirname(__file__))
             payload = build_lock(source_root)
+            os.makedirs(
+                os.path.dirname(os.path.abspath(parsed.output)),
+                exist_ok=True,
+            )
             write_atomic(parsed.output, payload, 0o755, "vouch.lock")
-        except StoreError as error:
+        except (OSError, StoreError) as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)
             return 2
         print(f"vouch.lock {lock_digest(payload)}")
@@ -1179,12 +1254,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if payload is None:
                     source_root = os.path.dirname(os.path.dirname(__file__))
                     payload = build_lock(source_root)
-            report = init_project(parsed.project, payload)
+            report = init_project(
+                parsed.project,
+                payload,
+                tier=Tier(parsed.tier),
+            )
         except (InitError, StoreError) as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)
             return 2
         for result in report:
             print(f"{result.status.value} {result.path}")
+        print("Vouch requires Python 3.14+")
         return 0
 
     if parsed.command == "mcp":
@@ -1342,12 +1422,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         actions = next_actions(snapshot)
         if parsed.command == "next":
+            # Format-3 stores created before adoption-seam have ledger semantics and
+            # frozen projections/tests that spell the historical console-script name.
+            # New init stores are strict and use the actual transport name.
+            program_name = (
+                parser.prog
+                if snapshot.ci_policy.value == "strict"
+                else "vouch-mk2"
+            )
             if parsed.json_output:
                 print(
                     json.dumps(
                         {
                             "actions": [
-                                _next_action_object(action, parsed.root)
+                                _next_action_object(
+                                    action, parsed.root, program_name
+                                )
                                 for action in actions
                             ]
                         },
@@ -1358,9 +1448,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not actions:
                 print("no next actions")
             for action in actions:
-                print(invocation_for(action, parsed.root))
+                print(invocation_for(action, parsed.root, program_name))
             return 0
         facts = status_facts(snapshot, actions)
+        if parsed.json_output:
+            print(json.dumps(_status_object(facts), sort_keys=True))
+            return 0
         print(f"unit_counts: {_format_counts(facts.unit_counts)}")
         print(f"deviation_counts: {_format_counts(facts.deviation_counts)}")
         print(f"release_counts: {_format_counts(facts.release_counts)}")
@@ -1368,6 +1461,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"anchored_current: {facts.anchored_current}")
         print(f"anchor_mode: {facts.anchor_mode}")
         print(f"tier: {facts.tier}")
+        print(f"ci_policy: {facts.ci_policy}")
+        for name, reason in facts.ci_exceptions:
+            print(f"ci_exception: {name} reason={reason}")
         recorded = "true" if facts.formal_certificate_recorded else "false"
         print(f"formal_certificate_recorded: {recorded}")
         print(f"next_action_count: {facts.next_action_count}")
@@ -1398,7 +1494,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"vouch-mk2: {error}", file=sys.stderr)
         return 2
 
-    report = run_checks(snapshot, artifact_results=artifact_results)
+    report = run_checks(
+        snapshot,
+        artifact_results=artifact_results,
+        ci=parsed.ci,
+    )
     if parsed.json_output:
         _present_json(report)
     else:

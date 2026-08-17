@@ -32,7 +32,8 @@ evaluator that ran, or the run fails.
 | Tier-scoped evidence requirements | the authoritative snapshot tier selects IR-bound chain, anchor, and high-attestation checks; no config authority exists | 1–2 |
 | Projection freshness | `check.map-freshness` and `check.context-freshness` regenerate and byte-compare in CI; staleness is a FAIL, never a broken commit | 1 |
 | Registry completeness | a check declared in the IR without an evaluator fails CI on the mk2 repo itself | 1 |
-| Formal invariants over the bounded model | checker consumes the same transition relation the runtime executes; independently authored invariants with private mutation witnesses; `unknown`/timeout is never a pass | 1 |
+| Recorded formal-certificate integrity | at `high`, `check` verifies the certificate object's CAS digest and canonical shape, checker version, current emitted policy tables and their stored object, and the certificate's formal universe/invariant/witness tables structurally; it reports `NOT_CHECKED`, not PASS, for results that require exploration | 1 |
+| Formal invariants over the bounded model | `vouch-mk2 formal` explores the bounded runtime relation, evaluates M1–M11, and runs the private mutation witnesses; the D-7 read-only MCP `formal` summary performs the same exploration; CLI `formal --record` stores that run's tables, relation digests and counts, and certificate | 1 |
 
 Lifecycle writes use the reflected CLI verbs (`vouch-mk2 specify`,
 `vouch-mk2 record-evidence`, and the rest of the typed command set). Each opens
@@ -61,6 +62,35 @@ evidence for that test set is green; a later refactor preserves that result, whi
 later RED invalidates it. Legacy pack format 1 uses its whole inventory digest, so its
 behavior is unchanged. Legacy pre-D-17 objects remain immutable and readable as having
 no pack digest, and are reported by name rather than treated as current-pack GREEN.
+
+Before spawning, the CLI warns on stderr when argv looks secret-bearing. The warning
+does not redact, rewrite, or refuse the command: the exact command line is still stored
+verbatim in the immutable evidence object.
+
+`check --ci` evaluates the recorded `ci_policy`. `strict` requires every unit that
+has left `specified` to be published, release-bound, or superseded, unless a recorded
+`mark-open-in-ci` exception names the unit and its stated reason. `ledger` retains the
+pre-D-18 coherence-only behavior. The check row always names the policy used and lists
+recorded exceptions with their reasons; Vouch verifies that the facts were recorded,
+not that an exception's reason is true or adequate.
+
+## Formal certificate boundary
+
+An ordinary `check` never explores the bounded model. At `high`, its cheap certificate
+path verifies the content-addressed certificate object, strict canonical decoding,
+the current checker version, the digest and bytes of the current emitted policy tables,
+and complete all-true invariant and discriminating-witness registries. These
+checks detect missing, corrupt, stale-table, stale-checker, incomplete-registry, and
+count-incoherent recorded artifacts.
+
+They do **not** regenerate the reachable relation (so its recorded digests and counts are
+not recomputed), execute M1–M11 over it, or rerun the
+private mutations that establish witness discrimination. Therefore the row is
+`NOT_CHECKED` even when every cheap integrity comparison succeeds, naming those three
+unverified properties. `vouch-mk2 formal` performs that exploration, and only a passing
+`vouch-mk2 formal --record --root ROOT` records its results. D-7 also binds the read-only MCP
+`formal` summary to the explorer; ordinary MCP `check`, CLI `check`, and hooks never explore.
+At tiers below `high`, the formal-certificate row is `NOT_APPLICABLE` by the IR tier rule.
 
 `rebind-pack` is restricted to published or release-bound units. Vouch records the old
 and new inventory digests, the old and new test-set digests, the evidence-head sequence,

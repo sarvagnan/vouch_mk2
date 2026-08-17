@@ -131,7 +131,14 @@ def test_mcp_remaining_read_tools_return_structured_objects(tmp_path: Path) -> N
         for response in responses
     ]
     assert structured[0]["passed"] is True
-    assert structured[1]["actions"] == []
+    assert structured[1]["actions"] == [
+        {
+            "subject_kind": "unit",
+            "subject_id": "<UNIT_NAME>",
+            "command": "specify",
+            "reason": "Specify the first unit to bootstrap this store.",
+        }
+    ]
     assert "status" in structured[2]
     assert structured[3]["map_format"] == 4
 

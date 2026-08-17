@@ -501,6 +501,30 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                     f"evidence_heads[{index}].pack_summaries[{summary_index}].pack_digest "
                     "must be empty or 64 lowercase hexadecimal characters",
                 )
+    seen_ci_exceptions: set[str] = set()
+    for index, exception in enumerate(snapshot.ci_exceptions):
+        if not valid_unit_identifier(exception.unit_name):
+            add(
+                "identifier.invalid",
+                f"ci_exceptions[{index}].unit_name {exception.unit_name!r} "
+                "is not a valid identifier",
+            )
+        if exception.unit_name in seen_ci_exceptions:
+            add(
+                "ci-policy.exception-duplicate",
+                f"ci_exceptions[{index}] duplicates unit {exception.unit_name!r}",
+            )
+        seen_ci_exceptions.add(exception.unit_name)
+        if snapshot.unit(exception.unit_name) is None:
+            add(
+                "ci-policy.exception-unit-unknown",
+                f"ci_exceptions[{index}] names missing unit {exception.unit_name!r}",
+            )
+        if not exception.reason.strip():
+            add(
+                "ci-policy.reason-required",
+                f"ci_exceptions[{index}].reason must be non-empty",
+            )
     cycle = _dependency_cycle(snapshot)
     if cycle is not None:
         add("unit.dependency-cycle", f"dependency cycle: {cycle!r}")

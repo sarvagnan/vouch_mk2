@@ -77,6 +77,9 @@ class ConditionKind(Enum):
     TIER_AT_LEAST = "tier-at-least"
     ANCHOR_MODE_IS = "anchor-mode-is"
     PROJECT_ROOT_PRESENT = "project-root-present"
+    CI_MODE_IS = "ci-mode-is"
+    CI_POLICY_IS = "ci-policy-is"
+    SUBJECTS_PRESENT = "subjects-present"
 
 
 @dataclass(frozen=True, slots=True)

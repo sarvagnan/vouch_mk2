@@ -423,8 +423,16 @@ def test_deviation_next_action_matrix(
 @pytest.mark.parametrize(
     ("state", "criteria", "expected"),
     (
-        (ReleaseState.PREPARED, False, {mk2.CMD_SET_CRITERIA}),
-        (ReleaseState.PREPARED, True, {mk2.CMD_START_DEPLOY}),
+        (
+            ReleaseState.PREPARED,
+            False,
+            {mk2.CMD_BIND_BUNDLE, mk2.CMD_SET_CRITERIA},
+        ),
+        (
+            ReleaseState.PREPARED,
+            True,
+            {mk2.CMD_BIND_BUNDLE, mk2.CMD_START_DEPLOY},
+        ),
         (ReleaseState.DEPLOYING, True, {mk2.CMD_START_VERIFICATION}),
         (ReleaseState.ROLLED_BACK, True, set()),
         (ReleaseState.SUCCEEDED, True, set()),
@@ -541,6 +549,9 @@ def test_every_emitted_reachable_action_names_a_legal_ir_edge() -> None:
     while frontier:
         snapshot = frontier.pop()
         for action in next_actions(snapshot):
+            if action.command == mk2.CMD_SPECIFY:
+                assert not snapshot.units
+                continue
             if action.subject_kind == "unit":
                 subject = snapshot.unit(action.subject_id)
                 assert subject is not None
@@ -640,7 +651,7 @@ def _regression_context_freshness_requires_context_with_map_and_detects_drift(
         snapshot = store.read_snapshot()
         assert (
             _artifact_result(store, snapshot, mk2.CHECK_CONTEXT_FRESHNESS)
-            is Verdict.PASS
+            is Verdict.NOT_APPLICABLE
         )
         emit_system_map(store)
         absent = next(
@@ -712,14 +723,13 @@ def _regression_tier_control_coverage_reports_partial_none_full_and_waived() -> 
                     assert cell.residual
 
     light = check_tier_controls(Snapshot(tier=Tier.LIGHTWEIGHT)).detail
-    assert "PARTIALLY CHECKED (mechanical: pyrefly strict, import-linter" in light
-    assert "residual: declared classes are human reviewed" in light
-    assert "waived at lightweight: Mutation testing" in light
-    assert "Mutation testing [mutation-testing] is waived — NOT CHECKED" not in light
+    assert "PARTIAL; mech=pyrefly strict, import-linter" in light
+    assert "residual=declared classes are human reviewed" in light
+    assert "[mutation-testing]: waived — WAIVED / no obligation" in light
     standard = check_tier_controls(Snapshot(tier=Tier.STANDARD)).detail
     assert "trigger evaluation NOT CHECKED" in standard
-    assert "Harness-recorded red→green→refactor" in standard
-    assert "PARTIALLY CHECKED" in standard
+    assert f"[{mk2.TIER_EVIDENCE_CONTROL}]" in standard
+    assert "PARTIAL; mech=" in standard
     assert (
         "the recorded order of Vouch's own events is not proof of chronology "
         "relative to implementation"

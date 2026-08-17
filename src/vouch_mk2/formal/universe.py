@@ -10,9 +10,10 @@ is a coverage decision, not a fix.
 #   command was dropped; the smaller relation is the new D-17 refusal surface.
 # - history-v1 31,416/94,280: restored u's seeded-history respecify loop with
 #   fresh p3 (p2 is already current) while retaining pack-binding@1 coverage.
-# - tier-v1 75/257: state coverage is unchanged. rebind.no-pack removes the
-#   three tier-specific label-only rebind edges; rebind.no-change removes nine
-#   repeat-rebind self-loops (three evidence-head shapes at each tier).
+# - tier-v1 294/2,024: D-18 adds both CI-policy values plus the valid
+#   mark/clear exception cycle. The whitespace-reason and missing-exception
+#   commands remain in the universe to cover their refusal paths; accepted
+#   policy/exception facts multiply the prior tier/evidence state shapes.
 
 from __future__ import annotations
 
@@ -25,17 +26,20 @@ from vouch_mk2.core import (
     BeginReverify,
     BindPack,
     CloseDeviation,
+    ClearOpenInCi,
     Command,
     CompleteRelease,
     Deviation,
     DeviationStatus,
     DeviationType,
+    CiPolicy,
     EvidenceEvent,
     EvidenceKind,
     EvidenceOutcome,
     FreezeAcceptance,
     LaunchCriteria,
     MarkDone,
+    MarkOpenInCi,
     MarkFailedUnrecovered,
     MarkReady,
     OpenDeviation,
@@ -50,6 +54,7 @@ from vouch_mk2.core import (
     RetireRelease,
     RollBack,
     SetAnchorMode,
+    SetCiPolicy,
     SetTier,
     SetReleaseCriteria,
     SpecifyUnit,
@@ -271,6 +276,11 @@ TIER_V1 = Universe(
         SetTier(Tier.LIGHTWEIGHT),
         SetTier(Tier.STANDARD),
         SetTier(Tier.HIGH),
+        SetCiPolicy(CiPolicy.LEDGER),
+        SetCiPolicy(CiPolicy.STRICT),
+        MarkOpenInCi(name="tier-unit", reason=" "),
+        MarkOpenInCi(name="tier-unit", reason="bounded formal exception"),
+        ClearOpenInCi(name="tier-unit"),
         SpecifyUnit(name="tier-unit", version="v1"),
         FreezeAcceptance(name="tier-unit", pack_version="pack-v1"),
         BindPack(name="tier-unit", pack_digest="e" * 64),
