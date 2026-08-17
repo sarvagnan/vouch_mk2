@@ -646,3 +646,58 @@ deprecated; it is simply unexercised by real data. Revisit trigger: a real 0.6 l
 The remaining "first usable release" work (bd4.4: a second real project) waits for the user to
 run Vouch on a real project first, then returns as a unit with that project's frictions as its
 pack.
+
+## D-16 — An append-only event log; the snapshot is derived from it and verified against it
+
+**Status:** decided 2026-08-17 (user decision after two independent adoption reviews). Unit `event-log@1`.
+
+- **The gap.** The store held one authoritative snapshot and nothing else: no transition log, no
+  timestamps, no actor, no ordering. Chronology lived only in the git history of `.vouch/`
+  (destroyed by squash merges), the quickstart's "the recorded order of Vouch's own events
+  makes auditable" was untrue, two branches produced unmergeable `state.json` files with no
+  safe rule, and an anchor could not say who advanced it or when.
+- **Decision.** Every event `apply()` folds becomes a content-addressed **event record**
+  (`ArtifactKind.EVENT`): `{event, payload, recorded_at, prev (digest of the previous event
+  record), revision, actor claim, run id if present, pack digest for pack-bearing events}`. The
+  snapshot carries `event_head` (digest of the latest record). Records are placed objects-first
+  in the same commit as the snapshot (the commit is atomic: no snapshot without its records).
+  `check.event-log` (mechanical, artifact): the chain from `event_head` back to genesis decodes,
+  is unbroken, and **replaying it through `apply()` from the empty snapshot reproduces the
+  committed snapshot byte-for-byte** — the snapshot is a derived, verified cache; the log is the
+  authority. Actor claim = whatever the caller asserts (`--actor`, defaulting to the OS user)
+  plus CI run identity from the environment when present (`GITHUB_RUN_ID` etc.); Vouch records
+  these as **claims**, and the check verifies structure and replay, never identity — the
+  claim boundary says so.
+- **What this enables (each its own unit):** chronology in the store (the quickstart sentence
+  becomes true and squash merges stop mattering); anchors that carry the run id that advanced
+  them (D-4 gets its CI side: `advance-anchor` in the generated workflow, bot-committed, on
+  fork PRs NOT_CHECKED); a semantic `merge`: replay both branches' event chains from their
+  common ancestor through `decide()`, refusing (not guessing) on a genuine conflict.
+- **State format 3** (`event_head`); upgrader 2→3 sets a genesis marker and records, as its own
+  first event, that history before revision N is not in the log ("pre-log revisions 1..N: git
+  history only") — no invented state. Store size grows by one small object per event; the
+  bench script is re-run and the number recorded.
+- **Rejected:** a merge driver over snapshots alone (no safe rule without event order); making
+  the log the *only* store (every read would replay; the derived snapshot is the cache that
+  keeps reads O(1)).
+
+## D-17 — Publication requires current-pack GREEN; evidence binds the pack it ran against
+
+**Status:** decided 2026-08-17 (both adoption reviews' first finding). Unit `evidence-semantics@1`.
+
+- **The gap.** `gate.dod.tier-evidence` required only that an evidence head *exist*: a unit with
+  a single RED published at `standard` and `check --ci` composed PASS. `record-evidence` accepted
+  any status, so a green on a merely-specified unit poisoned its chain forever. `EvidenceEvent`
+  bound unit, command line, outcome, and time — not the pack it ran against, so evidence for
+  pack/1 counted for pack/3.
+- **Decision.** `EvidenceEvent.pack_digest` (the unit's bound pack at recording; `""` for
+  label-only packs at lightweight); `record-evidence` is refused before `acceptance-frozen`
+  (`evidence.no-pack`) and allowed in every later status incl. published (late evidence is
+  legitimate and displayed as such); at `standard`+ publication requires, for the CURRENT pack
+  digest, a RED followed by a GREEN with the latest record GREEN (`gate.dod.current-pack-green`);
+  `check.evidence-chains` reports a chain whose latest current-pack record is not GREEN as FAIL
+  on published units at `standard`+. Re-versioning: `specify NAME --version V2` is accepted when
+  every existing record for NAME is superseded (D-9's stated intent), creating the new active
+  record with an empty chain — which is also the sanctioned escape from a poisoned chain.
+- **Rejected:** a `reset-evidence` command (an append-only chain must not be rewritten; the new
+  version IS the reset, and it is visible).
