@@ -5,12 +5,20 @@ Decision: DECISIONS.md D-17. Adoption reviews' finding #1 (both reviews). Bead: 
 
 ## Requirements (each bound to a test)
 
-R1 `EvidenceEvent.pack_digest: str` — the unit's `acceptance_pack_digest` at recording (`""` when the
-   unit is label-only); the evidence codec carries it (evidence objects are CAS: a new field means a
-   new evidence format — bump and refuse the old with a clear message; existing chains in the dogfood
-   store are the owner's problem, see ground rules); `record-evidence` fills it from the snapshot under
-   the lock; `decide(RecordEvidence)` refuses a digest that does not equal the unit's current one
-   (`evidence.pack-mismatch`). → `test_evidence_binds_the_pack_digest_it_ran_against`
+R1 `EvidenceEvent.pack_digest: str` — the **test-set digest** of the unit's current acceptance pack at
+   recording (`""` when the unit is label-only). The pack inventory gains a per-entry `role` (`test` |
+   `spec`) at `pack_format` 2; `freeze`/`bind-pack`/`rebind-pack` take `--pack-test-file` (role `test`,
+   repeatable) alongside `--pack-file` (role `spec`), and emit `pack_format` 2 whenever any
+   `--pack-test-file` is given, `pack_format` 1 otherwise. The **test-set digest** is: for `pack_format`
+   2, the digest over the canonical encoding of the entries whose role is `test`; for `pack_format` 1
+   (every pack frozen before this amendment), **exactly the inventory digest** — unchanged behaviour, so
+   no existing binding is silently weakened and evidence recorded either side of this change agrees.
+   The evidence codec carries the field (a new field means a new evidence format; see the amendments
+   below for what happens to legacy objects); `record-evidence` fills it from the snapshot under the
+   lock; `decide(RecordEvidence)` refuses a digest that does not equal the unit's current test-set digest
+   (`evidence.pack-mismatch`). → `test_evidence_binds_the_pack_digest_it_ran_against`,
+   `test_freeze_with_test_files_records_roles_and_a_test_set_digest`
+
 R2 `record-evidence` before `acceptance-frozen` → refused `evidence.no-pack`, nothing recorded; allowed
    in every later status incl. published/release-bound (late evidence). → `test_record_evidence_is_refused_before_the_pack_is_frozen`, `test_late_evidence_on_a_published_unit_is_allowed` (guard)
 R3 New DoD gate `gate.dod.current-pack-green` (IR-registered; listed in the `harness-recorded-red-green`
@@ -45,11 +53,39 @@ R6 Docs: quickstart §3/§4 and claim-boundary state the rule (`gate.dod.current
 - Every pre-existing test green (adjust coherently); new test functions for non-pack behavior;
   pyrefly 0; import-linter kept; README count is the owner's.
 
-## Amendment pack/2 (DEV-es-01, pack-defect, adjudicated amend)
+## Requirements added at pack/3
 
-R1 said a new evidence format must "bump and refuse the old"; the ground rule said legacy evidence
-objects decode as `pack_digest == ""` and are reported by name. Raised by the implementer. R1 now
-reads: the evidence codec is versioned — new records carry `pack_digest` (and the new format
-number); legacy records (pre-D-17) remain immutable, decode as `pack_digest == ""`, and are
-reported at standard+ as "pre-D-17 evidence" naming the unit rather than refused or counted as
-current-pack green. No refusal of old objects.
+R7 **Prose-only amendments keep RED** (D-17 amendment, 2026-08-17). Because evidence binds the test-set
+   digest, amending only the spec file of a pack leaves prior evidence valid for the new pack version;
+   changing any file whose role is `test` still voids prior evidence for that unit. A `pack_format` 1
+   pack keeps whole-inventory behaviour. → `test_prose_only_amendment_preserves_current_pack_evidence`,
+   `test_changing_a_test_file_still_voids_prior_evidence`,
+   `test_legacy_pack_format_one_binds_the_whole_inventory`
+
+R8 **`rebind-pack`** (D-14 amendment, 2026-08-17) — for a `published` or `release-bound` unit whose bound
+   pack files must change ONLY to adapt to a changed shared interface. Records old digest → new digest
+   with a stated non-empty `--reason` (refused empty: `rebind.reason-required`), replaces the unit's pack
+   inventory, carries the evidence chain forward (no `respecify`, no new pack version, chain untouched),
+   and sets `Unit.pack_binding = "rebound"`. Refused below `published` (`rebind.not-published`).
+   `check.evidence-chains` does not pass for a rebound unit until a fresh **GREEN** exists on the new
+   test-set digest — a RED is NOT required and must not be demanded. `check.pack-bound` lists rebound
+   units by name in its detail ("rebound after publication: …"), like late binding, and is FAIL at
+   `high` unless every rebound unit has that GREEN. →
+   `test_rebind_pack_replaces_the_inventory_and_requires_a_fresh_green`,
+   `test_rebind_pack_is_refused_before_publication`, `test_rebind_pack_requires_a_reason`,
+   `test_rebind_pack_is_listed_by_name_in_pack_bound`
+
+## Amendments (recorded; the requirement text above is edited in place)
+
+- **pack/2 (DEV-es-01, pack-defect, adjudicated amend).** R1 originally said a new evidence format must
+  "bump and refuse the old", contradicting the ground rule that legacy evidence objects decode as
+  `pack_digest == ""`. Raised by the implementer. Resolution, now written into R1 and the ground rules:
+  the evidence codec is versioned; new records carry `pack_digest` and the new format number; legacy
+  (pre-D-17) records remain immutable, decode as `pack_digest == ""`, and are reported at standard+ as
+  "pre-D-17 evidence" naming the unit rather than refused or counted as current-pack green. No refusal
+  of old objects.
+- **pack/3 (DEV-es-02, contract-conflict, adjudicated by the USER 2026-08-17, amend).** The pack bound
+  evidence to the whole pack inventory, so a prose-only amendment voided RED and unit #9 could not
+  publish through its own gate (batch-A finding O-1); and adapting a published unit's bound pack tests
+  to a changed shared type had no sanctioned repair (finding O-3). The user amended D-17 (evidence binds
+  the pack's executable entries) and D-14 (`rebind-pack`). R1 is edited in place and R7/R8 added above.
