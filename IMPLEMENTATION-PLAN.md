@@ -263,3 +263,4 @@ criteria-sidecar drift chain.
 - A scratch project can run the full walkthrough (init → unit lifecycle → evidence →
   release → attest) from the vendored `vouch.lock` artifact with no network.
 - `vouch-migrate` round-trips the 0.6 `vouch` repo's own ledger without warnings.
+  *(Withdrawn 2026-08-17 — DECISIONS.md D-8 addendum: no 0.6-governed project ever existed; the migrator is fixture-proven.)*

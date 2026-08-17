@@ -1,7 +1,8 @@
 # The working method: how a change moves through mk2
 
-This is the documented procedure for every forward change to Vouch mk2 (D-11: mk2's own
-development runs as units through mk2's own lifecycle). It records what has actually
+This is the BINDING procedure for every forward change to Vouch mk2 (D-11 adopted 2026-08-17:
+mk2's own development runs as units through mk2's own lifecycle; the named exceptions are in
+the D-11 status change). It records what has actually
 worked over units #1–#3, not an aspiration. Roles are fixed; the model behind each role is
 chosen for quota (Codex is generous, Claude is scarce) and for judgment where judgment is
 the product.

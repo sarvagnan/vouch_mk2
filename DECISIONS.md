@@ -620,3 +620,29 @@ both checks' scope; a pack path must appear verbatim in its directory listing (c
   itself; not 0.6's full field set.
 - The two `defect-closure.md` rows classified (c) for purpose rendering / DOM-order verification
   stand, now with this decision as their rationale.
+
+**D-11 status change (2026-08-17): ADOPTED.** The pilot ran eight units through mk2's own
+lifecycle (`ingress-invariants`, `assurance-tier`, `lifecycle-cli`, `state-format`,
+`operator-docs`, `pack-binding`, `cli-completeness`, `defect-dispositions`; `state-format`
+re-published after a genuine cross-unit contract conflict) — twelve deviations recorded and
+adjudicated as store facts, and the stop rule never fired. From this date every forward change
+to mk2 goes through a unit: pack frozen and byte-bound before implementation, RED recorded
+through the harness, review, publish through the real DoD gates, at tier `standard`;
+`docs/method.md` is binding, not descriptive. **Named exceptions** (changes that are not units):
+(i) `DECISIONS.md` entries themselves and their dated corrections; (ii) prose edits with no
+test binding and no behavioral claim (typo/wording), which still go through the doc-binding and
+accuracy tests; (iii) housekeeping artifacts — `docs/usage-log.md`, `docs/method.md`, the beads
+export, README's test-count re-pin; (iv) the dogfood store's own lifecycle commands (they are the
+method running, not a change to it). Anything else that changes what mk2 does, checks, stores,
+or claims is a unit. **The stop rule stands** as a standing check, not a pilot condition: if a
+gate must be bent to publish mk2's own unit, adoption stops and that fact is recorded here.
+
+**D-8 addendum (2026-08-17): plan §7 bullet 5 withdrawn.** "`vouch-migrate` round-trips the 0.6
+repo's own ledger without warnings" cannot be met: no 0.6-governed project ever existed (0.6
+never self-hosted, and Vouch was not used on any project before mk2). `migrate` remains as
+D-8 specifies, proven over its synthetic fixtures (13 tests: field mapping, refusal-not-repair,
+config/ledger tier disagreement, structural refusal before touching the target). It is not
+deprecated; it is simply unexercised by real data. Revisit trigger: a real 0.6 ledger appears.
+The remaining "first usable release" work (bd4.4: a second real project) waits for the user to
+run Vouch on a real project first, then returns as a unit with that project's frictions as its
+pack.

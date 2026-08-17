@@ -57,3 +57,6 @@ up front — decide that after D045 shows what the friction costs on this repo.
 **Stop rule:** if the D045 unit cannot reach `published` through the real gates without
 hand-editing the store or bending a gate, that is a finding about the method or about mk2 —
 record it and rule; never paper over it.
+
+
+**Outcome (2026-08-17):** D-11 ADOPTED with named exceptions after eight units; the stop rule never fired. See DECISIONS.md D-11 status change.
