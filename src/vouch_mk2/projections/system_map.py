@@ -8,6 +8,7 @@ from vouch_mk2.core.model import (
     ClosureRecord,
     EvidenceHead,
     LaunchCriteria,
+    PackRebound,
     Snapshot,
     UnitRef,
     blocking_deviations,
@@ -24,7 +25,9 @@ class SystemMapUnit:
     depends_on: tuple[str, ...]
     acceptance_pack_version: str
     acceptance_pack_digest: str
+    acceptance_test_set_digest: str
     pack_history: tuple[str, ...]
+    rebound_history: tuple[PackRebound, ...]
     pack_binding: str
     published_once: bool
     blocking_deviation_ids: tuple[str, ...]
@@ -79,7 +82,9 @@ def system_map(snapshot: Snapshot) -> SystemMap:
                     depends_on=unit.depends_on,
                     acceptance_pack_version=unit.acceptance_pack_version,
                     acceptance_pack_digest=unit.acceptance_pack_digest,
+                    acceptance_test_set_digest=unit.acceptance_test_set_digest,
                     pack_history=unit.pack_history,
+                    rebound_history=unit.rebound_history,
                     pack_binding=unit.pack_binding,
                     published_once=unit.published_once,
                     blocking_deviation_ids=tuple(

@@ -237,7 +237,7 @@ options:
 
 ```text
 usage: vouch-mk2 bind-pack [-h] --root ROOT [--json] --name NAME [--project PROJECT]
-                           --pack-file PACK_FILE
+                           [--pack-file PACK_FILE] [--pack-test-file PACK_TEST_FILE]
 
 options:
   -h, --help            show this help message and exit
@@ -246,7 +246,9 @@ options:
   --name NAME
   --project PROJECT     project root for --pack-file paths (default: current directory)
   --pack-file PACK_FILE
-                        project-relative acceptance file (repeatable)
+                        project-relative acceptance spec file (repeatable)
+  --pack-test-file PACK_TEST_FILE
+                        project-relative executable acceptance test file (repeatable)
 ```
 
 ## close-deviation
@@ -278,6 +280,7 @@ options:
 ```text
 usage: vouch-mk2 freeze [-h] --root ROOT [--json] --name NAME --pack-version PACK_VERSION
                         [--project PROJECT] [--pack-file PACK_FILE]
+                        [--pack-test-file PACK_TEST_FILE]
 
 options:
   -h, --help            show this help message and exit
@@ -287,7 +290,9 @@ options:
   --pack-version PACK_VERSION
   --project PROJECT     project root for --pack-file paths (default: current directory)
   --pack-file PACK_FILE
-                        project-relative acceptance file (repeatable)
+                        project-relative acceptance spec file (repeatable)
+  --pack-test-file PACK_TEST_FILE
+                        project-relative executable acceptance test file (repeatable)
 ```
 
 ## mark-done
@@ -369,6 +374,26 @@ options:
   --root ROOT  store root directory
   --json       emit one JSON result instead of text
   --name NAME
+```
+
+## rebind-pack
+
+```text
+usage: vouch-mk2 rebind-pack [-h] --root ROOT [--json] --name NAME --reason REASON
+                             [--project PROJECT] [--pack-file PACK_FILE]
+                             [--pack-test-file PACK_TEST_FILE]
+
+options:
+  -h, --help            show this help message and exit
+  --root ROOT           store root directory
+  --json                emit one JSON result instead of text
+  --name NAME
+  --reason REASON
+  --project PROJECT     project root for --pack-file paths (default: current directory)
+  --pack-file PACK_FILE
+                        project-relative acceptance spec file (repeatable)
+  --pack-test-file PACK_TEST_FILE
+                        project-relative executable acceptance test file (repeatable)
 ```
 
 ## record-evidence

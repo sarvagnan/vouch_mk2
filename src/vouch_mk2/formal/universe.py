@@ -10,8 +10,9 @@ is a coverage decision, not a fix.
 #   command was dropped; the smaller relation is the new D-17 refusal surface.
 # - history-v1 31,416/94,280: restored u's seeded-history respecify loop with
 #   fresh p3 (p2 is already current) while retaining pack-binding@1 coverage.
-# - tier-v1 66/230: adds a standard-tier frozen -> RED -> GREEN -> publish path
-#   so gate.dod.current-pack-green is exercised with its pack digest binding.
+# - tier-v1 75/257: state coverage is unchanged. rebind.no-pack removes the
+#   three tier-specific label-only rebind edges; rebind.no-change removes nine
+#   repeat-rebind self-loops (three evidence-head shapes at each tier).
 
 from __future__ import annotations
 
@@ -38,9 +39,12 @@ from vouch_mk2.core import (
     MarkFailedUnrecovered,
     MarkReady,
     OpenDeviation,
+    PackEntry,
+    PackInventory,
     PrepareRelease,
     Publish,
     RecordEvidence,
+    RebindPack,
     RejectDeviation,
     Respecify,
     RetireRelease,
@@ -300,6 +304,20 @@ TIER_V1 = Universe(
         ),
         MarkDone(name="tier-unit"),
         Publish(name="tier-unit"),
+        RebindPack(
+            name="tier-unit",
+            pack_digest="f" * 64,
+            test_set_digest="f" * 64,
+            reason="adapt to a changed shared interface",
+            old_inventory=PackInventory(
+                (PackEntry("tests/t.py", "e" * 64, 1),),
+                pack_format=1,
+            ),
+            new_inventory=PackInventory(
+                (PackEntry("tests/t.py", "f" * 64, 1),),
+                pack_format=1,
+            ),
+        ),
     ),
     initial=Snapshot(tier=Tier.HIGH),
     invariant_ids=("M11.tier-never-lowers-after-commitment",),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from vouch_mk2.checks.results import CheckResult
 from vouch_mk2.core.model import Snapshot, UnitStatus
+from vouch_mk2.core.invariants import current_pack_evidence_is_green
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Coverage, RequirementLevel, TierCell, TierRequirement, Verdict
 
@@ -32,13 +33,40 @@ def tier_check_applies(snapshot: Snapshot, check_id: str) -> bool:
 
 
 def check_pack_bound(snapshot: Snapshot) -> CheckResult:
+    rebound = tuple(
+        sorted(
+            unit.ref().label()
+            for unit in snapshot.units
+            if unit.status is not UnitStatus.SUPERSEDED
+            and unit.pack_binding == "rebound"
+        )
+    )
+    rebound_details = tuple(
+        f"{unit.ref().label()} old inventory {item.old_inventory_digest} -> "
+        f"new inventory {item.new_inventory_digest}; old test set "
+        f"{item.old_test_set_digest} -> new test set {item.new_test_set_digest}; "
+        f"evidence head sequence {item.evidence_head_sequence}; reason {item.reason!r}"
+        for unit in sorted(snapshot.units, key=lambda row: row.ref().label())
+        if unit.status is not UnitStatus.SUPERSEDED
+        for item in unit.rebound_history
+    )
     if not tier_check_applies(snapshot, mk2.CHECK_PACK_BOUND):
+        lightweight_notices = (
+            ()
+            if not rebound
+            else ("rebound after publication: " + ", ".join(rebound),)
+        ) + rebound_details
         return CheckResult(
             check_id=mk2.CHECK_PACK_BOUND,
             verdict=Verdict.NOT_APPLICABLE,
             detail=(
                 f"IR tier matrix: {snapshot.tier.value} label-only pack "
                 "binding is permitted"
+                + (
+                    "; " + "; ".join(lightweight_notices)
+                    if lightweight_notices
+                    else ""
+                )
             ),
         )
     offenders = tuple(
@@ -58,6 +86,13 @@ def check_pack_bound(snapshot: Snapshot) -> CheckResult:
             and unit.pack_binding == "late"
         )
     )
+    rebound_without_green = tuple(
+        unit.ref().label()
+        for unit in snapshot.units
+        if unit.status is not UnitStatus.SUPERSEDED
+        and unit.pack_binding == "rebound"
+        and not current_pack_evidence_is_green(snapshot, unit)
+    )
     failures: list[str] = []
     if offenders:
         failures.append(
@@ -65,12 +100,21 @@ def check_pack_bound(snapshot: Snapshot) -> CheckResult:
         )
     if snapshot.tier.value == "high" and late:
         failures.append("high: acceptance packs bound late: " + ", ".join(late))
+    if snapshot.tier.value == "high" and rebound_without_green:
+        failures.append(
+            "high: rebound units lack fresh GREEN: "
+            + ", ".join(rebound_without_green)
+        )
+    notices: list[str] = []
+    if late:
+        notices.append("bound late: " + ", ".join(late))
+    if rebound:
+        notices.append("rebound after publication: " + ", ".join(rebound))
+    notices.extend(rebound_details)
     return CheckResult(
         check_id=mk2.CHECK_PACK_BOUND,
         verdict=Verdict.FAIL if failures else Verdict.PASS,
-        detail="; ".join(failures) if failures else (
-            "bound late: " + ", ".join(late) if late else ""
-        ),
+        detail="; ".join((*failures, *notices)),
     )
 
 

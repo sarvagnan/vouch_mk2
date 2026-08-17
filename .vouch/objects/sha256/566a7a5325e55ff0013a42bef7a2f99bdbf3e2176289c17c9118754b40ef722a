@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/state-format-1.spec.md","sha256":"0cb9db3424b1dece13caa577c52cc7837784fd5b98c20e47749f2f2d32754cc4","size":6715},{"path":"tests/test_state_format.py","sha256":"022cbc2009912cb9476aa216ae9ec0b2a32c9da878947e27e862d984f7047c23","size":15037}],"pack_format":1}

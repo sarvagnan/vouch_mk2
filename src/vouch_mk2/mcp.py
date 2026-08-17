@@ -153,6 +153,8 @@ def _status_object(facts: StatusFacts) -> dict[str, object]:
         "next_action_count": facts.next_action_count,
         "unbound_pack_units": list(facts.unbound_pack_units),
         "late_bound_pack_units": list(facts.late_bound_pack_units),
+        "rebound_pack_units": list(facts.rebound_pack_units),
+        "pack_rebounds": list(facts.pack_rebounds),
     }
 
 

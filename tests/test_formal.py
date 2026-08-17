@@ -181,8 +181,8 @@ def _regression_tier_v1_covers_legal_lowering_and_committed_refusals(
 
     tier = formal_run.universe(TIER_V1.name)
     assert tier.universe_name == TIER_V1.name == "tier-v1"
-    assert tier.state_count == 66
-    assert tier.transition_count == 230
+    assert tier.state_count == 75
+    assert tier.transition_count == 257
     representatives = dict(tier.relation.representatives)
     lowering = [
         (representatives[source], representatives[target])
@@ -215,6 +215,23 @@ def _regression_tier_v1_covers_legal_lowering_and_committed_refusals(
         decision = decide(committed, SetTier(target))
         assert isinstance(decision, Refused)
         assert decision.violations[0].code == "tier.lowering-refused"
+
+
+def test_tier_v1_reaches_a_rebound_published_unit(formal_run: FormalRun) -> None:
+    tier = formal_run.universe(TIER_V1.name)
+    representatives = dict(tier.relation.representatives)
+    rebound_targets = (
+        representatives[target]
+        for _source, command, target in tier.relation.transitions
+        if command == mk2.CMD_REBIND_PACK
+    )
+    assert any(
+        (unit := snapshot.unit("tier-unit")) is not None
+        and unit.status is UnitStatus.PUBLISHED
+        and unit.pack_binding == "rebound"
+        and unit.acceptance_pack_version == "pack-v1"
+        for snapshot in rebound_targets
+    )
 
 
 def test_m10_m11_hold_in_their_certified_universes_and_witnesses_discriminate(

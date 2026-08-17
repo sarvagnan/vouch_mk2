@@ -28,7 +28,7 @@ evaluator that ran, or the run fails.
 | Lifecycle legality | `decide(Snapshot, Command)` refuses every transition the IR does not license; gates are inside the transition | 1 |
 | Deviation blocking | a unit with any open deviation cannot advance; `NAME@VERSION` binding | 1 |
 | Claim-shape obligations | completion claims re-check units + criteria digest + roster; negative outcomes require criteria + outcome deviations; protective closures require trigger + roster snapshot + `no_completion_claim`, and are never blocked by contaminated state | 1 |
-| Evidence-chain validity and ordering | canonical-JSON hash chain keyed by `NAME@VERSION`; each new record binds the current acceptance-pack digest; red-before-first-green ordering; anchor monotonicity (prior head remains an ancestor) | 1–2 |
+| Evidence-chain validity and ordering | canonical-JSON hash chain keyed by `NAME@VERSION`; each new record binds the current acceptance pack's test-set digest (the whole inventory digest for legacy pack format 1); red-before-first-green ordering except that a recorded post-publication rebound requires a fresh GREEN without inventing a RED; anchor monotonicity (prior head remains an ancestor) | 1–2 |
 | Tier-scoped evidence requirements | the authoritative snapshot tier selects IR-bound chain, anchor, and high-attestation checks; no config authority exists | 1–2 |
 | Projection freshness | `check.map-freshness` and `check.context-freshness` regenerate and byte-compare in CI; staleness is a FAIL, never a broken commit | 1 |
 | Registry completeness | a check declared in the IR without an evaluator fails CI on the mk2 repo itself | 1 |
@@ -56,14 +56,27 @@ inherits the caller's environment and working directory. This is not a claim tha
 the argv names a test runner, that the runner is honest, or that its exit status
 truthfully represents a test suite. Recording before acceptance is frozen is
 refused. At `standard` and `high`, `gate.dod.current-pack-green` refuses publication
-unless the current pack has RED followed by GREEN and the latest evidence for the
-current pack is green; a later refactor preserves that result, while a later RED
-invalidates it. Legacy pre-D-17 objects remain immutable and readable as having no
-pack digest, and are reported by name rather than treated as current-pack GREEN.
+unless the current pack's test-set digest has RED followed by GREEN and the latest
+evidence for that test set is green; a later refactor preserves that result, while a
+later RED invalidates it. Legacy pack format 1 uses its whole inventory digest, so its
+behavior is unchanged. Legacy pre-D-17 objects remain immutable and readable as having
+no pack digest, and are reported by name rather than treated as current-pack GREEN.
+
+`rebind-pack` is restricted to published or release-bound units. Vouch records the old
+and new inventory digests, the old and new test-set digests, the evidence-head sequence,
+and records the stated reason as a claim while preserving the pack label, unit status,
+and evidence chain. Mechanically, no previously bound path may be removed and no
+executable entry may be demoted to a non-executable role. Vouch does not verify the reason's truth
+and does not verify the adequacy of the new test content. It marks the
+binding as rebound; `check.evidence-chains` requires a fresh GREEN recorded after the
+rebound boundary for the new test-set digest at every tier (no RED is required), and
+`check.pack-bound` names rebound units and enforces that GREEN at high tier.
 
 For acceptance-pack binding, the pack's EXECUTION is not verified — runner
 configuration (conftest.py, pytest.ini, pyproject testpaths) can deselect a bound
-test; bind those files too.
+test; bind those files too. A format-2 inventory distinguishes executable
+`--pack-test-file` entries from `--pack-file` specs for evidence validity, but both roles
+remain byte-bound and re-verifiable.
 
 ## Permanently `NOT_CHECKED` (organizational)
 

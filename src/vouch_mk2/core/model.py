@@ -136,6 +136,18 @@ class EvidenceHead:
 
 
 @dataclass(frozen=True, slots=True)
+class PackRebound:
+    """One append-only post-publication pack adaptation epoch."""
+
+    old_inventory_digest: str
+    new_inventory_digest: str
+    old_test_set_digest: str
+    new_test_set_digest: str
+    reason: str
+    evidence_head_sequence: int
+
+
+@dataclass(frozen=True, slots=True)
 class Unit:
     name: str
     version: str
@@ -144,8 +156,10 @@ class Unit:
     acceptance_pack_version: str = ""
     published_once: bool = False
     acceptance_pack_digest: str = ""
+    acceptance_test_set_digest: str = ""
     pack_history: tuple[str, ...] = ()
     pack_binding: str = ""
+    rebound_history: tuple[PackRebound, ...] = ()
 
     def __post_init__(self) -> None:
         # Format 2 predates the provenance spelling in the owner-pinned golden.
@@ -154,6 +168,12 @@ class Unit:
         # an additional serialized field.
         if self.acceptance_pack_digest and not self.pack_binding:
             object.__setattr__(self, "pack_binding", "at-freeze")
+        if self.acceptance_pack_digest and not self.acceptance_test_set_digest:
+            object.__setattr__(
+                self,
+                "acceptance_test_set_digest",
+                self.acceptance_pack_digest,
+            )
 
     def ref(self) -> UnitRef:
         return UnitRef(name=self.name, version=self.version)
@@ -210,11 +230,13 @@ class PackEntry:
     path: str
     sha256: str
     size: int
+    role: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class PackInventory:
     entries: tuple[PackEntry, ...]
+    pack_format: int = 1
 
 
 @dataclass(frozen=True, slots=True)

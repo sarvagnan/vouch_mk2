@@ -15,6 +15,7 @@ from vouch_mk2.core.model import (
     DeviationType,
     EvidenceEvent,
     LaunchCriteria,
+    PackInventory,
     Tier,
     UnitRef,
 )
@@ -38,6 +39,7 @@ class FreezeAcceptance:
     name: str
     pack_version: str
     pack_digest: str = ""
+    test_set_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +49,20 @@ class BindPack:
     ir_command: ClassVar[str] = mk2.CMD_BIND_PACK
     name: str
     pack_digest: str
+    test_set_digest: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RebindPack:
+    """Replace a published unit's pack after a shared-interface adaptation."""
+
+    ir_command: ClassVar[str] = mk2.CMD_REBIND_PACK
+    name: str
+    pack_digest: str
+    reason: str
+    test_set_digest: str = ""
+    old_inventory: PackInventory | None = None
+    new_inventory: PackInventory | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +259,7 @@ type Command = (
     | SetReleaseCriteria
     | BindBundle
     | BindPack
+    | RebindPack
     | RecordEvidence
     | AdvanceAnchor
     | SetAnchorMode

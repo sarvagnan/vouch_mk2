@@ -504,6 +504,7 @@ def test_pack_digest_a_to_b_to_a_retains_a_green_summary(tmp_path: Path) -> None
                         unit,
                         acceptance_pack_version="pack/b",
                         acceptance_pack_digest=digest_b,
+                        acceptance_test_set_digest=digest_b,
                     ),
                 ),
             )

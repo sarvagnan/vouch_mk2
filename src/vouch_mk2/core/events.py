@@ -48,12 +48,25 @@ class AcceptanceFrozen:
     pack_version: str
     pack_digest: str
     gate: GateRecord
+    test_set_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class AcceptancePackBound:
     name: str
     pack_digest: str
+    test_set_digest: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptancePackRebound:
+    name: str
+    old_pack_digest: str
+    new_pack_digest: str
+    old_test_set_digest: str
+    new_test_set_digest: str
+    reason: str
+    evidence_head_sequence: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +254,7 @@ type Event = (
     UnitSpecified
     | AcceptanceFrozen
     | AcceptancePackBound
+    | AcceptancePackRebound
     | UnitMarkedReady
     | WorkStarted
     | UnitMarkedDone

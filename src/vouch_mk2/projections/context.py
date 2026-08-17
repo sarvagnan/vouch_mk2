@@ -52,7 +52,28 @@ def agent_context(snapshot: Snapshot) -> str:
             "Acceptance packs: "
             f"{sum(bool(unit.acceptance_pack_digest) for unit in snapshot.units)} bound; "
             f"{sum(bool(unit.acceptance_pack_version) and not unit.acceptance_pack_digest for unit in snapshot.units)} label-only; "
-            f"{sum(unit.pack_binding == 'late' for unit in snapshot.units)} bound late."
+            f"{sum(unit.pack_binding == 'late' for unit in snapshot.units)} bound late; "
+            f"{sum(unit.pack_binding == 'rebound' for unit in snapshot.units)} rebound after publication."
+        ),
+        "",
+        "## Pack rebound history",
+        "",
+        *(
+            (
+                f"- {escape_markdown(unit.ref().label())}: inventory "
+                f"`{rebound.old_inventory_digest}` → `{rebound.new_inventory_digest}`; "
+                f"test set `{rebound.old_test_set_digest}` → "
+                f"`{rebound.new_test_set_digest}`; evidence head sequence "
+                f"{rebound.evidence_head_sequence}; stated reason: "
+                f"{escape_markdown(rebound.reason)}"
+            )
+            for unit in sorted(snapshot.units, key=lambda item: item.ref().label())
+            for rebound in unit.rebound_history
+        ),
+        *(
+            ("- none",)
+            if not any(unit.rebound_history for unit in snapshot.units)
+            else ()
         ),
         "",
         "## Next actions",

@@ -21,6 +21,7 @@ from vouch_mk2.core.commands import (
     AmendDeviation,
     BeginReverify,
     BindPack,
+    RebindPack,
     BindBundle,
     CloseDeviation,
     Command,
@@ -52,6 +53,7 @@ from vouch_mk2.core.commands import (
 from vouch_mk2.core.events import (
     AcceptanceFrozen,
     AcceptancePackBound,
+    AcceptancePackRebound,
     AnchorAdvanced,
     AnchorModeSet,
     BundleBound,
@@ -93,6 +95,7 @@ from vouch_mk2.core.invariants import (
     valid_identifier,
     valid_unit_identifier,
 )
+from vouch_mk2.core.evidence import fold_evidence_pack_summaries
 from vouch_mk2.core.model import (
     ClosureRecord,
     ClosureTriggerKind,
@@ -100,7 +103,7 @@ from vouch_mk2.core.model import (
     DeviationStatus,
     EvidenceHead,
     EvidenceKind,
-    EvidencePackSummary,
+    PackRebound,
     Release,
     ReleaseArchetype,
     ReleaseState,
@@ -303,14 +306,15 @@ def _gate_tier_evidence(ctx: _GateContext) -> tuple[Violation, ...]:
 def _gate_current_pack_green(ctx: _GateContext) -> tuple[Violation, ...]:
     if mk2.GATE_DOD_CURRENT_PACK_GREEN not in _tier_evidence_checks(ctx.snapshot):
         return ()
-    if not ctx.unit.acceptance_pack_digest:
+    if not ctx.unit.acceptance_test_set_digest:
         return (
             Violation(
                 code=mk2.GATE_DOD_CURRENT_PACK_GREEN,
                 detail=(
                     f"{ctx.snapshot.tier.value} publication of unit "
                     f"{ctx.unit.ref().label()!r} refused: the current acceptance "
-                    "pack is label-only, so there is nothing to bind evidence to"
+                    "pack is label-only, so there is nothing to bind evidence to "
+                    "(no test-set digest)"
                 ),
             ),
         )
@@ -618,12 +622,17 @@ def _transition_event(
     command: UnitTransitionCommand, unit: Unit, record: GateRecord
 ) -> Event:
     match command:
-        case FreezeAcceptance(pack_version=pack_version, pack_digest=pack_digest):
+        case FreezeAcceptance(
+            pack_version=pack_version,
+            pack_digest=pack_digest,
+            test_set_digest=test_set_digest,
+        ):
             return AcceptanceFrozen(
                 name=unit.name,
                 pack_version=pack_version,
                 pack_digest=pack_digest,
                 gate=record,
+                test_set_digest=test_set_digest or pack_digest,
             )
         case MarkReady():
             return UnitMarkedReady(name=unit.name)
@@ -686,6 +695,24 @@ def _decide_unit_transition(
             "pack.digest-invalid",
             "acceptance pack digest must be empty or 64 lowercase hexadecimal characters",
         )
+    if (
+        isinstance(command, FreezeAcceptance)
+        and command.test_set_digest
+        and not _valid_digest(command.test_set_digest)
+    ):
+        return _refuse(
+            "pack.test-set-digest-invalid",
+            "acceptance test-set digest must be 64 lowercase hexadecimal characters",
+        )
+    if (
+        isinstance(command, FreezeAcceptance)
+        and command.test_set_digest
+        and not command.pack_digest
+    ):
+        return _refuse(
+            "pack.test-set-without-pack",
+            "an acceptance test-set digest requires a bound pack digest",
+        )
     pack_version = (
         command.pack_version
         if isinstance(command, FreezeAcceptance)
@@ -724,11 +751,98 @@ def _decide_bind_pack(snapshot: Snapshot, command: BindPack) -> Decision:
             "pack.digest-invalid",
             "acceptance pack digest must be 64 lowercase hexadecimal characters",
         )
+    test_set_digest = command.test_set_digest or command.pack_digest
+    if not _valid_digest(test_set_digest):
+        return _refuse(
+            "pack.test-set-digest-invalid",
+            "acceptance test-set digest must be 64 lowercase hexadecimal characters",
+        )
     return Accepted(
         events=(
             AcceptancePackBound(
                 name=unit.name,
                 pack_digest=command.pack_digest,
+                test_set_digest=test_set_digest,
+            ),
+        )
+    )
+
+
+def _decide_rebind_pack(snapshot: Snapshot, command: RebindPack) -> Decision:
+    unit = snapshot.unit(command.name)
+    if unit is None:
+        return _refuse("unit.unknown", f"unit {command.name!r} does not exist")
+    if unit.status not in {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND}:
+        return _refuse(
+            "rebind.not-published",
+            f"unit {unit.ref().label()!r} is not published or release-bound",
+        )
+    if not unit.acceptance_pack_digest or not unit.acceptance_test_set_digest:
+        return _refuse(
+            "rebind.no-pack",
+            f"unit {unit.ref().label()!r} has no bound acceptance pack to rebind",
+        )
+    if not command.reason.strip():
+        return _refuse(
+            "rebind.reason-required",
+            "rebind-pack requires a non-empty reason",
+        )
+    if not _valid_digest(command.pack_digest):
+        return _refuse(
+            "pack.digest-invalid",
+            "acceptance pack digest must be 64 lowercase hexadecimal characters",
+        )
+    if command.pack_digest == unit.acceptance_pack_digest:
+        return _refuse(
+            "rebind.no-change",
+            "rebind-pack requires a changed acceptance pack inventory",
+        )
+    test_set_digest = command.test_set_digest or command.pack_digest
+    if not _valid_digest(test_set_digest):
+        return _refuse(
+            "pack.test-set-digest-invalid",
+            "acceptance test-set digest must be 64 lowercase hexadecimal characters",
+        )
+    if command.old_inventory is None or command.new_inventory is None:
+        return _refuse(
+            "rebind.inventory-required",
+            "rebind-pack requires both old and new acceptance pack inventories",
+        )
+    old_paths = {entry.path for entry in command.old_inventory.entries}
+    new_paths = {entry.path for entry in command.new_inventory.entries}
+    removed = tuple(sorted(old_paths - new_paths))
+    if removed:
+        return _refuse(
+            "rebind.paths-removed",
+            "rebind-pack cannot remove bound path(s): " + ", ".join(removed),
+        )
+    old_tests = {
+        entry.path
+        for entry in command.old_inventory.entries
+        if command.old_inventory.pack_format == 1 or entry.role == "test"
+    }
+    new_tests = {
+        entry.path
+        for entry in command.new_inventory.entries
+        if command.new_inventory.pack_format == 1 or entry.role == "test"
+    }
+    demoted = tuple(sorted((old_tests & new_paths) - new_tests))
+    if demoted:
+        return _refuse(
+            "rebind.test-demoted",
+            "rebind-pack cannot demote executable path(s): " + ", ".join(demoted),
+        )
+    head = snapshot.evidence_head_ref(unit.ref())
+    return Accepted(
+        events=(
+            AcceptancePackRebound(
+                name=unit.name,
+                old_pack_digest=unit.acceptance_pack_digest,
+                new_pack_digest=command.pack_digest,
+                old_test_set_digest=unit.acceptance_test_set_digest,
+                new_test_set_digest=test_set_digest,
+                reason=command.reason,
+                evidence_head_sequence=0 if head is None else head.head_sequence,
             ),
         )
     )
@@ -901,11 +1015,11 @@ def _decide_record_evidence(
             "evidence.no-pack",
             f"unit {event.unit.label()!r} has no frozen acceptance pack",
         )
-    if event.pack_digest != unit.acceptance_pack_digest:
+    if event.pack_digest != unit.acceptance_test_set_digest:
         return _refuse(
             "evidence.pack-mismatch",
             f"evidence pack digest does not match unit {event.unit.label()!r}'s "
-            "current acceptance pack digest",
+            "current acceptance test-set digest",
         )
     if event.evidence_format != 2:
         return _refuse(
@@ -1284,6 +1398,8 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             return _decide_bind_bundle(snapshot, command)
         case BindPack():
             return _decide_bind_pack(snapshot, command)
+        case RebindPack():
+            return _decide_rebind_pack(snapshot, command)
         case RecordEvidence():
             return _decide_record_evidence(snapshot, command)
         case AdvanceAnchor():
@@ -1382,7 +1498,10 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                 ),
             )
         case AcceptanceFrozen(
-            name=name, pack_version=pack_version, pack_digest=pack_digest
+            name=name,
+            pack_version=pack_version,
+            pack_digest=pack_digest,
+            test_set_digest=test_set_digest,
         ):
             unit = _existing(snapshot, name)
             units = _with_unit(
@@ -1393,10 +1512,15 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                     status=UnitStatus.ACCEPTANCE_FROZEN,
                     acceptance_pack_version=pack_version,
                     acceptance_pack_digest=pack_digest,
+                    acceptance_test_set_digest=test_set_digest or pack_digest,
                     pack_binding="at-freeze" if pack_digest else "",
                 ),
             )
-        case AcceptancePackBound(name=name, pack_digest=pack_digest):
+        case AcceptancePackBound(
+            name=name,
+            pack_digest=pack_digest,
+            test_set_digest=test_set_digest,
+        ):
             unit = _existing(snapshot, name)
             units = _with_unit(
                 units,
@@ -1404,7 +1528,39 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                 replace(
                     unit,
                     acceptance_pack_digest=pack_digest,
+                    acceptance_test_set_digest=test_set_digest or pack_digest,
                     pack_binding="late",
+                ),
+            )
+        case AcceptancePackRebound(
+            name=name,
+            old_pack_digest=old_pack_digest,
+            new_pack_digest=new_pack_digest,
+            old_test_set_digest=old_test_set_digest,
+            new_test_set_digest=new_test_set_digest,
+            reason=reason,
+            evidence_head_sequence=evidence_head_sequence,
+        ):
+            unit = _existing(snapshot, name)
+            units = _with_unit(
+                units,
+                name,
+                replace(
+                    unit,
+                    acceptance_pack_digest=new_pack_digest,
+                    acceptance_test_set_digest=new_test_set_digest,
+                    pack_binding="rebound",
+                    rebound_history=unit.rebound_history
+                    + (
+                        PackRebound(
+                            old_inventory_digest=old_pack_digest,
+                            new_inventory_digest=new_pack_digest,
+                            old_test_set_digest=old_test_set_digest,
+                            new_test_set_digest=new_test_set_digest,
+                            reason=reason,
+                            evidence_head_sequence=evidence_head_sequence,
+                        ),
+                    ),
                 ),
             )
         case UnitMarkedReady(name=name):
@@ -1434,6 +1590,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                     status=UnitStatus.SPECIFIED,
                     acceptance_pack_version="",
                     acceptance_pack_digest="",
+                    acceptance_test_set_digest="",
                     pack_history=(
                         unit.pack_history + (unit.acceptance_pack_version,)
                         if unit.acceptance_pack_version
@@ -1518,36 +1675,15 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             )
         case EvidenceRecorded(event=recorded, event_digest=event_digest):
             prior = snapshot.evidence_head_ref(recorded.unit)
-            by_digest = {
-                summary.pack_digest: summary
-                for summary in (() if prior is None else prior.pack_summaries)
-            }
-            previous = by_digest.get(recorded.pack_digest)
-            red_seen = False if previous is None else previous.red_seen
-            green = False if previous is None else previous.green
-            match recorded.kind:
-                case EvidenceKind.RED:
-                    red_seen = True
-                    green = False
-                case EvidenceKind.GREEN:
-                    green = red_seen
-                case EvidenceKind.REFACTOR:
-                    pass
-                case _:
-                    assert_never(recorded.kind)
-            by_digest[recorded.pack_digest] = EvidencePackSummary(
-                pack_digest=recorded.pack_digest,
-                red_seen=red_seen,
-                green=green,
-            )
             changed = EvidenceHead(
                 unit_name=recorded.unit.name,
                 head=event_digest,
                 head_sequence=recorded.sequence,
                 anchored="GENESIS" if prior is None else prior.anchored,
                 unit_version=recorded.unit.version,
-                pack_summaries=tuple(
-                    by_digest[digest] for digest in sorted(by_digest)
+                pack_summaries=fold_evidence_pack_summaries(
+                    (recorded,),
+                    initial=() if prior is None else prior.pack_summaries,
                 ),
             )
             evidence_heads = _with_evidence_head(evidence_heads, changed)

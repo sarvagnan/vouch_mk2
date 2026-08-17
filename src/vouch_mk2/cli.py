@@ -16,7 +16,11 @@ from enum import Enum
 from typing import Any, Callable, cast, get_args, get_origin, get_type_hints
 
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
-from vouch_mk2.bundle import build_inventory, build_pack_inventory
+from vouch_mk2.bundle import (
+    build_inventory,
+    build_pack_inventory,
+    pack_test_set_digest,
+)
 from vouch_mk2.core import (
     Accepted,
     AnchorMode,
@@ -85,6 +89,8 @@ class _Arguments(argparse.Namespace):
     output: str
     project: str
     pack_file: list[str]
+    pack_test_file: list[str]
+    reason: str
     lock_path: str | None
     edit_target: str | None
     ledger: str
@@ -448,10 +454,13 @@ def _add_lifecycle_parsers(commands: Any) -> None:
         if command_type in {
             command_module.FreezeAcceptance,
             command_module.BindPack,
+            command_module.RebindPack,
         }:
             parser.add_argument("--name", required=True)
             if command_type is command_module.FreezeAcceptance:
                 parser.add_argument("--pack-version", required=True)
+            if command_type is command_module.RebindPack:
+                parser.add_argument("--reason", required=True)
             parser.add_argument(
                 "--project",
                 default=".",
@@ -461,8 +470,13 @@ def _add_lifecycle_parsers(commands: Any) -> None:
                 "--pack-file",
                 action="append",
                 default=[],
-                required=command_type is command_module.BindPack,
-                help="project-relative acceptance file (repeatable)",
+                help="project-relative acceptance spec file (repeatable)",
+            )
+            parser.add_argument(
+                "--pack-test-file",
+                action="append",
+                default=[],
+                help="project-relative executable acceptance test file (repeatable)",
             )
             continue
         if command_type is command_module.RecordEvidence:
@@ -636,32 +650,77 @@ def _make_lifecycle_handler(command_type: _CommandClass) -> _LifecycleHandler:
 def _pack_binding_handler(
     command_type: _CommandClass, namespace: argparse.Namespace
 ) -> int:
-    from vouch_mk2.store import ArtifactKind, digest_of, encode_pack_inventory
+    from vouch_mk2.store import (
+        ArtifactKind,
+        decode_pack_inventory,
+        digest_of,
+        encode_pack_inventory,
+    )
 
     data: bytes | None = None
     digest = ""
+    inventory = None
+    command: Command | None
     try:
         pack_files = tuple(cast(list[str], namespace.pack_file))
-        if pack_files:
-            inventory = build_pack_inventory(namespace.project, pack_files)
+        pack_test_files = tuple(cast(list[str], namespace.pack_test_file))
+        if pack_files or pack_test_files:
+            inventory = build_pack_inventory(
+                namespace.project, pack_files, pack_test_files
+            )
             data = encode_pack_inventory(inventory)
             digest = digest_of(ArtifactKind.ACCEPTANCE_PACK, data)
+            test_set_digest = pack_test_set_digest(inventory)
+        else:
+            test_set_digest = ""
+            if command_type in {
+                command_module.BindPack,
+                command_module.RebindPack,
+            }:
+                raise StoreError(
+                    f"{command_type.ir_command} refuses an empty acceptance pack inventory"
+                )
         if command_type is command_module.FreezeAcceptance:
-            command: Command = command_module.FreezeAcceptance(
+            command = command_module.FreezeAcceptance(
                 name=namespace.name,
                 pack_version=namespace.pack_version,
                 pack_digest=digest,
+                test_set_digest=test_set_digest,
             )
         elif command_type is command_module.BindPack:
             command = command_module.BindPack(
                 name=namespace.name,
                 pack_digest=digest,
+                test_set_digest=test_set_digest,
             )
+        elif command_type is command_module.RebindPack:
+            command = None
         else:
             raise AssertionError("pack binding handler received another command")
         with Store.open(namespace.root) as store:
             with store.write_locked():
                 snapshot = store.read_snapshot()
+                if command_type is command_module.RebindPack:
+                    unit = snapshot.unit(namespace.name)
+                    old_inventory = (
+                        None
+                        if unit is None or not unit.acceptance_pack_digest
+                        else decode_pack_inventory(
+                            store.get_object(
+                                ArtifactKind.ACCEPTANCE_PACK,
+                                unit.acceptance_pack_digest,
+                            )
+                        )
+                    )
+                    command = command_module.RebindPack(
+                        name=namespace.name,
+                        pack_digest=digest,
+                        test_set_digest=test_set_digest,
+                        reason=namespace.reason,
+                        old_inventory=old_inventory,
+                        new_inventory=inventory,
+                    )
+                assert command is not None
                 decision = decide(snapshot, command)
                 if isinstance(decision, Refused):
                     return _present_refusal(namespace.json_output, decision)
@@ -754,7 +813,9 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                         timespec="seconds"
                     ),
                     pack_digest=(
-                        "" if resolved is None else resolved.acceptance_pack_digest
+                        ""
+                        if resolved is None
+                        else resolved.acceptance_test_set_digest
                     ),
                 )
                 digest = record_evidence(store, event)
@@ -819,6 +880,7 @@ LIFECYCLE_VERBS: dict[str, _LifecycleHandler] = {
         if command_type in {
             command_module.FreezeAcceptance,
             command_module.BindPack,
+            command_module.RebindPack,
         }
         else _make_lifecycle_handler(command_type)
     )
@@ -847,6 +909,7 @@ class _Invocation:
 # invocation with the real parser.
 _SPECIALIZED_REQUIRED: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("bind-pack", "pack_digest"): (("--pack-file", "<PACK_FILE>"),),
+    ("rebind-pack", "pack_digest"): (("--pack-file", "<PACK_FILE>"),),
 }
 
 
@@ -983,6 +1046,11 @@ def _present_upgrade(result: UpgradeResult, *, dry_run: bool) -> None:
             assertion = "was-published" if was_published else "never-published"
             print(f"{prefix}assert {assertion} {ref}")
         print(f"{prefix}state format: {CURRENT_STATE_FORMAT}")
+    action = "would rebuild" if dry_run else "rebuilt"
+    print(
+        f"{prefix}{action} {result.evidence_head_summaries_rebuilt} "
+        "evidence-head summaries"
+    )
     if dry_run:
         print("dry-run: no changes written")
 
@@ -1038,6 +1106,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         output="",
         project="",
         pack_file=[],
+        pack_test_file=[],
+        reason="",
         lock_path=None,
         edit_target=None,
         ledger="",
@@ -1307,6 +1377,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             "late_bound_pack_units: " + ",".join(facts.late_bound_pack_units)
         )
+        print(
+            "rebound_pack_units: " + ",".join(facts.rebound_pack_units)
+        )
+        for rebound in facts.pack_rebounds:
+            print("pack_rebound: " + rebound)
         return 0
 
     try:

@@ -85,11 +85,20 @@ def current_pack_evidence_is_green(snapshot: Snapshot, unit: Unit) -> bool:
         (
             item
             for item in head.pack_summaries
-            if item.pack_digest == unit.acceptance_pack_digest
+            if item.pack_digest == unit.acceptance_test_set_digest
         ),
         None,
     )
-    return summary is not None and summary.red_seen and summary.green
+    return (
+        summary is not None
+        and summary.green
+        and (summary.red_seen or unit.pack_binding == "rebound")
+        and (
+            not unit.rebound_history
+            or head.head_sequence
+            > unit.rebound_history[-1].evidence_head_sequence
+        )
+    )
 
 
 def _dependency_cycle(snapshot: Snapshot) -> tuple[str, ...] | None:
@@ -154,6 +163,7 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                 "is not a valid identifier",
             )
         digest = unit.acceptance_pack_digest
+        test_set_digest = unit.acceptance_test_set_digest
         if digest and (
             len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)
@@ -168,16 +178,97 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                 "pack.digest-without-version",
                 f"units[{index}] binds a pack digest without a pack version",
             )
-        if unit.pack_binding not in {"", "at-freeze", "late"}:
+        if test_set_digest and (
+            len(test_set_digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in test_set_digest
+            )
+        ):
+            add(
+                "pack.test-set-digest-invalid",
+                f"units[{index}].acceptance_test_set_digest must be empty or 64 "
+                "lowercase hexadecimal characters",
+            )
+        if bool(test_set_digest) != bool(digest):
+            add(
+                "pack.test-set-digest-incoherent",
+                f"units[{index}].acceptance_test_set_digest must be empty iff "
+                "its pack digest is empty",
+            )
+        if unit.pack_binding not in {"", "at-freeze", "late", "rebound"}:
             add(
                 "pack.binding-invalid",
-                f"units[{index}].pack_binding must be '', 'at-freeze', or 'late'",
+                f"units[{index}].pack_binding must be '', 'at-freeze', 'late', or 'rebound'",
             )
         if bool(unit.pack_binding) != bool(digest):
             add(
                 "pack.binding-incoherent",
                 f"units[{index}].pack_binding must be empty iff its pack digest is empty",
             )
+        if unit.pack_binding == "rebound" and not unit.rebound_history:
+            add(
+                "rebind.history-missing",
+                f"units[{index}] has rebound binding without rebound history",
+            )
+        previous_rebound_digest = ""
+        previous_rebound_sequence = -1
+        for rebound_index, rebound in enumerate(unit.rebound_history):
+            for field_name, rebound_digest in (
+                ("old_inventory_digest", rebound.old_inventory_digest),
+                ("new_inventory_digest", rebound.new_inventory_digest),
+                ("old_test_set_digest", rebound.old_test_set_digest),
+                ("new_test_set_digest", rebound.new_test_set_digest),
+            ):
+                if len(rebound_digest) != 64 or any(
+                    character not in "0123456789abcdef"
+                    for character in rebound_digest
+                ):
+                    add(
+                        "rebind.history-digest-invalid",
+                        f"units[{index}].rebound_history[{rebound_index}].{field_name} "
+                        "must be 64 lowercase hexadecimal characters",
+                    )
+            if not rebound.reason.strip():
+                add(
+                    "rebind.history-reason-empty",
+                    f"units[{index}].rebound_history[{rebound_index}].reason "
+                    "must be non-empty",
+                )
+            if rebound.evidence_head_sequence < previous_rebound_sequence:
+                add(
+                    "rebind.history-sequence-regressed",
+                    f"units[{index}].rebound_history[{rebound_index}] evidence "
+                    "sequence precedes the prior rebound",
+                )
+            if previous_rebound_digest and (
+                rebound.old_inventory_digest != previous_rebound_digest
+            ):
+                add(
+                    "rebind.history-disconnected",
+                    f"units[{index}].rebound_history[{rebound_index}] old inventory "
+                    "does not equal the prior new inventory",
+                )
+            previous_rebound_digest = rebound.new_inventory_digest
+            previous_rebound_sequence = rebound.evidence_head_sequence
+        if unit.rebound_history:
+            latest = unit.rebound_history[-1]
+            if (
+                latest.new_inventory_digest != unit.acceptance_pack_digest
+                and unit.pack_binding == "rebound"
+            ):
+                add(
+                    "rebind.history-current-mismatch",
+                    f"units[{index}] rebound history does not name its current inventory",
+                )
+            if (
+                latest.new_test_set_digest != unit.acceptance_test_set_digest
+                and unit.pack_binding == "rebound"
+            ):
+                add(
+                    "rebind.history-current-test-set-mismatch",
+                    f"units[{index}] rebound history does not name its current test set",
+                )
         seen_pack_versions: set[str] = set()
         for history_index, pack_version in enumerate(unit.pack_history):
             if not valid_identifier(pack_version):
@@ -410,13 +501,6 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                     f"evidence_heads[{index}].pack_summaries[{summary_index}].pack_digest "
                     "must be empty or 64 lowercase hexadecimal characters",
                 )
-            if summary.green and not summary.red_seen:
-                add(
-                    "evidence.summary-incoherent",
-                    f"evidence_heads[{index}].pack_summaries[{summary_index}] "
-                    "cannot be green without a prior RED",
-                )
-
     cycle = _dependency_cycle(snapshot)
     if cycle is not None:
         add("unit.dependency-cycle", f"dependency cycle: {cycle!r}")

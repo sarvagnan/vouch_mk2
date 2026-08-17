@@ -5,6 +5,7 @@ from vouch_mk2.core.commands import (
     AmendDeviation,
     BeginReverify,
     BindPack,
+    RebindPack,
     BindBundle,
     CloseDeviation,
     Command,
@@ -32,6 +33,7 @@ from vouch_mk2.core.commands import (
     Supersede,
 )
 from vouch_mk2.core.decide import Accepted, Decision, Refused, apply, decide
+from vouch_mk2.core.evidence import fold_evidence_pack_summaries
 from vouch_mk2.core.invariants import (
     current_pack_evidence_is_green,
     evidence_kind_outcome_coherent,
@@ -43,6 +45,7 @@ from vouch_mk2.core.invariants import (
 from vouch_mk2.core.events import (
     AcceptanceFrozen,
     AcceptancePackBound,
+    AcceptancePackRebound,
     AnchorAdvanced,
     AnchorModeSet,
     BundleBound,
@@ -94,6 +97,7 @@ from vouch_mk2.core.model import (
     LaunchCriteria,
     PackEntry,
     PackInventory,
+    PackRebound,
     Release,
     ReleaseArchetype,
     ReleaseState,
@@ -109,6 +113,7 @@ __all__ = [
     "Accepted",
     "AcceptanceFrozen",
     "AcceptancePackBound",
+    "AcceptancePackRebound",
     "AdvanceAnchor",
     "AnchorAdvanced",
     "AnchorMode",
@@ -116,6 +121,7 @@ __all__ = [
     "AmendDeviation",
     "BeginReverify",
     "BindPack",
+    "RebindPack",
     "BindBundle",
     "BundleBound",
     "BundleInventory",
@@ -147,6 +153,7 @@ __all__ = [
     "InventoryEntry",
     "PackEntry",
     "PackInventory",
+    "PackRebound",
     "MarkDone",
     "MarkFailedUnrecovered",
     "MarkReady",
@@ -202,6 +209,7 @@ __all__ = [
     "decide",
     "current_pack_evidence_is_green",
     "evidence_kind_outcome_coherent",
+    "fold_evidence_pack_summaries",
     "valid_command_line",
     "valid_identifier",
     "valid_unit_identifier",

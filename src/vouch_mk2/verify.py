@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import assert_never
 
 from vouch_mk2.bundle import build_pack_inventory
@@ -20,15 +20,17 @@ from vouch_mk2.core import (
     EvidenceEvent,
     EvidenceHead,
     EvidenceKind,
-    EvidencePackSummary,
+    PackRebound,
     RecordEvidence,
     RecordFormalCertificate,
     Snapshot,
     Tier,
+    Unit,
     UnitStatus,
     apply,
     decide,
     evidence_kind_outcome_coherent,
+    fold_evidence_pack_summaries,
 )
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
@@ -87,6 +89,7 @@ class UpgradeResult:
     steps: tuple[tuple[int, int], ...]
     assertions: tuple[tuple[str, bool], ...]
     projections_regenerated: bool
+    evidence_head_summaries_rebuilt: int
 
 
 class ProjectionRegenerationError(StoreError):
@@ -146,68 +149,74 @@ def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
     return _ChainWalk(head, tuple(events), "")
 
 
-def _red_before_first_green(walk: _ChainWalk) -> str:
-    by_pack: dict[tuple[str, str], list[EvidenceEvent]] = {}
-    for _, event in reversed(walk.events):
-        by_pack.setdefault((event.unit.version, event.pack_digest), []).append(event)
-    for (version, pack_digest), events in by_pack.items():
-        first_green = next(
-            (index for index, event in enumerate(events) if _is_green(event.kind)),
-            None,
+def _red_before_first_green(
+    walk: _ChainWalk, *, rebound_history: tuple[PackRebound, ...] = ()
+) -> str:
+    events = tuple(event for _, event in reversed(walk.events))
+    first_green = next(
+        (index for index, event in enumerate(events) if _is_green(event.kind)),
+        None,
+    )
+    if first_green is None or any(
+        _is_red(event.kind) for event in events[:first_green]
+    ):
+        return ""
+    green = events[first_green]
+    rebound_green = any(
+        rebound.new_test_set_digest == green.pack_digest
+        and rebound.evidence_head_sequence < green.sequence
+        and (
+            index + 1 == len(rebound_history)
+            or green.sequence
+            <= rebound_history[index + 1].evidence_head_sequence
         )
-        if first_green is not None and not any(
-            _is_red(event.kind) for event in events[:first_green]
+        for index, rebound in enumerate(rebound_history)
+    )
+    if rebound_green:
+        return ""
+    return f"unit {walk.head.ref().label()!r} has no RED before its first GREEN"
+
+
+def _fresh_rebound_green(walk: _ChainWalk, unit: Unit) -> bool:
+    if not unit.rebound_history:
+        return False
+    boundary = unit.rebound_history[-1].evidence_head_sequence
+    fresh_green = False
+    green = False
+    for _digest, event in reversed(walk.events):
+        if (
+            event.sequence <= boundary
+            or event.pack_digest != unit.acceptance_test_set_digest
+            or event.evidence_format == 1
         ):
-            return (
-                f"unit {walk.head.unit_name!r} version {version!r} has no RED "
-                f"before its first GREEN for pack {pack_digest or 'pre-D-17/label-only'!r}"
-            )
-    return ""
+            continue
+        match event.kind:
+            case EvidenceKind.RED:
+                green = False
+            case EvidenceKind.GREEN:
+                fresh_green = True
+                green = True
+            case EvidenceKind.REFACTOR:
+                pass
+            case _:
+                assert_never(event.kind)
+    return fresh_green and green
 
 
 def _pack_result(
     events: tuple[tuple[str, EvidenceEvent], ...], pack_digest: str
 ) -> tuple[bool, bool, bool]:
     """Return (found, red_seen, green) for one pack in chronological order."""
-    found = False
-    red_seen = False
-    green = False
-    for _digest, event in reversed(events):
-        if event.pack_digest != pack_digest or event.evidence_format == 1:
-            continue
-        found = True
-        match event.kind:
-            case EvidenceKind.RED:
-                red_seen = True
-                green = False
-            case EvidenceKind.GREEN:
-                green = red_seen
-            case EvidenceKind.REFACTOR:
-                pass
-            case _:
-                assert_never(event.kind)
-    return found, red_seen, green
-
-
-def _pack_summaries(
-    events: tuple[tuple[str, EvidenceEvent], ...],
-) -> tuple[EvidencePackSummary, ...]:
-    """Recompute every distinct non-legacy digest summary from the chain."""
-    digests = tuple(
-        sorted(
-            {
-                event.pack_digest
-                for _, event in events
-                if event.evidence_format != 1
-            }
-        )
+    summaries = fold_evidence_pack_summaries(
+        (event for _digest, event in reversed(events))
     )
-    summaries: list[EvidencePackSummary] = []
-    for pack_digest in digests:
-        found, red_seen, green = _pack_result(events, pack_digest)
-        if found:
-            summaries.append(EvidencePackSummary(pack_digest, red_seen, green))
-    return tuple(summaries)
+    summary = next(
+        (item for item in summaries if item.pack_digest == pack_digest),
+        None,
+    )
+    if summary is None:
+        return False, False, False
+    return True, summary.red_seen, summary.green
 
 
 def _is_green(kind: EvidenceKind) -> bool:
@@ -257,10 +266,16 @@ def _check_evidence_chains(
         if walk.error:
             failures.append(f"unit {walk.head.unit_name!r}: {walk.error}")
             continue
-        history_error = _red_before_first_green(walk)
+        history_error = _red_before_first_green(
+            walk,
+            rebound_history=unit.rebound_history,
+        )
         if history_error:
             failures.append(history_error)
-        if walk.head.pack_summaries != _pack_summaries(walk.events):
+        derived_summaries = fold_evidence_pack_summaries(
+            (event for _digest, event in reversed(walk.events))
+        )
+        if walk.head.pack_summaries != derived_summaries:
             failures.append(
                 f"unit {unit.ref().label()!r}: evidence-head per-pack summary "
                 "does not match its immutable chain"
@@ -277,17 +292,36 @@ def _check_evidence_chains(
                 "current-pack evidence"
             )
         found, red_seen, green = _pack_result(
-            walk.events, unit.acceptance_pack_digest
+            walk.events, unit.acceptance_test_set_digest
         )
         if (
             snapshot.tier is not Tier.LIGHTWEIGHT
             and unit.status in {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND}
-            and (not found or not red_seen or not green)
+            and unit.pack_binding != "rebound"
+            and (
+                not found
+                or not green
+                or not red_seen
+            )
             and not all_legacy
         ):
             failures.append(
                 f"unit {unit.ref().label()!r}: latest evidence for the "
-                "current pack is not GREEN"
+                "current pack is not GREEN (test-set digest)"
+            )
+    walks_by_ref = {walk.head.ref(): walk for walk in walks}
+    for unit in snapshot.units:
+        if (
+            unit.status is UnitStatus.SUPERSEDED
+            or unit.pack_binding != "rebound"
+        ):
+            continue
+        walk = walks_by_ref.get(unit.ref())
+        if walk is None or walk.error or not _fresh_rebound_green(walk, unit):
+            failures.append(
+                f"unit {unit.ref().label()!r}: rebound after publication; "
+                "a fresh GREEN later than the rebound evidence boundary is "
+                "missing (no RED is required)"
             )
     return CheckResult(
         check_id=mk2.CHECK_EVIDENCE_CHAINS,
@@ -375,12 +409,33 @@ def _check_bundle_inventories(store: Store, snapshot: Snapshot) -> CheckResult:
     )
 
 
-def _check_pack_bound_objects(store: Store, snapshot: Snapshot) -> CheckResult:
+def _check_pack_bound_objects(
+    store: Store, snapshot: Snapshot, walks: tuple[_ChainWalk, ...]
+) -> CheckResult:
     standing = check_pack_bound(snapshot)
     if standing.verdict is Verdict.NOT_APPLICABLE:
         return standing
     details: list[str] = [standing.detail] if standing.detail else []
     failed = standing.verdict is Verdict.FAIL
+    walks_by_ref = {walk.head.ref(): walk for walk in walks}
+    if snapshot.tier is Tier.HIGH:
+        stale_rebounds = tuple(
+            unit.ref().label()
+            for unit in snapshot.units
+            if unit.status is not UnitStatus.SUPERSEDED
+            and unit.pack_binding == "rebound"
+            and (
+                (walk := walks_by_ref.get(unit.ref())) is None
+                or walk.error
+                or not _fresh_rebound_green(walk, unit)
+            )
+        )
+        if stale_rebounds:
+            failed = True
+            details.append(
+                "high: rebound units lack fresh GREEN: "
+                + ", ".join(stale_rebounds)
+            )
     for unit in snapshot.units:
         if (
             unit.status is UnitStatus.SUPERSEDED
@@ -446,7 +501,17 @@ def _check_pack_files_match(
             continue
         try:
             actual = build_pack_inventory(
-                project_root, tuple(entry.path for entry in inventory.entries)
+                project_root,
+                tuple(
+                    entry.path
+                    for entry in inventory.entries
+                    if inventory.pack_format == 1 or entry.role == "spec"
+                ),
+                tuple(
+                    entry.path
+                    for entry in inventory.entries
+                    if inventory.pack_format == 2 and entry.role == "test"
+                ),
             )
         except StoreError as error:
             failures.append(f"unit {unit.ref().label()!r}: missing pack file: {error}")
@@ -664,7 +729,7 @@ def run_artifact_checks(
                 _check_formal_certificate(store, snapshot),
                 _check_map_freshness(store, snapshot),
                 _check_context_freshness(store, snapshot),
-                _check_pack_bound_objects(store, snapshot),
+                _check_pack_bound_objects(store, snapshot, walks),
                 _check_pack_files_match(store, snapshot, project),
             ),
             key=lambda result: result.check_id,
@@ -702,6 +767,42 @@ def emit_context(store: Store, target: str | None) -> str:
     return destination
 
 
+def _rebuild_evidence_head_summaries(
+    store: Store, snapshot: Snapshot
+) -> tuple[Snapshot, int]:
+    """Replace only summary caches, after validating their immutable chains."""
+    walks = tuple(_walk_chain(store, head) for head in snapshot.evidence_heads)
+    problems: list[str] = []
+    for walk in walks:
+        if walk.error:
+            problems.append(f"unit {walk.head.ref().label()!r}: {walk.error}")
+            continue
+        for digest, event in walk.events:
+            if not evidence_kind_outcome_coherent(event.kind, event.outcome):
+                problems.append(
+                    f"unit {walk.head.ref().label()!r}: incoherent evidence object "
+                    f"{digest!r} at sequence {event.sequence}"
+                )
+    if problems:
+        raise StoreError(
+            "cannot rebuild evidence-head summaries from immutable chains: "
+            + "; ".join(problems)
+        )
+
+    rebuilt = 0
+    heads: list[EvidenceHead] = []
+    for walk in walks:
+        summaries = fold_evidence_pack_summaries(
+            (event for _digest, event in reversed(walk.events))
+        )
+        if summaries != walk.head.pack_summaries:
+            rebuilt += 1
+            heads.append(replace(walk.head, pack_summaries=summaries))
+        else:
+            heads.append(walk.head)
+    return replace(snapshot, evidence_heads=tuple(heads)), rebuilt
+
+
 def upgrade_store(
     store: Store,
     *,
@@ -721,24 +822,28 @@ def upgrade_store(
             published_once=published_once,
             store_name=os.path.dirname(store.generated_path("map.json")),
         )
-        encoded = encode_document(upgraded)
-        decode_snapshot(encoded)
+        snapshot = decode_snapshot(encode_document(upgraded))
+        snapshot, rebuilt = _rebuild_evidence_head_summaries(store, snapshot)
+        encode_snapshot(snapshot)
         return UpgradeResult(
             steps=tuple(steps),
             assertions=tuple(sorted(published_once.items())) if steps else (),
             projections_regenerated=False,
+            evidence_head_summaries_rebuilt=rebuilt,
         )
 
     with store.write_locked():
-        document = decode_raw_document(store.read_state_bytes())
+        original = store.read_state_bytes()
+        document = decode_raw_document(original)
         upgraded, steps = upgrade_document(
             document,
             published_once=published_once,
             store_name=os.path.dirname(store.generated_path("map.json")),
         )
-        encoded = encode_document(upgraded)
-        decode_snapshot(encoded)
-        state_upgraded = bool(steps)
+        snapshot = decode_snapshot(encode_document(upgraded))
+        snapshot, rebuilt = _rebuild_evidence_head_summaries(store, snapshot)
+        encoded = encode_snapshot(snapshot)
+        state_upgraded = bool(steps) or encoded != original
         if state_upgraded:
             store.replace_state_for_upgrade(encoded)
         try:
@@ -753,6 +858,7 @@ def upgrade_store(
         steps=tuple(steps),
         assertions=tuple(sorted(published_once.items())) if steps else (),
         projections_regenerated=True,
+        evidence_head_summaries_rebuilt=rebuilt,
     )
 
 

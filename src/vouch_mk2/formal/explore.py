@@ -48,8 +48,20 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             unit.status.value,
             unit.acceptance_pack_version,
             unit.acceptance_pack_digest,
+            unit.acceptance_test_set_digest,
             tuple(unit.pack_history),
             unit.pack_binding,
+            tuple(
+                (
+                    rebound.old_inventory_digest,
+                    rebound.new_inventory_digest,
+                    rebound.old_test_set_digest,
+                    rebound.new_test_set_digest,
+                    rebound.reason,
+                    rebound.evidence_head_sequence,
+                )
+                for rebound in unit.rebound_history
+            ),
             unit.published_once,
             tuple(unit.depends_on),
         )

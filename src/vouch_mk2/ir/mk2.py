@@ -69,6 +69,7 @@ CMD_MARK_FAILED_UNRECOVERED = "mark-failed-unrecovered"
 CMD_RETIRE_RELEASE = "retire"
 CMD_BIND_BUNDLE = "bind-bundle"
 CMD_BIND_PACK = "bind-pack"
+CMD_REBIND_PACK = "rebind-pack"
 
 # Evidence commands.
 CMD_RECORD_EVIDENCE = "record-evidence"

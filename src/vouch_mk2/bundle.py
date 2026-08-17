@@ -238,23 +238,26 @@ def path_text(path: RelPath) -> str:
 
 
 def build_pack_inventory(
-    project: str, pack_files: tuple[str, ...]
+    project: str,
+    pack_files: tuple[str, ...],
+    pack_test_files: tuple[str, ...] = (),
 ) -> PackInventory:
     """Hash an explicit, canonical set of project-relative acceptance files."""
-    if not pack_files:
+    if not pack_files and not pack_test_files:
         raise InventoryError("acceptance pack must contain at least one file")
-    relative_paths: list[RelPath] = []
+    relative_paths: list[tuple[RelPath, str]] = []
     seen: set[str] = set()
-    for text in pack_files:
-        try:
-            relative = RelPath.parse(text)
-        except StoreError as error:
-            raise InventoryError(f"pack file {text!r}: {error}") from error
-        canonical = path_text(relative)
-        if canonical in seen:
-            raise InventoryError(f"pack file {canonical!r}: duplicate path")
-        seen.add(canonical)
-        relative_paths.append(relative)
+    for files, role in ((pack_files, "spec"), (pack_test_files, "test")):
+        for text in files:
+            try:
+                relative = RelPath.parse(text)
+            except StoreError as error:
+                raise InventoryError(f"pack file {text!r}: {error}") from error
+            canonical = path_text(relative)
+            if canonical in seen:
+                raise InventoryError(f"pack file {canonical!r}: duplicate path")
+            seen.add(canonical)
+            relative_paths.append((relative, role))
 
     absolute_root = os.path.abspath(project)
     try:
@@ -273,18 +276,38 @@ def build_pack_inventory(
         raise InventoryError(f"{absolute_root}: cannot open project: {error}") from error
     try:
         entries: list[PackEntry] = []
-        for relative in sorted(relative_paths, key=path_text):
+        for relative, role in sorted(
+            relative_paths, key=lambda item: path_text(item[0])
+        ):
             data = _read_relative_regular(root_fd, relative)
             entries.append(
                 PackEntry(
                     path=path_text(relative),
                     sha256=hashlib.sha256(data).hexdigest(),
                     size=len(data),
+                    role=role,
                 )
             )
-        return PackInventory(entries=tuple(entries))
+        return PackInventory(
+            entries=tuple(entries),
+            pack_format=2 if pack_test_files else 1,
+        )
     finally:
         os.close(root_fd)
+
+
+def pack_test_set_digest(inventory: PackInventory) -> str:
+    """Digest the executable entries, preserving format-1 whole-pack semantics."""
+    test_inventory = inventory
+    if inventory.pack_format == 2:
+        test_inventory = PackInventory(
+            entries=tuple(entry for entry in inventory.entries if entry.role == "test"),
+            pack_format=2,
+        )
+    return digest_of(
+        ArtifactKind.ACCEPTANCE_PACK,
+        encode_pack_inventory(test_inventory),
+    )
 
 
 def build_inventory(root: str, exclusions: tuple[str, ...]) -> BundleInventory:
@@ -375,7 +398,10 @@ def bind_pack(store: Store, name: str, inventory: PackInventory) -> str:
     snapshot = store.read_snapshot()
     data = encode_pack_inventory(inventory)
     digest = digest_of(ArtifactKind.ACCEPTANCE_PACK, data)
-    decision = decide(snapshot, BindPack(name, digest))
+    decision = decide(
+        snapshot,
+        BindPack(name, digest, pack_test_set_digest(inventory)),
+    )
     if not isinstance(decision, Accepted):
         codes = tuple(violation.code for violation in decision.violations)
         raise StoreError(f"bind-pack refused: {codes!r}")

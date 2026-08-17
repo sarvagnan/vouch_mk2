@@ -32,6 +32,7 @@ from vouch_mk2.core.model import (
     LaunchCriteria,
     PackEntry,
     PackInventory,
+    PackRebound,
     Release,
     ReleaseArchetype,
     ReleaseState,
@@ -72,6 +73,17 @@ def _canonical_json(document: object) -> bytes:
 def encode_document(document: object) -> bytes:
     """Encode a raw state document with the codec's canonical JSON spelling."""
     return _canonical_json(document)
+
+
+def _pack_rebound_object(rebound: PackRebound) -> dict[str, object]:
+    return {
+        "evidence_head_sequence": rebound.evidence_head_sequence,
+        "new_inventory_digest": rebound.new_inventory_digest,
+        "new_test_set_digest": rebound.new_test_set_digest,
+        "old_inventory_digest": rebound.old_inventory_digest,
+        "old_test_set_digest": rebound.old_test_set_digest,
+        "reason": rebound.reason,
+    }
 
 
 def encode_snapshot(snapshot: Snapshot) -> bytes:
@@ -166,15 +178,20 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
             {
                 "acceptance_pack_version": unit.acceptance_pack_version,
                 "acceptance_pack_digest": unit.acceptance_pack_digest,
+                "acceptance_test_set_digest": unit.acceptance_test_set_digest,
                 "depends_on": list(unit.depends_on),
                 "name": unit.name,
                 "pack_history": list(unit.pack_history),
+                "rebound_history": [
+                    _pack_rebound_object(rebound)
+                    for rebound in unit.rebound_history
+                ],
                 "published_once": unit.published_once,
                 "status": unit.status.value,
                 "version": unit.version,
                 **(
                     {"pack_binding": unit.pack_binding}
-                    if unit.pack_binding == "late"
+                    if unit.pack_binding in {"late", "rebound"}
                     else {}
                 ),
             }
@@ -235,6 +252,16 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
     """Encode one canonical acceptance-pack inventory (D-14)."""
     if not inventory.entries:
         raise StoreError("acceptance pack inventory must contain at least one entry")
+    if inventory.pack_format not in {1, 2}:
+        raise StoreError(
+            f"unsupported acceptance pack format {inventory.pack_format}; expected 1 or 2"
+        )
+    if inventory.pack_format == 2 and not any(
+        entry.role == "test" for entry in inventory.entries
+    ):
+        raise StoreError(
+            "acceptance pack format 2 must contain at least one role 'test' entry"
+        )
     previous = ""
     for entry in inventory.entries:
         RelPath.parse(entry.path)
@@ -251,14 +278,29 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
             )
         if type(entry.size) is not int or entry.size < 0:
             raise StoreError(f"pack entry {entry.path!r}: size must be non-negative")
+        if inventory.pack_format == 1:
+            if entry.role not in {"", "spec"}:
+                raise StoreError(
+                    f"pack entry {entry.path!r}: pack format 1 cannot carry role {entry.role!r}"
+                )
+        elif entry.role not in {"test", "spec"}:
+            raise StoreError(
+                f"pack entry {entry.path!r}: role must be 'test' or 'spec'"
+            )
         previous = entry.path
+    entries = [
+        {
+            "path": entry.path,
+            "sha256": entry.sha256,
+            "size": entry.size,
+            **({"role": entry.role} if inventory.pack_format == 2 else {}),
+        }
+        for entry in inventory.entries
+    ]
     return _canonical_json(
         {
-            "pack_format": 1,
-            "entries": [
-                {"path": entry.path, "sha256": entry.sha256, "size": entry.size}
-                for entry in inventory.entries
-            ],
+            "pack_format": inventory.pack_format,
+            "entries": entries,
         }
     )
 
@@ -415,6 +457,10 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
                 "late_bound_pack_units": list(
                     map.status_facts.late_bound_pack_units
                 ),
+                "rebound_pack_units": list(
+                    map.status_facts.rebound_pack_units
+                ),
+                "pack_rebounds": list(map.status_facts.pack_rebounds),
                 "unbound_pack_units": list(
                     map.status_facts.unbound_pack_units
                 ),
@@ -425,11 +471,16 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
                 {
                     "acceptance_pack_version": unit.acceptance_pack_version,
                     "acceptance_pack_digest": unit.acceptance_pack_digest,
+                    "acceptance_test_set_digest": unit.acceptance_test_set_digest,
                     "blocking_deviation_ids": list(unit.blocking_deviation_ids),
                     "depends_on": list(unit.depends_on),
                     "name": unit.name,
                     "pack_binding": unit.pack_binding,
                     "pack_history": list(unit.pack_history),
+                    "rebound_history": [
+                        _pack_rebound_object(rebound)
+                        for rebound in unit.rebound_history
+                    ],
                     "published_once": unit.published_once,
                     "status": unit.status,
                     "version": unit.version,
@@ -523,7 +574,9 @@ _UNIT_FIELDS = frozenset(
         "depends_on",
         "acceptance_pack_version",
         "acceptance_pack_digest",
+        "acceptance_test_set_digest",
         "pack_history",
+        "rebound_history",
         "published_once",
     }
 )
@@ -599,8 +652,19 @@ _LEGACY_EVIDENCE_EVENT_FIELDS = frozenset(
 )
 _INVENTORY_ENTRY_FIELDS = frozenset({"path", "digest"})
 _BUNDLE_INVENTORY_FIELDS = frozenset({"entries", "exclusions"})
-_PACK_ENTRY_FIELDS = frozenset({"path", "sha256", "size"})
+_PACK_ENTRY_V1_FIELDS = frozenset({"path", "sha256", "size"})
+_PACK_ENTRY_V2_FIELDS = frozenset({"path", "sha256", "size", "role"})
 _PACK_INVENTORY_FIELDS = frozenset({"pack_format", "entries"})
+_PACK_REBOUND_FIELDS = frozenset(
+    {
+        "old_inventory_digest",
+        "new_inventory_digest",
+        "old_test_set_digest",
+        "new_test_set_digest",
+        "reason",
+        "evidence_head_sequence",
+    }
+)
 _FORMAL_CERTIFICATE_FIELDS = frozenset(
     {
         "checker_version",
@@ -649,8 +713,10 @@ _SYSTEM_MAP_UNIT_FIELDS = frozenset(
         "depends_on",
         "acceptance_pack_version",
         "acceptance_pack_digest",
+        "acceptance_test_set_digest",
         "pack_binding",
         "pack_history",
+        "rebound_history",
         "published_once",
         "blocking_deviation_ids",
     }
@@ -670,6 +736,8 @@ _STATUS_FACTS_FIELDS = frozenset(
         "formal_certificate_recorded",
         "next_action_count",
         "late_bound_pack_units",
+        "rebound_pack_units",
+        "pack_rebounds",
         "unbound_pack_units",
     }
 )
@@ -691,6 +759,13 @@ def _parent(value: object, path: str) -> str:
     return _digest(parent, path)
 
 
+def _pack_role(value: object, path: str) -> str:
+    role = _string(value, path)
+    if role not in {"test", "spec"}:
+        raise DecodeError(f"{path}: expected 'test' or 'spec'")
+    return role
+
+
 def _decode_unit(value: object, path: str) -> Unit:
     obj = _fields(value, path, _UNIT_FIELDS, _UNIT_OPTIONAL_FIELDS)
     digest = _digest(
@@ -703,6 +778,16 @@ def _decode_unit(value: object, path: str) -> Unit:
     ) if "pack_binding" not in obj else _decode_pack_binding(
         obj["pack_binding"], digest, _child(path, "pack_binding")
     )
+    test_set_digest = _digest(
+        obj["acceptance_test_set_digest"],
+        _child(path, "acceptance_test_set_digest"),
+        allow_empty=True,
+    )
+    if bool(test_set_digest) != bool(digest):
+        raise DecodeError(
+            f"{_child(path, 'acceptance_test_set_digest')}: must be empty iff "
+            "acceptance pack digest is empty"
+        )
     return Unit(
         name=_string(obj["name"], _child(path, "name")),
         version=_string(obj["version"], _child(path, "version")),
@@ -713,6 +798,7 @@ def _decode_unit(value: object, path: str) -> Unit:
             _child(path, "acceptance_pack_version"),
         ),
         acceptance_pack_digest=digest,
+        acceptance_test_set_digest=test_set_digest,
         published_once=_boolean(
             obj["published_once"], _child(path, "published_once")
         ),
@@ -720,13 +806,49 @@ def _decode_unit(value: object, path: str) -> Unit:
             obj["pack_history"], _child(path, "pack_history")
         ),
         pack_binding=binding,
+        rebound_history=tuple(
+            _decode_pack_rebound(raw, f"{path}.rebound_history[{index}]")
+            for index, raw in enumerate(
+                _array(obj["rebound_history"], f"{path}.rebound_history")
+            )
+        ),
+    )
+
+
+def _decode_pack_rebound(value: object, path: str) -> PackRebound:
+    obj = _fields(value, path, _PACK_REBOUND_FIELDS)
+    sequence = _integer(
+        obj["evidence_head_sequence"], f"{path}.evidence_head_sequence"
+    )
+    if sequence < 0:
+        raise DecodeError(f"{path}.evidence_head_sequence: must be non-negative")
+    reason = _string(obj["reason"], f"{path}.reason")
+    if not reason.strip():
+        raise DecodeError(f"{path}.reason: must be non-empty")
+    return PackRebound(
+        old_inventory_digest=_digest(
+            obj["old_inventory_digest"], f"{path}.old_inventory_digest"
+        ),
+        new_inventory_digest=_digest(
+            obj["new_inventory_digest"], f"{path}.new_inventory_digest"
+        ),
+        old_test_set_digest=_digest(
+            obj["old_test_set_digest"], f"{path}.old_test_set_digest"
+        ),
+        new_test_set_digest=_digest(
+            obj["new_test_set_digest"], f"{path}.new_test_set_digest"
+        ),
+        reason=reason,
+        evidence_head_sequence=sequence,
     )
 
 
 def _decode_pack_binding(value: object, digest: str, path: str) -> str:
     binding = _string(value, path)
-    if binding not in {"", "at-freeze", "late"}:
-        raise DecodeError(f"{path}: expected '', 'at-freeze', or 'late'")
+    if binding not in {"", "at-freeze", "late", "rebound"}:
+        raise DecodeError(
+            f"{path}: expected '', 'at-freeze', 'late', or 'rebound'"
+        )
     if bool(binding) != bool(digest):
         raise DecodeError(f"{path}: must be empty iff acceptance pack digest is empty")
     return binding
@@ -907,8 +1029,6 @@ def _decode_evidence_pack_summary(
     obj = _fields(value, path, _EVIDENCE_PACK_SUMMARY_FIELDS)
     red_seen = _boolean(obj["red_seen"], _child(path, "red_seen"))
     green = _boolean(obj["green"], _child(path, "green"))
-    if green and not red_seen:
-        raise DecodeError(f"{path}: cannot be green without a prior RED")
     return EvidencePackSummary(
         pack_digest=_digest(
             obj["pack_digest"], _child(path, "pack_digest"), allow_empty=True
@@ -1042,8 +1162,8 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
         _PACK_INVENTORY_FIELDS,
     )
     pack_format = _integer(obj["pack_format"], "pack_format")
-    if pack_format != 1:
-        raise DecodeError(f"pack_format: expected 1, got {pack_format}")
+    if pack_format not in {1, 2}:
+        raise DecodeError(f"pack_format: expected 1 or 2, got {pack_format}")
     raw_entries = _array(obj["entries"], "entries")
     if not raw_entries:
         raise DecodeError("entries: acceptance pack inventory must not be empty")
@@ -1052,7 +1172,11 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
     previous = ""
     for index, raw in enumerate(raw_entries):
         path = f"entries[{index}]"
-        fields = _fields(raw, path, _PACK_ENTRY_FIELDS)
+        fields = _fields(
+            raw,
+            path,
+            _PACK_ENTRY_V1_FIELDS if pack_format == 1 else _PACK_ENTRY_V2_FIELDS,
+        )
         text = _string(fields["path"], f"{path}.path")
         try:
             RelPath.parse(text)
@@ -1070,11 +1194,20 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
                 path=text,
                 sha256=_digest(fields["sha256"], f"{path}.sha256"),
                 size=size,
+                role=(
+                    ""
+                    if pack_format == 1
+                    else _pack_role(fields["role"], f"{path}.role")
+                ),
             )
         )
         seen_paths.add(text)
         previous = text
-    inventory = PackInventory(entries=tuple(entries))
+    inventory = PackInventory(entries=tuple(entries), pack_format=pack_format)
+    if pack_format == 2 and not any(entry.role == "test" for entry in entries):
+        raise DecodeError(
+            "entries: acceptance pack format 2 must contain at least one role 'test' entry"
+        )
     if encode_pack_inventory(inventory) != data:
         raise DecodeError("$: non-canonical acceptance pack inventory encoding")
     return inventory
@@ -1301,7 +1434,18 @@ def _decode_system_map_unit(value: object, path: str) -> SystemMapUnit:
             obj["acceptance_pack_version"], f"{path}.acceptance_pack_version"
         ),
         acceptance_pack_digest=digest,
+        acceptance_test_set_digest=_digest(
+            obj["acceptance_test_set_digest"],
+            f"{path}.acceptance_test_set_digest",
+            allow_empty=True,
+        ),
         pack_history=_strings(obj["pack_history"], f"{path}.pack_history"),
+        rebound_history=tuple(
+            _decode_pack_rebound(raw, f"{path}.rebound_history[{index}]")
+            for index, raw in enumerate(
+                _array(obj["rebound_history"], f"{path}.rebound_history")
+            )
+        ),
         pack_binding=_decode_pack_binding(
             obj["pack_binding"], digest, f"{path}.pack_binding"
         ),
@@ -1407,6 +1551,10 @@ def _decode_status_facts(value: object, path: str) -> StatusFacts:
         late_bound_pack_units=_strings(
             obj["late_bound_pack_units"], f"{path}.late_bound_pack_units"
         ),
+        rebound_pack_units=_strings(
+            obj["rebound_pack_units"], f"{path}.rebound_pack_units"
+        ),
+        pack_rebounds=_strings(obj["pack_rebounds"], f"{path}.pack_rebounds"),
         unbound_pack_units=_strings(
             obj["unbound_pack_units"], f"{path}.unbound_pack_units"
         ),

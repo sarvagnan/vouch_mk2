@@ -22,6 +22,8 @@ class StatusFacts:
     next_action_count: int
     unbound_pack_units: tuple[str, ...]
     late_bound_pack_units: tuple[str, ...]
+    rebound_pack_units: tuple[str, ...]
+    pack_rebounds: tuple[str, ...]
 
 
 def _counts(values: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
@@ -64,5 +66,24 @@ def status_facts(
                 if unit.status is not UnitStatus.SUPERSEDED
                 and unit.pack_binding == "late"
             )
+        ),
+        rebound_pack_units=tuple(
+            sorted(
+                unit.ref().label()
+                for unit in snapshot.units
+                if unit.status is not UnitStatus.SUPERSEDED
+                and unit.pack_binding == "rebound"
+            )
+        ),
+        pack_rebounds=tuple(
+            f"{unit.ref().label()} "
+            f"old_inventory={rebound.old_inventory_digest} "
+            f"new_inventory={rebound.new_inventory_digest} "
+            f"old_test_set={rebound.old_test_set_digest} "
+            f"new_test_set={rebound.new_test_set_digest} "
+            f"evidence_head_sequence={rebound.evidence_head_sequence} "
+            f"reason={rebound.reason!r}"
+            for unit in sorted(snapshot.units, key=lambda item: item.ref().label())
+            for rebound in unit.rebound_history
         ),
     )

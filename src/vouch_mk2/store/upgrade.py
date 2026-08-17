@@ -103,15 +103,24 @@ def _upgrade_2_to_3(document: StateDocument) -> StateDocument:
     raw_units = document.get("units")
     candidates: dict[str, list[tuple[str, str]]] = {}
     if type(raw_units) is list:
+        units: list[object] = []
         for raw_unit in cast(list[object], raw_units):
             if type(raw_unit) is not dict:
+                units.append(raw_unit)
                 continue
             unit = cast(dict[str, object], raw_unit)
+            copied_unit = dict(unit)
+            copied_unit["acceptance_test_set_digest"] = unit.get(
+                "acceptance_pack_digest", ""
+            )
+            copied_unit["rebound_history"] = []
+            units.append(copied_unit)
             name = unit.get("name")
             version = unit.get("version")
             status = unit.get("status")
             if type(name) is str and type(version) is str and type(status) is str:
                 candidates.setdefault(name, []).append((version, status))
+        upgraded["units"] = units
 
     raw_heads = document.get("evidence_heads")
     if type(raw_heads) is list:
@@ -153,6 +162,41 @@ UPGRADERS: dict[int, Upgrader] = {
     1: _upgrade_1_to_2,
     2: _upgrade_2_to_3,
 }
+
+
+def _repair_pre_extension_format_three(document: StateDocument) -> StateDocument:
+    """Repair the format-3 layout committed before pack/3 finished.
+
+    This branch exists only because format 3 was committed mid-unit inside this
+    repository and may be dropped before release.
+    """
+    raw_units = document.get("units")
+    if type(raw_units) is not list:
+        return dict(document)
+    changed = False
+    units: list[object] = []
+    for raw_unit in cast(list[object], raw_units):
+        if type(raw_unit) is not dict:
+            units.append(raw_unit)
+            continue
+        unit = cast(dict[str, object], raw_unit)
+        copied = dict(unit)
+        if "acceptance_test_set_digest" not in copied:
+            # Every pack written before this mid-unit extension was format 1,
+            # whose test-set digest is exactly its inventory digest (D-13).
+            copied["acceptance_test_set_digest"] = copied.get(
+                "acceptance_pack_digest", ""
+            )
+            changed = True
+        if "rebound_history" not in copied:
+            copied["rebound_history"] = []
+            changed = True
+        units.append(copied)
+    if not changed:
+        return dict(document)
+    repaired = dict(document)
+    repaired["units"] = units
+    return repaired
 
 
 def _prepare_format_zero_assertions(
@@ -243,6 +287,8 @@ def upgrade_document(
                 + ", ".join(sorted(assertions))
             )
         upgraded = dict(document)
+    if raw_format == CURRENT_STATE_FORMAT:
+        upgraded = _repair_pre_extension_format_three(upgraded)
     steps: list[tuple[int, int]] = []
     current = raw_format
     while current < CURRENT_STATE_FORMAT:

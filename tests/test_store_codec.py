@@ -109,7 +109,9 @@ def _baseline_document() -> dict[str, object]:
                 "depends_on": [],
                 "acceptance_pack_version": "",
                 "acceptance_pack_digest": "",
+                "acceptance_test_set_digest": "",
                 "pack_history": [],
+                "rebound_history": [],
                 "published_once": False,
             }
         ],
@@ -502,10 +504,12 @@ def test_evidence_pack_summaries_refuse_non_deterministic_layout(
     document["units"] = [
         {
             "acceptance_pack_digest": "",
+            "acceptance_test_set_digest": "",
             "acceptance_pack_version": "p1",
             "depends_on": [],
             "name": "u",
             "pack_history": [],
+            "rebound_history": [],
             "published_once": False,
             "status": "acceptance-frozen",
             "version": "v1",
