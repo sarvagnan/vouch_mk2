@@ -739,9 +739,10 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
         with Store.open(namespace.root) as store:
             with store.write_locked():
                 snapshot = store.read_snapshot()
-                head = snapshot.evidence_head(unit.name)
+                head = snapshot.evidence_head_ref(unit)
                 sequence = 1 if head is None else head.head_sequence + 1
                 parent = "GENESIS" if head is None else head.head
+                resolved = snapshot.unit_ref(unit)
                 event = EvidenceEvent(
                     unit=unit,
                     sequence=sequence,
@@ -751,6 +752,9 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                     outcome=outcome,
                     recorded_at=datetime.datetime.now(datetime.UTC).isoformat(
                         timespec="seconds"
+                    ),
+                    pack_digest=(
+                        "" if resolved is None else resolved.acceptance_pack_digest
                     ),
                 )
                 digest = record_evidence(store, event)
@@ -1212,8 +1216,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
         except UpgradeRefused as error:
             print(
-                f"vouch-mk2: upgrade refused: {error}; provide "
-                "--was-published NAME@V or --never-published NAME@V",
+                f"vouch-mk2: upgrade refused: {error}; {error.operator_hint}",
                 file=sys.stderr,
             )
             return 2

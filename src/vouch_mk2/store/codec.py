@@ -27,6 +27,7 @@ from vouch_mk2.core.model import (
     EvidenceHead,
     EvidenceKind,
     EvidenceOutcome,
+    EvidencePackSummary,
     InventoryEntry,
     LaunchCriteria,
     PackEntry,
@@ -54,7 +55,8 @@ from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
 
-CURRENT_STATE_FORMAT = 2
+CURRENT_STATE_FORMAT = 3
+CURRENT_EVIDENCE_FORMAT = 2
 
 
 def _canonical_json(document: object) -> bytes:
@@ -101,6 +103,15 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
                 "head": head.head,
                 "head_sequence": head.head_sequence,
                 "unit_name": head.unit_name,
+                "unit_version": head.unit_version,
+                "pack_summaries": [
+                    {
+                        "green": summary.green,
+                        "pack_digest": summary.pack_digest,
+                        "red_seen": summary.red_seen,
+                    }
+                    for summary in head.pack_summaries
+                ],
             }
             for head in snapshot.evidence_heads
         ],
@@ -174,8 +185,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
 
 
 def encode_evidence_event(event: EvidenceEvent) -> bytes:
-    return _canonical_json(
-        {
+    body = {
             "command_line": event.command_line,
             "kind": event.kind.value,
             "outcome": event.outcome.value,
@@ -183,8 +193,19 @@ def encode_evidence_event(event: EvidenceEvent) -> bytes:
             "recorded_at": event.recorded_at,
             "sequence": event.sequence,
             "unit": {"name": event.unit.name, "version": event.unit.version},
-        }
-    )
+    }
+    if event.evidence_format == 1:
+        if event.pack_digest:
+            raise StoreError("legacy evidence format cannot carry pack_digest")
+        return _canonical_json(body)
+    if event.evidence_format != CURRENT_EVIDENCE_FORMAT:
+        raise StoreError(
+            f"unsupported evidence format {event.evidence_format}; "
+            f"expected {CURRENT_EVIDENCE_FORMAT}"
+        )
+    body["evidence_format"] = CURRENT_EVIDENCE_FORMAT
+    body["pack_digest"] = event.pack_digest
+    return _canonical_json(body)
 
 
 def encode_bundle_inventory(inventory: BundleInventory) -> bytes:
@@ -314,7 +335,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "source_state_digest: expected 64 lowercase hexadecimal characters"
         )
     document = {
-        "map_format": 3,
+        "map_format": 4,
         "source_state_digest": source_state_digest,
         "map": {
             "anchor_mode": map.anchor_mode,
@@ -340,6 +361,15 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
                     "head": head.head,
                     "head_sequence": head.head_sequence,
                     "unit_name": head.unit_name,
+                    "unit_version": head.unit_version,
+                    "pack_summaries": [
+                        {
+                            "green": summary.green,
+                            "pack_digest": summary.pack_digest,
+                            "red_seen": summary.red_seen,
+                        }
+                        for summary in head.pack_summaries
+                    ],
                 }
                 for head in map.evidence_heads
             ],
@@ -539,9 +569,32 @@ _RELEASE_FIELDS = frozenset(
     }
 )
 _EVIDENCE_HEAD_FIELDS = frozenset(
-    {"unit_name", "head", "head_sequence", "anchored"}
+    {
+        "unit_name",
+        "unit_version",
+        "head",
+        "head_sequence",
+        "anchored",
+        "pack_summaries",
+    }
+)
+_EVIDENCE_PACK_SUMMARY_FIELDS = frozenset(
+    {"pack_digest", "red_seen", "green"}
 )
 _EVIDENCE_EVENT_FIELDS = frozenset(
+    {
+        "evidence_format",
+        "unit",
+        "sequence",
+        "parent",
+        "kind",
+        "command_line",
+        "outcome",
+        "recorded_at",
+        "pack_digest",
+    }
+)
+_LEGACY_EVIDENCE_EVENT_FIELDS = frozenset(
     {"unit", "sequence", "parent", "kind", "command_line", "outcome", "recorded_at"}
 )
 _INVENTORY_ENTRY_FIELDS = frozenset({"path", "digest"})
@@ -828,11 +881,40 @@ def _decode_evidence_head(value: object, path: str) -> EvidenceHead:
     unit_name = _string(obj["unit_name"], _child(path, "unit_name"))
     if not unit_name:
         raise DecodeError(f"{_child(path, 'unit_name')}: must be non-empty")
+    summaries_path = _child(path, "pack_summaries")
+    summaries = tuple(
+        _decode_evidence_pack_summary(item, f"{summaries_path}[{index}]")
+        for index, item in enumerate(_array(obj["pack_summaries"], summaries_path))
+    )
+    digests = tuple(summary.pack_digest for summary in summaries)
+    if digests != tuple(sorted(digests)):
+        raise DecodeError(f"{summaries_path}: must be sorted by pack_digest")
+    if len(digests) != len(set(digests)):
+        raise DecodeError(f"{summaries_path}: duplicate pack_digest")
     return EvidenceHead(
         unit_name=unit_name,
         head=_digest(obj["head"], _child(path, "head")),
         head_sequence=sequence,
         anchored=_parent(obj["anchored"], _child(path, "anchored")),
+        unit_version=_string(obj["unit_version"], _child(path, "unit_version")),
+        pack_summaries=summaries,
+    )
+
+
+def _decode_evidence_pack_summary(
+    value: object, path: str
+) -> EvidencePackSummary:
+    obj = _fields(value, path, _EVIDENCE_PACK_SUMMARY_FIELDS)
+    red_seen = _boolean(obj["red_seen"], _child(path, "red_seen"))
+    green = _boolean(obj["green"], _child(path, "green"))
+    if green and not red_seen:
+        raise DecodeError(f"{path}: cannot be green without a prior RED")
+    return EvidencePackSummary(
+        pack_digest=_digest(
+            obj["pack_digest"], _child(path, "pack_digest"), allow_empty=True
+        ),
+        red_seen=red_seen,
+        green=green,
     )
 
 
@@ -866,7 +948,21 @@ def decode_raw_document(data: bytes) -> dict[str, object]:
 
 
 def decode_evidence_event(data: bytes) -> EvidenceEvent:
-    obj = _fields(_decode_json(data, "evidence event"), "", _EVIDENCE_EVENT_FIELDS)
+    raw = _object(_decode_json(data, "evidence event"), "")
+    legacy = "evidence_format" not in raw
+    obj = _fields(
+        raw,
+        "",
+        _LEGACY_EVIDENCE_EVENT_FIELDS if legacy else _EVIDENCE_EVENT_FIELDS,
+    )
+    evidence_format = 1
+    if not legacy:
+        evidence_format = _integer(obj["evidence_format"], "evidence_format")
+        if evidence_format != CURRENT_EVIDENCE_FORMAT:
+            raise DecodeError(
+                f"evidence_format: expected {CURRENT_EVIDENCE_FORMAT}; "
+                f"format {evidence_format} is not supported"
+            )
     sequence = _integer(obj["sequence"], "sequence")
     if sequence < 1:
         raise DecodeError("sequence: must be at least 1")
@@ -883,6 +979,12 @@ def decode_evidence_event(data: bytes) -> EvidenceEvent:
         command_line=command_line,
         outcome=_enum_value(obj["outcome"], "outcome", EvidenceOutcome),
         recorded_at=_string(obj["recorded_at"], "recorded_at"),
+        pack_digest=(
+            ""
+            if legacy
+            else _digest(obj["pack_digest"], "pack_digest", allow_empty=True)
+        ),
+        evidence_format=1 if legacy else evidence_format,
     )
     if not valid_unit_identifier(event.unit.name) or not valid_unit_identifier(
         event.unit.version
@@ -892,7 +994,8 @@ def decode_evidence_event(data: bytes) -> EvidenceEvent:
         )
     # Content-addressed artifacts must have exactly ONE byte representation per
     # logical value, or digest identity is not event identity.
-    if encode_evidence_event(event) != data:
+    canonical = encode_evidence_event(event)
+    if canonical != data:
         raise DecodeError("$: non-canonical evidence event encoding")
     return event
 
@@ -1122,14 +1225,15 @@ def decode_snapshot(data: bytes) -> Snapshot:
             _array(obj["evidence_heads"], "evidence_heads")
         )
     )
-    seen_heads: set[str] = set()
+    seen_heads: set[tuple[str, str]] = set()
     for index, head in enumerate(evidence_heads):
-        if head.unit_name in seen_heads:
+        key = (head.unit_name, head.unit_version)
+        if key in seen_heads:
             raise DecodeError(
-                f"evidence_heads[{index}].unit_name: duplicate unit name "
-                f"{head.unit_name!r}"
+                f"evidence_heads[{index}].unit_name: duplicate unit ref "
+                f"{head.ref().label()!r}"
             )
-        seen_heads.add(head.unit_name)
+        seen_heads.add(key)
 
     snapshot = Snapshot(
         revision=revision,
@@ -1343,9 +1447,9 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         _decode_json(data, "system map"), "", _SYSTEM_MAP_DOCUMENT_FIELDS
     )
     map_format = _integer(document["map_format"], "map_format")
-    if map_format != 3:
+    if map_format != 4:
         raise DecodeError(
-            f"map_format: expected 3; format {map_format} is no longer supported"
+            f"map_format: expected 4; format {map_format} is no longer supported"
         )
     source_state_digest = _digest(
         document["source_state_digest"], "source_state_digest"
@@ -1402,9 +1506,9 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         "release id",
     )
     _require_unique(
-        tuple(head.unit_name for head in evidence_heads),
+        tuple((head.unit_name, head.unit_version) for head in evidence_heads),
         "map.evidence_heads",
-        "unit name",
+        "unit ref",
     )
     map = SystemMap(
         revision=revision,

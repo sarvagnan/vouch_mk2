@@ -17,6 +17,7 @@ from vouch_mk2.core.model import (
     EvidenceHead,
     EvidenceKind,
     EvidenceOutcome,
+    EvidencePackSummary,
     InventoryEntry,
     LaunchCriteria,
     Release,
@@ -386,7 +387,7 @@ def test_phase5_snapshot_round_trip_and_head_refusals() -> None:
     snapshot = Snapshot(
         revision=8,
         units=(Unit("u", "v1", UnitStatus.SPECIFIED),),
-        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS", "v1"),),
         anchor_mode=AnchorMode.CI,
     )
     assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
@@ -396,7 +397,7 @@ def test_phase5_snapshot_round_trip_and_head_refusals() -> None:
     heads = document["evidence_heads"]
     assert isinstance(heads, list)
     heads.append(dict(heads[0]))
-    with pytest.raises(DecodeError, match="duplicate unit name"):
+    with pytest.raises(DecodeError, match="duplicate unit ref"):
         decode_snapshot(_json_bytes(document))
 
 
@@ -428,9 +429,11 @@ def test_evidence_head_field_refusals(
     document["evidence_heads"] = [
         {
             "unit_name": "u",
+            "unit_version": "v1",
             "head": "a" * 64,
             "head_sequence": 1,
             "anchored": "GENESIS",
+            "pack_summaries": [],
         }
     ]
     heads = document["evidence_heads"]
@@ -463,6 +466,63 @@ def test_evidence_event_round_trip() -> None:
         "opaque",
     )
     assert decode_evidence_event(encode_evidence_event(event)) == event
+
+
+def test_evidence_pack_summaries_round_trip_in_digest_order() -> None:
+    snapshot = Snapshot(
+        units=(Unit("u", "v1", UnitStatus.ACCEPTANCE_FROZEN),),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                "f" * 64,
+                2,
+                "GENESIS",
+                "v1",
+                (
+                    EvidencePackSummary("a" * 64, True, True),
+                    EvidencePackSummary("b" * 64, True, False),
+                ),
+            ),
+        ),
+    )
+    assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
+
+
+@pytest.mark.parametrize("failure", ("unsorted", "duplicate"))
+def test_evidence_pack_summaries_refuse_non_deterministic_layout(
+    failure: str,
+) -> None:
+    document = _baseline_document()
+    first = {"green": False, "pack_digest": "b" * 64, "red_seen": True}
+    second = {
+        "green": True,
+        "pack_digest": "a" * 64 if failure == "unsorted" else "b" * 64,
+        "red_seen": True,
+    }
+    document["units"] = [
+        {
+            "acceptance_pack_digest": "",
+            "acceptance_pack_version": "p1",
+            "depends_on": [],
+            "name": "u",
+            "pack_history": [],
+            "published_once": False,
+            "status": "acceptance-frozen",
+            "version": "v1",
+        }
+    ]
+    document["evidence_heads"] = [
+        {
+            "unit_name": "u",
+            "unit_version": "v1",
+            "head": "f" * 64,
+            "head_sequence": 2,
+            "anchored": "GENESIS",
+            "pack_summaries": [first, second],
+        }
+    ]
+    with pytest.raises(DecodeError, match="sorted|duplicate"):
+        decode_snapshot(_json_bytes(document))
 
 
 @pytest.mark.parametrize(
@@ -572,7 +632,7 @@ def test_system_map_refuses_two_contradictory_tiers_and_format_one() -> None:
 
     encoded = encode_system_map(system_map(Snapshot(revision=1, tier=Tier.STANDARD)), "a" * 64)
     document = json.loads(encoded)
-    assert document["map_format"] == 3
+    assert document["map_format"] == 4
     document["map"]["status_facts"]["tier"] = "high"
     with pytest.raises(DecodeError, match="status_facts.tier"):
         decode_system_map(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")

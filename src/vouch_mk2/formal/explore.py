@@ -98,9 +98,20 @@ def state_fingerprint(snapshot: Snapshot) -> str:
         for release in sorted(snapshot.releases, key=lambda item: item.release_id)
     )
     heads = tuple(
-        (head.unit_name, head.head, head.head_sequence, head.anchored)
+        (
+            head.unit_name,
+            head.unit_version,
+            head.head,
+            head.head_sequence,
+            head.anchored,
+            tuple(
+                (summary.pack_digest, summary.red_seen, summary.green)
+                for summary in head.pack_summaries
+            ),
+        )
         for head in sorted(
-            snapshot.evidence_heads, key=lambda item: item.unit_name
+            snapshot.evidence_heads,
+            key=lambda item: (item.unit_name, item.unit_version),
         )
     )
     return repr(

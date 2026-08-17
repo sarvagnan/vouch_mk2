@@ -19,6 +19,7 @@ import vouch_mk2.verify as verify_module
 from vouch_mk2.cli import main
 from vouch_mk2.core import (
     Accepted,
+    AnchorMode,
     EvidenceEvent,
     EvidenceKind,
     EvidenceOutcome,
@@ -26,6 +27,7 @@ from vouch_mk2.core import (
     Refused,
     Snapshot,
     SpecifyUnit,
+    Tier,
     Unit,
     UnitRef,
     UnitStatus,
@@ -60,7 +62,14 @@ def _init_store(root: Path, *, unit_name: str | None = None) -> None:
             store.commit(
                 Snapshot(
                     revision=1,
-                    units=(Unit(unit_name, "v1", UnitStatus.SPECIFIED),),
+                    units=(
+                        Unit(
+                            unit_name,
+                            "v1",
+                            UnitStatus.ACCEPTANCE_FROZEN,
+                            acceptance_pack_version="pack/1",
+                        ),
+                    ),
                 )
             )
 
@@ -318,13 +327,134 @@ def test_record_evidence_command_line_distinguishes_argv_tokenization(
 def test_decide_refuses_an_invalid_evidence_command_line() -> None:
     event = _event("pytest\nforged-result")
     decision = decide(
-        Snapshot(units=(Unit("u", "v1", UnitStatus.SPECIFIED),)),
+        Snapshot(
+            units=(
+                Unit(
+                    "u",
+                    "v1",
+                    UnitStatus.ACCEPTANCE_FROZEN,
+                    acceptance_pack_version="pack/1",
+                ),
+            )
+        ),
         RecordEvidence(event, digest_of(ArtifactKind.EVIDENCE, encode_evidence_event(event))),
     )
     assert isinstance(decision, Refused)
     assert [violation.code for violation in decision.violations] == [
         "evidence.command-line-invalid"
     ]
+
+
+def test_stale_label_specified_evidence_cannot_poison_later_publication(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "stale-label"
+    with Store.init(str(root)) as store:
+        store.commit(
+            Snapshot(
+                revision=1,
+                tier=Tier.STANDARD,
+                anchor_mode=AnchorMode.CI,
+                units=(
+                    Unit(
+                        "u",
+                        "v1",
+                        UnitStatus.SPECIFIED,
+                        acceptance_pack_version="stale-label",
+                    ),
+                ),
+            )
+        )
+    for kind, exit_code in (("red", 1), ("green", 0)):
+        assert main(
+            [
+                "record-evidence",
+                "--root",
+                str(root),
+                "--unit",
+                "u@v1",
+                "--kind",
+                kind,
+                "--",
+                sys.executable,
+                "-c",
+                f"raise SystemExit({exit_code})",
+            ]
+        ) == 2
+        assert "evidence.no-pack" in capsys.readouterr().err
+    assert main(
+        [
+            "freeze",
+            "--root",
+            str(root),
+            "--name",
+            "u",
+            "--pack-version",
+            "real-label",
+        ]
+    ) == 0
+    assert main(["mark-ready", "--root", str(root), "--name", "u"]) == 0
+    assert main(["start", "--root", str(root), "--name", "u"]) == 0
+    assert main(["advance-anchor", "--root", str(root), "--unit-name", "u"]) == 2
+    capsys.readouterr()
+    assert main(["mark-done", "--root", str(root), "--name", "u"]) == 0
+    assert main(["publish", "--root", str(root), "--name", "u"]) == 2
+    out = capsys.readouterr().err
+    assert "gate.dod.current-pack-green" in out
+    with Store.open(str(root), read_only=True) as store:
+        snapshot = store.read_snapshot()
+    assert snapshot.evidence_head("u") is None
+    assert snapshot.unit("u") is not None
+    assert snapshot.unit("u").status is UnitStatus.DONE_PENDING_ACCEPTANCE  # type: ignore[union-attr]
+
+
+def test_standard_label_only_pack_cannot_publish_after_red_green(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "label-only"
+    Store.init(str(root)).close()
+    assert main(["set-tier", "--root", str(root), "--tier", "standard"]) == 0
+    assert main(["set-anchor-mode", "--root", str(root), "--mode", "ci"]) == 0
+    assert main(
+        ["specify", "--root", str(root), "--name", "u", "--version", "v1"]
+    ) == 0
+    assert main(
+        [
+            "freeze",
+            "--root",
+            str(root),
+            "--name",
+            "u",
+            "--pack-version",
+            "label-only/1",
+        ]
+    ) == 0
+    assert main(["mark-ready", "--root", str(root), "--name", "u"]) == 0
+    assert main(["start", "--root", str(root), "--name", "u"]) == 0
+    for kind, exit_code in (("red", 1), ("green", 0)):
+        assert main(
+            [
+                "record-evidence",
+                "--root",
+                str(root),
+                "--unit",
+                "u@v1",
+                "--kind",
+                kind,
+                "--",
+                sys.executable,
+                "-c",
+                f"raise SystemExit({exit_code})",
+            ]
+        ) == 0
+    assert main(["advance-anchor", "--root", str(root), "--unit-name", "u"]) == 0
+    assert main(["mark-done", "--root", str(root), "--name", "u"]) == 0
+    assert main(["publish", "--root", str(root), "--name", "u"]) == 2
+    out = capsys.readouterr().err
+    assert "gate.dod.current-pack-green" in out
+    assert "label-only" in out
+    assert "nothing to bind evidence to" in out
+    assert "requires RED followed by GREEN" not in out
 
 
 def test_verify_record_evidence_raises_typed_refusal_with_all_violations(
@@ -627,7 +757,19 @@ def test_next_shell_line_round_trips_exact_root_and_subject_argv(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = tmp_path / "store with space"
-    _init_store(root, unit_name="unit with space")
+    _init_store(root)
+    assert main(
+        [
+            "specify",
+            "--root",
+            str(root),
+            "--name",
+            "unit with space",
+            "--version",
+            "v1",
+        ]
+    ) == 0
+    capsys.readouterr()
     assert main(["next", "--root", str(root)]) == 0
     line = capsys.readouterr().out.strip()
     command, marker, reason = line.partition("  # ")

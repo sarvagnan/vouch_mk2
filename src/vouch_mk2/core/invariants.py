@@ -8,6 +8,7 @@ from vouch_mk2.core.model import (
     EvidenceKind,
     EvidenceOutcome,
     Snapshot,
+    Unit,
     UnitStatus,
 )
 from vouch_mk2.ir.schema import Violation
@@ -69,6 +70,26 @@ def evidence_kind_outcome_coherent(
                     assert_never(outcome)
         case _:
             assert_never(kind)
+
+
+def current_pack_evidence_is_green(snapshot: Snapshot, unit: Unit) -> bool:
+    """Whether the exact unit's current pack has a RED→GREEN result still green.
+
+    ``REFACTOR`` records preserve the preceding result; the fold maintains this
+    summary so the pure publication gate never needs artifact I/O.
+    """
+    head = snapshot.evidence_head_ref(unit.ref())
+    if head is None:
+        return False
+    summary = next(
+        (
+            item
+            for item in head.pack_summaries
+            if item.pack_digest == unit.acceptance_pack_digest
+        ),
+        None,
+    )
+    return summary is not None and summary.red_seen and summary.green
 
 
 def _dependency_cycle(snapshot: Snapshot) -> tuple[str, ...] | None:
@@ -339,7 +360,7 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                     f"refs {tuple(sorted(seen_roster_refs))!r}",
                 )
 
-    seen_head_names: set[str] = set()
+    seen_head_refs: set[tuple[str, str]] = set()
     for index, head in enumerate(snapshot.evidence_heads):
         if not valid_unit_identifier(head.unit_name):
             add(
@@ -347,17 +368,54 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                 f"evidence_heads[{index}].unit_name {head.unit_name!r} is not "
                 "a valid identifier",
             )
-        if head.unit_name in seen_head_names:
+        if not valid_unit_identifier(head.unit_version):
+            add(
+                "identifier.invalid",
+                f"evidence_heads[{index}].unit_version {head.unit_version!r} is not "
+                "a valid identifier",
+            )
+        key = (head.unit_name, head.unit_version)
+        if key in seen_head_refs:
             add(
                 "evidence.head-duplicate",
-                f"evidence_heads[{index}] duplicates unit name {head.unit_name!r}",
+                f"evidence_heads[{index}] duplicates unit ref {head.ref().label()!r}",
             )
-        seen_head_names.add(head.unit_name)
-        if snapshot.unit(head.unit_name) is None:
+        seen_head_refs.add(key)
+        if snapshot.unit_ref(head.ref()) is None:
             add(
                 "evidence.unit-unresolved",
-                f"evidence head for {head.unit_name!r} does not resolve to a unit",
+                f"evidence head for {head.ref().label()!r} does not resolve to a unit",
             )
+        summary_digests = tuple(
+            summary.pack_digest for summary in head.pack_summaries
+        )
+        if summary_digests != tuple(sorted(summary_digests)):
+            add(
+                "evidence.summary-order-invalid",
+                f"evidence_heads[{index}].pack_summaries must be sorted by pack digest",
+            )
+        if len(summary_digests) != len(set(summary_digests)):
+            add(
+                "evidence.summary-duplicate",
+                f"evidence_heads[{index}].pack_summaries contains duplicate pack digests",
+            )
+        for summary_index, summary in enumerate(head.pack_summaries):
+            digest = summary.pack_digest
+            if digest and (
+                len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                add(
+                    "evidence.pack-digest-invalid",
+                    f"evidence_heads[{index}].pack_summaries[{summary_index}].pack_digest "
+                    "must be empty or 64 lowercase hexadecimal characters",
+                )
+            if summary.green and not summary.red_seen:
+                add(
+                    "evidence.summary-incoherent",
+                    f"evidence_heads[{index}].pack_summaries[{summary_index}] "
+                    "cannot be green without a prior RED",
+                )
 
     cycle = _dependency_cycle(snapshot)
     if cycle is not None:
@@ -367,6 +425,7 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
 
 
 __all__ = [
+    "current_pack_evidence_is_green",
     "evidence_kind_outcome_coherent",
     "valid_command_line",
     "valid_identifier",

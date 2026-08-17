@@ -42,7 +42,7 @@ def test_state_format_is_two_and_the_unit_carries_a_pack_digest() -> None:
     from vouch_mk2.core.model import Unit
     from vouch_mk2.store import CURRENT_STATE_FORMAT
 
-    assert CURRENT_STATE_FORMAT == 2
+    assert CURRENT_STATE_FORMAT == 3
     unit = Unit("u", "1", UnitStatus.ACCEPTANCE_FROZEN, (), "u-pack/1", False, acceptance_pack_digest="a" * 64, pack_history=("u-pack/0",))
     snapshot = Snapshot(revision=1, units=(unit,))
     assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
@@ -55,7 +55,7 @@ def test_format1_upgrades_to_format2_with_unbound_packs() -> None:
 
     document = json.loads((ROOT / "tests" / "fixtures" / "state-format" / "format1.golden.json").read_bytes())
     upgraded, steps = upgrade_document(document)
-    assert steps == [(1, 2)]
+    assert steps == [(1, 2), (2, 3)]
     units = upgraded["units"]
     assert isinstance(units, list)
     for unit in units:
@@ -68,10 +68,17 @@ def test_format2_golden_is_pinned() -> None:
     # ask the owner to re-pin. The golden is the format-1 golden snapshot at format 2 with
     # digests bound on core@v1/core@v0 and ui@v1 left label-only (a legal state).
     golden = (ROOT / "tests" / "fixtures" / "state-format" / "format2.golden.json").read_bytes()
-    snapshot = decode_snapshot(golden)
+    from vouch_mk2.store import encode_document
+    from vouch_mk2.store.upgrade import upgrade_document
+
+    document, steps = upgrade_document(json.loads(golden))
+    assert steps == [(2, 3)]
+    snapshot = decode_snapshot(encode_document(document))
     assert snapshot.revision == 7
     assert {u.acceptance_pack_digest for u in snapshot.units} == {"", "c" * 64, "d" * 64}
-    assert encode_snapshot(snapshot) == golden
+    assert encode_snapshot(snapshot) == (
+        ROOT / "tests" / "fixtures" / "state-format" / "format3.golden.json"
+    ).read_bytes()
 
 
 def test_pack_inventory_is_a_canonical_object_kind() -> None:

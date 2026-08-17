@@ -87,6 +87,7 @@ from vouch_mk2.core.events import (
     TierSet,
 )
 from vouch_mk2.core.invariants import (
+    current_pack_evidence_is_green,
     evidence_kind_outcome_coherent,
     valid_command_line,
     valid_identifier,
@@ -98,6 +99,8 @@ from vouch_mk2.core.model import (
     Deviation,
     DeviationStatus,
     EvidenceHead,
+    EvidenceKind,
+    EvidencePackSummary,
     Release,
     ReleaseArchetype,
     ReleaseState,
@@ -297,6 +300,34 @@ def _gate_tier_evidence(ctx: _GateContext) -> tuple[Violation, ...]:
     )
 
 
+def _gate_current_pack_green(ctx: _GateContext) -> tuple[Violation, ...]:
+    if mk2.GATE_DOD_CURRENT_PACK_GREEN not in _tier_evidence_checks(ctx.snapshot):
+        return ()
+    if not ctx.unit.acceptance_pack_digest:
+        return (
+            Violation(
+                code=mk2.GATE_DOD_CURRENT_PACK_GREEN,
+                detail=(
+                    f"{ctx.snapshot.tier.value} publication of unit "
+                    f"{ctx.unit.ref().label()!r} refused: the current acceptance "
+                    "pack is label-only, so there is nothing to bind evidence to"
+                ),
+            ),
+        )
+    if current_pack_evidence_is_green(ctx.snapshot, ctx.unit):
+        return ()
+    return (
+        Violation(
+            code=mk2.GATE_DOD_CURRENT_PACK_GREEN,
+            detail=(
+                f"{ctx.snapshot.tier.value} publication of unit "
+                f"{ctx.unit.ref().label()!r} requires RED followed by GREEN "
+                "for the current acceptance pack, with no later RED"
+            ),
+        ),
+    )
+
+
 GATE_EVALUATORS: Mapping[str, Callable[[_GateContext], tuple[Violation, ...]]] = {
     mk2.GATE_DOR_PACK_RECORDED: _gate_pack_recorded,
     mk2.GATE_DOR_DEPENDENCIES_EXIST: _gate_dependencies_exist,
@@ -305,6 +336,7 @@ GATE_EVALUATORS: Mapping[str, Callable[[_GateContext], tuple[Violation, ...]]] =
     mk2.GATE_DOD_DEPENDENCIES_SATISFIED: _gate_dependencies_satisfied,
     mk2.GATE_DOD_NO_BLOCKING_DEVIATIONS: _gate_no_blocking_deviations,
     mk2.GATE_DOD_TIER_EVIDENCE: _gate_tier_evidence,
+    mk2.GATE_DOD_CURRENT_PACK_GREEN: _gate_current_pack_green,
     mk2.GATE_UNBLOCK_NO_BLOCKING_DEVIATIONS: _gate_no_blocking_deviations,
     mk2.GATE_REVERIFY_PACK_RECORDED: _gate_pack_recorded,
 }
@@ -559,7 +591,12 @@ def _decide_specify(snapshot: Snapshot, command: SpecifyUnit) -> Decision:
             "unit name and version must be printable identifiers of at most 200 "
             "characters without surrounding whitespace or '@'",
         )
-    if snapshot.unit(command.name) is not None:
+    same_name = tuple(unit for unit in snapshot.units if unit.name == command.name)
+    if any(
+        unit.status is not UnitStatus.SUPERSEDED
+        or unit.version == command.version
+        for unit in same_name
+    ):
         return _refuse("unit.exists", f"unit {command.name!r} already exists")
     missing = _unknown_dependencies(snapshot, command.depends_on)
     if missing:
@@ -846,9 +883,8 @@ def _decide_record_evidence(
 ) -> Decision:
     event = command.event
     unit = snapshot.unit_ref(event.unit)
-    # Evidence heads are keyed by unit NAME (one chain per unit), so evidence may
-    # bind only the CURRENT record: a superseded version is inert history (D-9)
-    # and recording against it would fold a stale version into the live head.
+    # Evidence may bind only the CURRENT record. Heads are exact NAME@VERSION
+    # bindings, so superseded history stays inspectable but inert (D-9/D-17).
     if unit is None or unit.status is UnitStatus.SUPERSEDED:
         current_unit = snapshot.unit(event.unit.name)
         current = (
@@ -859,6 +895,22 @@ def _decide_record_evidence(
         return _refuse(
             "evidence.binding-stale",
             f"evidence binds {event.unit.label()!r}; current unit is {current!r}",
+        )
+    if unit.status is UnitStatus.SPECIFIED or not unit.acceptance_pack_version:
+        return _refuse(
+            "evidence.no-pack",
+            f"unit {event.unit.label()!r} has no frozen acceptance pack",
+        )
+    if event.pack_digest != unit.acceptance_pack_digest:
+        return _refuse(
+            "evidence.pack-mismatch",
+            f"evidence pack digest does not match unit {event.unit.label()!r}'s "
+            "current acceptance pack digest",
+        )
+    if event.evidence_format != 2:
+        return _refuse(
+            "evidence.format-legacy",
+            "legacy evidence objects are readable history but cannot be recorded anew",
         )
     if not valid_command_line(event.command_line):
         return _refuse(
@@ -876,7 +928,7 @@ def _decide_record_evidence(
             "kind/outcome coherence violated: "
             f"kind {event.kind.value!r} contradicts outcome {event.outcome.value!r}",
         )
-    head = snapshot.evidence_head(event.unit.name)
+    head = snapshot.evidence_head_ref(event.unit)
     expected_parent = "GENESIS" if head is None else head.head
     expected_sequence = 1 if head is None else head.head_sequence + 1
     if event.parent != expected_parent or event.sequence != expected_sequence:
@@ -1305,8 +1357,10 @@ def _with_release(
 def _with_evidence_head(
     heads: tuple[EvidenceHead, ...], changed: EvidenceHead
 ) -> tuple[EvidenceHead, ...]:
-    retained = tuple(head for head in heads if head.unit_name != changed.unit_name)
-    return tuple(sorted(retained + (changed,), key=lambda head: head.unit_name))
+    retained = tuple(head for head in heads if head.ref() != changed.ref())
+    return tuple(
+        sorted(retained + (changed,), key=lambda head: (head.unit_name, head.unit_version))
+    )
 
 
 def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
@@ -1463,12 +1517,38 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                 replace(release, bundle_inventory_digest=inventory_digest),
             )
         case EvidenceRecorded(event=recorded, event_digest=event_digest):
-            prior = snapshot.evidence_head(recorded.unit.name)
+            prior = snapshot.evidence_head_ref(recorded.unit)
+            by_digest = {
+                summary.pack_digest: summary
+                for summary in (() if prior is None else prior.pack_summaries)
+            }
+            previous = by_digest.get(recorded.pack_digest)
+            red_seen = False if previous is None else previous.red_seen
+            green = False if previous is None else previous.green
+            match recorded.kind:
+                case EvidenceKind.RED:
+                    red_seen = True
+                    green = False
+                case EvidenceKind.GREEN:
+                    green = red_seen
+                case EvidenceKind.REFACTOR:
+                    pass
+                case _:
+                    assert_never(recorded.kind)
+            by_digest[recorded.pack_digest] = EvidencePackSummary(
+                pack_digest=recorded.pack_digest,
+                red_seen=red_seen,
+                green=green,
+            )
             changed = EvidenceHead(
                 unit_name=recorded.unit.name,
                 head=event_digest,
                 head_sequence=recorded.sequence,
                 anchored="GENESIS" if prior is None else prior.anchored,
+                unit_version=recorded.unit.version,
+                pack_summaries=tuple(
+                    by_digest[digest] for digest in sorted(by_digest)
+                ),
             )
             evidence_heads = _with_evidence_head(evidence_heads, changed)
         case AnchorAdvanced(unit_name=unit_name):

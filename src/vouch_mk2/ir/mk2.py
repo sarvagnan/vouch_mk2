@@ -90,6 +90,7 @@ GATE_DOD_PACK_FROZEN = "gate.dod.pack-frozen"
 GATE_DOD_DEPENDENCIES_SATISFIED = "gate.dod.dependencies-satisfied"
 GATE_DOD_NO_BLOCKING_DEVIATIONS = "gate.dod.no-blocking-deviations"
 GATE_DOD_TIER_EVIDENCE = "gate.dod.tier-evidence"
+GATE_DOD_CURRENT_PACK_GREEN = "gate.dod.current-pack-green"
 GATE_UNBLOCK_NO_BLOCKING_DEVIATIONS = "gate.unblock.no-blocking-deviations"
 GATE_REVERIFY_PACK_RECORDED = "gate.reverify.pack-recorded"
 GATE_RELEASE_CRITERIA_BEFORE_PROGRESSION = (
@@ -163,6 +164,7 @@ _DOD_GATES = (
     GATE_DOD_DEPENDENCIES_SATISFIED,
     GATE_DOD_NO_BLOCKING_DEVIATIONS,
     GATE_DOD_TIER_EVIDENCE,
+    GATE_DOD_CURRENT_PACK_GREEN,
 )
 
 _UNIT_STATES = (
@@ -429,6 +431,14 @@ _OBLIGATIONS = (
         description=(
             "Publication satisfies the snapshot tier's IR-bound evidence, anchor, "
             "and formal-certificate requirements."
+        ),
+    ),
+    Obligation(
+        obligation_id=GATE_DOD_CURRENT_PACK_GREEN,
+        scope=ObligationScope.TRANSITION_GATE,
+        description=(
+            "At standard and high tier, the current acceptance pack has a RED "
+            "followed by GREEN and no later RED regression."
         ),
     ),
     Obligation(
@@ -784,8 +794,17 @@ def _risk(scope: str = "", detail: str = "", residual: str = "") -> TierCell:
 
 
 _WAIVED = TierCell(level=RequirementLevel.WAIVED)
-_CHAIN_CHECKS = (CHECK_EVIDENCE_ANCHORS, CHECK_TIER_EVIDENCE_REQUIRED)
+_CHAIN_CHECKS = (
+    CHECK_EVIDENCE_ANCHORS,
+    CHECK_TIER_EVIDENCE_REQUIRED,
+    GATE_DOD_CURRENT_PACK_GREEN,
+)
 _HIGH_ATTESTATION_CHECKS = _CHAIN_CHECKS + (CHECK_TIER_HIGH_ATTESTATION,)
+_EVIDENCE_RESIDUAL = (
+    "the recorded order of Vouch's own events is not proof of chronology relative "
+    "to implementation; recording a command's exit status is not proof that the "
+    "bound acceptance tests actually executed"
+)
 
 _TIER_REQUIREMENTS = (
     TierRequirement(
@@ -867,17 +886,20 @@ _TIER_REQUIREMENTS = (
         lightweight=_required(
             detail="chain optional (ordering only, no causal claim)",
             mechanical_evidence=("record-evidence ordering and outcome gates",),
-            coverage=Coverage.FULL,
+            coverage=Coverage.PARTIAL,
+            residual=_EVIDENCE_RESIDUAL,
         ),
         standard=_required(
             detail="chained, CI-signed anchor",
             mechanical_checks=_CHAIN_CHECKS,
-            coverage=Coverage.FULL,
+            coverage=Coverage.PARTIAL,
+            residual=_EVIDENCE_RESIDUAL,
         ),
         high=_required(
             detail="chained, external append-only anchor",
             mechanical_checks=_HIGH_ATTESTATION_CHECKS,
-            coverage=Coverage.FULL,
+            coverage=Coverage.PARTIAL,
+            residual=_EVIDENCE_RESIDUAL,
         ),
     ),
     TierRequirement(

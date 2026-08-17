@@ -13,10 +13,12 @@ from vouch_mk2.core import (
     EvidenceHead,
     EvidenceKind,
     EvidenceOutcome,
+    EvidencePackSummary,
     RecordEvidence,
     Refused,
     SetAnchorMode,
     Snapshot,
+    Tier,
     Unit,
     UnitRef,
     UnitStatus,
@@ -39,7 +41,12 @@ from vouch_mk2.verify import record_evidence, run_artifact_checks
 
 
 def _unit(name: str, version: str = "v1") -> Unit:
-    return Unit(name=name, version=version, status=UnitStatus.SPECIFIED)
+    return Unit(
+        name=name,
+        version=version,
+        status=UnitStatus.ACCEPTANCE_FROZEN,
+        acceptance_pack_version="pack/1",
+    )
 
 
 def _event(
@@ -98,8 +105,22 @@ def test_record_evidence_happy_chain_and_independent_second_unit(tmp_path: Path)
         )
         b_red = record_evidence(store, _event("b", 1, "GENESIS", EvidenceKind.RED))
         snapshot = store.read_snapshot()
-        assert snapshot.evidence_head("a") == EvidenceHead("a", a_refactor, 3, "GENESIS")
-        assert snapshot.evidence_head("b") == EvidenceHead("b", b_red, 1, "GENESIS")
+        assert snapshot.evidence_head("a") == EvidenceHead(
+            "a",
+            a_refactor,
+            3,
+            "GENESIS",
+            "v1",
+            (EvidencePackSummary("", True, True),),
+        )
+        assert snapshot.evidence_head("b") == EvidenceHead(
+            "b",
+            b_red,
+            1,
+            "GENESIS",
+            "v1",
+            (EvidencePackSummary("", True, False),),
+        )
         assert tuple(head.unit_name for head in snapshot.evidence_heads) == ("a", "b")
         assert decode_evidence_event(store.get_object(ArtifactKind.EVIDENCE, a_green)).kind is EvidenceKind.GREEN
 
@@ -126,7 +147,7 @@ def test_record_evidence_named_refusals(
 def test_parent_and_sequence_mismatch_after_existing_head() -> None:
     snapshot = Snapshot(
         units=(_unit("u"),),
-        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS", "v1"),),
     )
     for event in (
         _event("u", 2, "b" * 64, EvidenceKind.GREEN),
@@ -139,7 +160,7 @@ def test_parent_and_sequence_mismatch_after_existing_head() -> None:
 
 
 def test_anchor_promotion_and_mode_round_trip() -> None:
-    snapshot = Snapshot(units=(_unit("u"),), evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),))
+    snapshot = Snapshot(units=(_unit("u"),), evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS", "v1"),))
     advanced = decide(snapshot, AdvanceAnchor("u"))
     assert isinstance(advanced, Accepted)
     after = apply(snapshot, advanced.events)
@@ -203,7 +224,7 @@ def test_snapshot_codec_round_trip_with_phase5_fields() -> None:
     snapshot = Snapshot(
         revision=3,
         units=(_unit("u"),),
-        evidence_heads=(EvidenceHead("u", "a" * 64, 2, "b" * 64),),
+        evidence_heads=(EvidenceHead("u", "a" * 64, 2, "b" * 64, "v1"),),
         anchor_mode=AnchorMode.CI,
     )
     assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
@@ -249,7 +270,7 @@ def test_corrupt_evidence_and_absent_head_fail(tmp_path: Path) -> None:
             Snapshot(
                 revision=1,
                 units=(_unit("u"),),
-                evidence_heads=(EvidenceHead("u", missing, 1, "GENESIS"),),
+                evidence_heads=(EvidenceHead("u", missing, 1, "GENESIS", "v1"),),
             )
         )
         found = _result(store, store.read_snapshot(), mk2.CHECK_EVIDENCE_CHAINS)
@@ -369,7 +390,7 @@ def test_ghost_evidence_head_is_refused_at_store_ingress(tmp_path: Path) -> None
         del digest
 
 
-def test_stale_version_chain_events_fail_chains_check(tmp_path: Path) -> None:
+def test_snapshot_ingress_rejects_head_for_missing_version(tmp_path: Path) -> None:
     root = tmp_path / "store"
     _init(root)
     with Store.open(str(root)) as store:
@@ -380,10 +401,8 @@ def test_stale_version_chain_events_fail_chains_check(tmp_path: Path) -> None:
             units=(_unit("u", version="v2"),),
             evidence_heads=snapshot.evidence_heads,
         )
-        store.commit(bumped)
-        found = _result(store, bumped, mk2.CHECK_EVIDENCE_CHAINS)
-        assert found.verdict is Verdict.FAIL
-        assert "unit is at 'v2'" in found.detail
+        with pytest.raises(StoreError, match="evidence.unit-unresolved"):
+            store.commit(bumped)
 
 
 def test_anchor_advanced_event_is_promotion_only_by_type() -> None:
@@ -406,3 +425,393 @@ def test_non_canonical_evidence_bytes_are_refused() -> None:
     with pytest.raises(DecodeError, match="non-canonical"):
         decode_evidence_event(reordered)
     assert decode_evidence_event(canonical) is not None
+
+
+def test_legacy_evidence_decodes_as_pre_d17_without_a_pack_digest() -> None:
+    legacy = replace(
+        _event("u", 1, "GENESIS", EvidenceKind.RED), evidence_format=1
+    )
+    data = encode_evidence_event(legacy)
+    decoded = decode_evidence_event(data)
+    assert decoded.evidence_format == 1
+    assert decoded.pack_digest == ""
+    assert encode_evidence_event(decoded) == data
+
+
+def test_decide_refuses_evidence_for_a_digest_other_than_the_current_pack() -> None:
+    unit = Unit(
+        "u",
+        "v1",
+        UnitStatus.ACCEPTANCE_FROZEN,
+        acceptance_pack_version="pack/1",
+        acceptance_pack_digest="a" * 64,
+    )
+    event = replace(
+        _event("u", 1, "GENESIS", EvidenceKind.RED),
+        pack_digest="b" * 64,
+    )
+    decision = decide(Snapshot(units=(unit,)), RecordEvidence(event, "c" * 64))
+    assert isinstance(decision, Refused)
+    assert tuple(v.code for v in decision.violations) == ("evidence.pack-mismatch",)
+
+
+def test_record_evidence_refuses_specified_unit_with_stale_pack_label() -> None:
+    unit = Unit(
+        "u",
+        "v1",
+        UnitStatus.SPECIFIED,
+        acceptance_pack_version="stale-pack-label",
+    )
+    event = _event("u", 1, "GENESIS", EvidenceKind.RED)
+    decision = decide(
+        Snapshot(units=(unit,)),
+        RecordEvidence(event, digest_of(ArtifactKind.EVIDENCE, encode_evidence_event(event))),
+    )
+    assert isinstance(decision, Refused)
+    assert tuple(v.code for v in decision.violations) == ("evidence.no-pack",)
+
+
+def test_pack_digest_a_to_b_to_a_retains_a_green_summary(tmp_path: Path) -> None:
+    from vouch_mk2.core import Publish
+
+    digest_a = "a" * 64
+    digest_b = "b" * 64
+    root = tmp_path / "digest-back"
+    unit = Unit(
+        "u",
+        "v1",
+        UnitStatus.ACCEPTANCE_FROZEN,
+        acceptance_pack_version="pack/a",
+        acceptance_pack_digest=digest_a,
+    )
+    with Store.init(str(root)) as store:
+        store.commit(Snapshot(revision=1, tier=Tier.STANDARD, units=(unit,)))
+        red_a = record_evidence(
+            store,
+            replace(_event("u", 1, "GENESIS", EvidenceKind.RED), pack_digest=digest_a),
+        )
+        record_evidence(
+            store,
+            replace(_event("u", 2, red_a, EvidenceKind.GREEN), pack_digest=digest_a),
+        )
+        snapshot = store.read_snapshot()
+        store.commit(
+            replace(
+                snapshot,
+                revision=snapshot.revision + 1,
+                units=(
+                    replace(
+                        unit,
+                        acceptance_pack_version="pack/b",
+                        acceptance_pack_digest=digest_b,
+                    ),
+                ),
+            )
+        )
+        head = store.read_snapshot().evidence_head("u")
+        assert head is not None
+        red_b = record_evidence(
+            store,
+            replace(
+                _event("u", 3, head.head, EvidenceKind.RED),
+                pack_digest=digest_b,
+            ),
+        )
+        record_evidence(
+            store,
+            replace(_event("u", 4, red_b, EvidenceKind.GREEN), pack_digest=digest_b),
+        )
+        snapshot = store.read_snapshot()
+        done = replace(
+            snapshot,
+            units=(
+                replace(
+                    unit,
+                    status=UnitStatus.DONE_PENDING_ACCEPTANCE,
+                    acceptance_pack_version="pack/a-again",
+                ),
+            ),
+        )
+    assert isinstance(decide(done, Publish("u")), Accepted)
+
+
+def test_all_legacy_chain_rejects_forged_cached_summary(tmp_path: Path) -> None:
+    from vouch_mk2.core import EvidencePackSummary
+
+    legacy = replace(
+        _event("u", 1, "GENESIS", EvidenceKind.RED), evidence_format=1
+    )
+    data = encode_evidence_event(legacy)
+    digest = digest_of(ArtifactKind.EVIDENCE, data)
+    snapshot = Snapshot(
+        revision=1,
+        tier=Tier.STANDARD,
+        units=(
+            Unit(
+                "u",
+                "v1",
+                UnitStatus.ACCEPTANCE_FROZEN,
+                acceptance_pack_version="pack/1",
+                acceptance_pack_digest="a" * 64,
+            ),
+        ),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                digest,
+                1,
+                "GENESIS",
+                "v1",
+                (EvidencePackSummary("", True, True),),
+            ),
+        ),
+    )
+    with Store.init(str(tmp_path / "legacy-forged")) as store:
+        store.commit(snapshot, objects=((ArtifactKind.EVIDENCE, data),))
+        result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
+    assert result.verdict is Verdict.FAIL
+    assert "u@v1" in result.detail and "summary" in result.detail
+
+
+def test_cached_pack_digest_set_must_match_the_nonlegacy_chain(tmp_path: Path) -> None:
+    from vouch_mk2.core import EvidencePackSummary
+
+    event = replace(
+        _event("u", 1, "GENESIS", EvidenceKind.RED), pack_digest="a" * 64
+    )
+    data = encode_evidence_event(event)
+    digest = digest_of(ArtifactKind.EVIDENCE, data)
+    snapshot = Snapshot(
+        revision=1,
+        units=(
+            Unit(
+                "u",
+                "v1",
+                UnitStatus.ACCEPTANCE_FROZEN,
+                acceptance_pack_version="pack/a",
+                acceptance_pack_digest="a" * 64,
+            ),
+        ),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                digest,
+                1,
+                "GENESIS",
+                "v1",
+                (EvidencePackSummary("b" * 64, True, False),),
+            ),
+        ),
+    )
+    with Store.init(str(tmp_path / "wrong-digest")) as store:
+        store.commit(snapshot, objects=((ArtifactKind.EVIDENCE, data),))
+        result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
+    assert result.verdict is Verdict.FAIL
+    assert "u@v1" in result.detail and "summary" in result.detail
+
+
+def test_chain_check_validates_every_cached_pack_summary(tmp_path: Path) -> None:
+    from vouch_mk2.core import EvidencePackSummary
+
+    digest_a = "a" * 64
+    digest_b = "b" * 64
+    events: list[tuple[EvidenceEvent, bytes, str]] = []
+    parent = "GENESIS"
+    for sequence, (pack_digest, kind) in enumerate(
+        (
+            (digest_a, EvidenceKind.RED),
+            (digest_a, EvidenceKind.GREEN),
+            (digest_b, EvidenceKind.RED),
+            (digest_b, EvidenceKind.GREEN),
+        ),
+        start=1,
+    ):
+        event = replace(
+            _event("u", sequence, parent, kind), pack_digest=pack_digest
+        )
+        data = encode_evidence_event(event)
+        parent = digest_of(ArtifactKind.EVIDENCE, data)
+        events.append((event, data, parent))
+    snapshot = Snapshot(
+        revision=1,
+        units=(
+            Unit(
+                "u",
+                "v1",
+                UnitStatus.ACCEPTANCE_FROZEN,
+                acceptance_pack_version="pack/b",
+                acceptance_pack_digest=digest_b,
+            ),
+        ),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                parent,
+                4,
+                "GENESIS",
+                "v1",
+                (
+                    EvidencePackSummary(digest_a, False, False),
+                    EvidencePackSummary(digest_b, True, True),
+                ),
+            ),
+        ),
+    )
+    objects = tuple((ArtifactKind.EVIDENCE, data) for _event_value, data, _ in events)
+    with Store.init(str(tmp_path / "all-summaries")) as store:
+        store.commit(snapshot, objects=objects)
+        result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
+    assert result.verdict is Verdict.FAIL
+    assert "u@v1" in result.detail and "summary" in result.detail
+
+
+@pytest.mark.parametrize("tier", (Tier.STANDARD, Tier.HIGH))
+def test_mixed_legacy_chain_is_reported_for_nonpublished_green_unit(
+    tmp_path: Path, tier: Tier
+) -> None:
+    from vouch_mk2.core import EvidencePackSummary
+
+    pack_digest = "a" * 64
+    rows: list[tuple[bytes, str]] = []
+    parent = "GENESIS"
+    for sequence, (evidence_format, kind) in enumerate(
+        (
+            (1, EvidenceKind.RED),
+            (1, EvidenceKind.GREEN),
+            (2, EvidenceKind.RED),
+            (2, EvidenceKind.GREEN),
+        ),
+        start=1,
+    ):
+        event = replace(
+            _event("u", sequence, parent, kind),
+            evidence_format=evidence_format,
+            pack_digest=pack_digest if evidence_format == 2 else "",
+        )
+        data = encode_evidence_event(event)
+        parent = digest_of(ArtifactKind.EVIDENCE, data)
+        rows.append((data, parent))
+    snapshot = Snapshot(
+        revision=1,
+        tier=tier,
+        units=(
+            Unit(
+                "u",
+                "v1",
+                UnitStatus.ACCEPTANCE_FROZEN,
+                acceptance_pack_version="pack/a",
+                acceptance_pack_digest=pack_digest,
+            ),
+        ),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                parent,
+                4,
+                "GENESIS",
+                "v1",
+                (EvidencePackSummary(pack_digest, True, True),),
+            ),
+        ),
+    )
+    with Store.init(str(tmp_path / tier.value)) as store:
+        store.commit(
+            snapshot,
+            objects=tuple((ArtifactKind.EVIDENCE, data) for data, _ in rows),
+        )
+        result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
+    assert result.verdict is Verdict.PASS
+    assert "pre-D-17 evidence" in result.detail and "u@v1" in result.detail
+
+
+def test_pre_d17_notice_survives_a_current_pack_failure(tmp_path: Path) -> None:
+    from vouch_mk2.core import EvidencePackSummary
+
+    pack_digest = "a" * 64
+    legacy = replace(
+        _event("u", 1, "GENESIS", EvidenceKind.RED), evidence_format=1
+    )
+    legacy_data = encode_evidence_event(legacy)
+    legacy_digest = digest_of(ArtifactKind.EVIDENCE, legacy_data)
+    current = replace(
+        _event("u", 2, legacy_digest, EvidenceKind.RED), pack_digest=pack_digest
+    )
+    current_data = encode_evidence_event(current)
+    current_digest = digest_of(ArtifactKind.EVIDENCE, current_data)
+    snapshot = Snapshot(
+        revision=1,
+        tier=Tier.STANDARD,
+        units=(
+            Unit(
+                "u",
+                "v1",
+                UnitStatus.PUBLISHED,
+                acceptance_pack_version="pack/a",
+                published_once=True,
+                acceptance_pack_digest=pack_digest,
+            ),
+        ),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                current_digest,
+                2,
+                "GENESIS",
+                "v1",
+                (EvidencePackSummary(pack_digest, True, False),),
+            ),
+        ),
+    )
+    with Store.init(str(tmp_path / "legacy-and-failure")) as store:
+        store.commit(
+            snapshot,
+            objects=(
+                (ArtifactKind.EVIDENCE, legacy_data),
+                (ArtifactKind.EVIDENCE, current_data),
+            ),
+        )
+        result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
+    assert result.verdict is Verdict.FAIL
+    assert "pre-D-17 evidence" in result.detail
+    assert "latest evidence for the current pack is not GREEN" in result.detail
+
+
+def test_pre_d17_chain_is_reported_without_failing_a_published_unit(
+    tmp_path: Path,
+) -> None:
+    red_event = replace(
+        _event("u", 1, "GENESIS", EvidenceKind.RED), evidence_format=1
+    )
+    red_data = encode_evidence_event(red_event)
+    red_digest = digest_of(ArtifactKind.EVIDENCE, red_data)
+    green_event = replace(
+        _event("u", 2, red_digest, EvidenceKind.GREEN), evidence_format=1
+    )
+    green_data = encode_evidence_event(green_event)
+    green_digest = digest_of(ArtifactKind.EVIDENCE, green_data)
+    snapshot = Snapshot(
+        revision=1,
+        tier=Tier.STANDARD,
+        units=(
+            Unit(
+                "u",
+                "v1",
+                UnitStatus.PUBLISHED,
+                acceptance_pack_version="pack/1",
+                published_once=True,
+                acceptance_pack_digest="a" * 64,
+            ),
+        ),
+        evidence_heads=(EvidenceHead("u", green_digest, 2, "GENESIS", "v1"),),
+    )
+    with Store.init(str(tmp_path / "legacy")) as store:
+        store.commit(
+            snapshot,
+            objects=(
+                (ArtifactKind.EVIDENCE, red_data),
+                (ArtifactKind.EVIDENCE, green_data),
+            ),
+        )
+        result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
+    assert result.verdict is Verdict.PASS
+    assert "pre-D-17 evidence" in result.detail and "u@v1" in result.detail

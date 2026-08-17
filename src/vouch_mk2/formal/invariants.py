@@ -365,28 +365,28 @@ def _anchor_monotonic(relation: Relation) -> tuple[str, ...]:
     for source, command, target in relation.transitions:
         before = representatives[source]
         after = representatives[target]
-        names = {head.unit_name for head in before.evidence_heads} | {
-            head.unit_name for head in after.evidence_heads
+        refs = {head.ref() for head in before.evidence_heads} | {
+            head.ref() for head in after.evidence_heads
         }
-        for name in sorted(names):
-            prior = before.evidence_head(name)
-            current = after.evidence_head(name)
+        for ref in sorted(refs, key=lambda item: (item.name, item.version)):
+            prior = before.evidence_head_ref(ref)
+            current = after.evidence_head_ref(ref)
             if current is None:
-                violations.append(f"{command}: evidence head {name!r} disappeared")
+                violations.append(f"{command}: evidence head {ref.label()!r} disappeared")
                 continue
             if prior is None:
                 if current.anchored != "GENESIS":
                     violations.append(
-                        f"{command}: new head {name!r} has non-GENESIS anchor"
+                        f"{command}: new head {ref.label()!r} has non-GENESIS anchor"
                     )
                 continue
             if current.head_sequence < prior.head_sequence:
                 violations.append(
-                    f"{command}: head sequence for {name!r} decreased"
+                    f"{command}: head sequence for {ref.label()!r} decreased"
                 )
             if current.anchored not in {prior.anchored, current.head}:
                 violations.append(
-                    f"{command}: anchor for {name!r} moved from "
+                    f"{command}: anchor for {ref.label()!r} moved from "
                     f"{prior.anchored!r} to unrelated {current.anchored!r}"
                 )
     return tuple(violations)

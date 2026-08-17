@@ -61,8 +61,8 @@ def test_core_v1_closes_exhaustively_with_stable_counts(
 ) -> None:
     core = formal_run.universe(CORE_V1.name)
     assert core.universe_name == CORE_V1.name == "core-v1"
-    assert core.state_count == 268_202
-    assert core.transition_count == 1_453_962
+    assert core.state_count == 264_462
+    assert core.transition_count == 1_381_350
     assert len(set(core.relation.states)) == core.state_count
     assert len(set(core.relation.transitions)) == core.transition_count
     assert passed(formal_run)
@@ -181,8 +181,8 @@ def _regression_tier_v1_covers_legal_lowering_and_committed_refusals(
 
     tier = formal_run.universe(TIER_V1.name)
     assert tier.universe_name == TIER_V1.name == "tier-v1"
-    assert tier.state_count == 12
-    assert tier.transition_count == 39
+    assert tier.state_count == 66
+    assert tier.transition_count == 230
     representatives = dict(tier.relation.representatives)
     lowering = [
         (representatives[source], representatives[target])

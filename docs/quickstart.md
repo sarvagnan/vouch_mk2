@@ -73,7 +73,8 @@ python3 vouch.lock start --root .vouch --name greeter
 There is no flag to type an outcome by hand. What Vouch claims about this record is exactly:
 the recorded outcome is the exit status of a process this verb spawned, at the time it
 spawned it. It does not claim the command was a test runner, or that the runner was honest —
-that is your harness's job.
+that is your harness's job. Recording is refused until the unit has a frozen acceptance
+pack, and each record binds the current pack digest read while the store is locked.
 
 The pack test fails now, because `greeter` does not exist yet. That is the point: a `red`
 record proves the spawned command *exited non-zero* before any implementation existed —
@@ -117,6 +118,9 @@ python3 vouch.lock publish --root .vouch --name greeter
 
 `publish` went through the definition-of-done gates: a pack version is recorded, dependencies
 are satisfied, no blocking deviations, and the evidence the assurance tier requires is present.
+At `standard` and `high`, `gate.dod.current-pack-green` additionally requires RED followed by
+GREEN for the current pack; the latest evidence for the current pack must be green (a later
+refactor preserves green, while a later red breaks it).
 A refused lifecycle command prints the violation code and leaves the store unchanged —
 publishing twice, for instance (a child run by `record-evidence` may of course have changed
 files *outside* the store before its record was refused):

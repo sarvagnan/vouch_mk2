@@ -105,7 +105,7 @@ def test_pack_inventory_refuses_duplicate_paths_at_encode_and_decode() -> None:
 def test_system_map_format_three_refuses_format_two() -> None:
     encoded = encode_system_map(system_map(Snapshot()), "a" * 64)
     document = json.loads(encoded)
-    assert document["map_format"] == 3
+    assert document["map_format"] == 4
     document["map_format"] = 2
     with pytest.raises(DecodeError, match="format 2"):
         decode_system_map(_canonical(document))

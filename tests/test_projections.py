@@ -48,6 +48,7 @@ from vouch_mk2.core.model import (
     DeviationStatus,
     DeviationType,
     EvidenceHead,
+    EvidencePackSummary,
     LaunchCriteria,
     Release,
     ReleaseArchetype,
@@ -174,7 +175,9 @@ def _populated_snapshot() -> Snapshot:
                 "b" * 64,
             ),
         ),
-        evidence_heads=(EvidenceHead("consumer", "c" * 64, 2, "c" * 64),),
+        evidence_heads=(
+            EvidenceHead("consumer", "c" * 64, 2, "c" * 64, "3"),
+        ),
         anchor_mode=AnchorMode.CI,
         formal_certificate_digest="f" * 64,
     )
@@ -217,7 +220,7 @@ def _regression_system_map_v2_refuses_v1_and_contradictory_tiers() -> None:
     with pytest.raises(DecodeError, match="format 2 is no longer supported"):
         decode_system_map(legacy)
 
-    document["map_format"] = 3
+    document["map_format"] = 4
     document["map"]["status_facts"]["tier"] = "high"
     contradictory = json.dumps(
         document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -310,14 +313,27 @@ def _regression_publish_next_action_obeys_tier_evidence_gate() -> None:
     from vouch_mk2.core import Tier
 
     unit = Unit(
-        "u", "v1", UnitStatus.DONE_PENDING_ACCEPTANCE, acceptance_pack_version="p1"
+        "u",
+        "v1",
+        UnitStatus.DONE_PENDING_ACCEPTANCE,
+        acceptance_pack_version="p1",
+        acceptance_pack_digest="d" * 64,
     )
     standard = Snapshot(tier=Tier.STANDARD, units=(unit,))
     assert mk2.CMD_PUBLISH not in _commands(standard, "unit", "u")
     standard_ready = Snapshot(
         tier=Tier.STANDARD,
         units=(unit,),
-        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                "a" * 64,
+                1,
+                "GENESIS",
+                "v1",
+                (EvidencePackSummary("d" * 64, True, True),),
+            ),
+        ),
     )
     assert mk2.CMD_PUBLISH in _commands(standard_ready, "unit", "u")
     high_unready = Snapshot(
@@ -329,7 +345,16 @@ def _regression_publish_next_action_obeys_tier_evidence_gate() -> None:
     high_ready = Snapshot(
         tier=Tier.HIGH,
         units=(unit,),
-        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "a" * 64),),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                "a" * 64,
+                1,
+                "a" * 64,
+                "v1",
+                (EvidencePackSummary("d" * 64, True, True),),
+            ),
+        ),
         formal_certificate_digest="f" * 64,
     )
     assert mk2.CMD_PUBLISH in _commands(high_ready, "unit", "u")
@@ -444,11 +469,34 @@ def test_verifying_completes_only_when_all_gates_pass_otherwise_rolls_back() -> 
 
 
 def test_stagnant_ci_anchor_emits_advance_and_none_mode_does_not() -> None:
-    head = EvidenceHead("u", "a" * 64, 1, "GENESIS")
-    ci = Snapshot(evidence_heads=(head,), anchor_mode=AnchorMode.CI)
+    head = EvidenceHead("u", "a" * 64, 1, "GENESIS", "v1")
+    units = (Unit("u", "v1", UnitStatus.SPECIFIED),)
+    ci = Snapshot(units=units, evidence_heads=(head,), anchor_mode=AnchorMode.CI)
     assert _commands(ci, "evidence", "u") == {mk2.CMD_ADVANCE_ANCHOR}
-    none = Snapshot(evidence_heads=(head,), anchor_mode=AnchorMode.NONE)
+    none = Snapshot(units=units, evidence_heads=(head,), anchor_mode=AnchorMode.NONE)
     assert _commands(none, "evidence", "u") == set()
+
+
+def test_publish_next_action_is_suppressed_until_current_pack_is_green() -> None:
+    from vouch_mk2.core import Tier
+
+    unit = Unit(
+        "u",
+        "v1",
+        UnitStatus.DONE_PENDING_ACCEPTANCE,
+        acceptance_pack_version="pack/1",
+        acceptance_pack_digest="a" * 64,
+    )
+    red_head = EvidenceHead(
+        "u",
+        "b" * 64,
+        1,
+        "GENESIS",
+        "v1",
+        (EvidencePackSummary("a" * 64, True, False),),
+    )
+    snapshot = Snapshot(tier=Tier.STANDARD, units=(unit,), evidence_heads=(red_head,))
+    assert mk2.CMD_PUBLISH not in _commands(snapshot, "unit", "u")
 
 
 def test_status_facts_reuses_already_derived_actions() -> None:
@@ -458,6 +506,33 @@ def test_status_facts_reuses_already_derived_actions() -> None:
     assert facts.unit_counts == (("specified", 1),)
     assert facts.deviation_counts == ()
     assert facts.next_action_count == len(actions) == 1
+
+
+def test_system_map_flattens_per_digest_evidence_summaries() -> None:
+    head = EvidenceHead(
+        "u",
+        "f" * 64,
+        2,
+        "GENESIS",
+        "v1",
+        (
+            EvidencePackSummary("a" * 64, True, True),
+            EvidencePackSummary("b" * 64, True, False),
+        ),
+    )
+    projected = system_map(
+        Snapshot(
+            units=(Unit("u", "v1", UnitStatus.ACCEPTANCE_FROZEN),),
+            evidence_heads=(head,),
+        )
+    )
+    document = json.loads(encode_system_map(projected, "c" * 64))
+    summaries = document["map"]["evidence_heads"][0]["pack_summaries"]
+    assert summaries == [
+        {"green": True, "pack_digest": "a" * 64, "red_seen": True},
+        {"green": False, "pack_digest": "b" * 64, "red_seen": True},
+    ]
+    assert decode_system_map(encode_system_map(projected, "c" * 64))[0] == projected
 
 
 def test_every_emitted_reachable_action_names_a_legal_ir_edge() -> None:
@@ -622,8 +697,15 @@ def _regression_tier_control_coverage_reports_partial_none_full_and_waived() -> 
                 assert cell.coverage is expected
                 assert cell.residual
             elif requirement.control_id == mk2.TIER_EVIDENCE_CONTROL:
-                assert cell.coverage is Coverage.FULL
-                assert not cell.residual
+                assert cell.coverage is Coverage.PARTIAL
+                assert (
+                    "recorded order of Vouch's own events is not proof of chronology "
+                    "relative to implementation"
+                ) in cell.residual
+                assert (
+                    "recording a command's exit status is not proof that the bound "
+                    "acceptance tests actually executed"
+                ) in cell.residual
             else:
                 assert cell.coverage is Coverage.NONE
                 if cell.level is not RequirementLevel.WAIVED:
@@ -636,7 +718,16 @@ def _regression_tier_control_coverage_reports_partial_none_full_and_waived() -> 
     assert "Mutation testing [mutation-testing] is waived — NOT CHECKED" not in light
     standard = check_tier_controls(Snapshot(tier=Tier.STANDARD)).detail
     assert "trigger evaluation NOT CHECKED" in standard
-    assert "Harness-recorded red" not in standard
+    assert "Harness-recorded red→green→refactor" in standard
+    assert "PARTIALLY CHECKED" in standard
+    assert (
+        "the recorded order of Vouch's own events is not proof of chronology "
+        "relative to implementation"
+    ) in standard
+    assert (
+        "recording a command's exit status is not proof that the bound acceptance "
+        "tests actually executed"
+    ) in standard
 
 
 def test_generated_store_allowlist_symlink_refusal_and_temp_cleanup(

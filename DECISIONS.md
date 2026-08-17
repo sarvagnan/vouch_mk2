@@ -448,9 +448,9 @@ covered or waived.
 - independence-minimum/lightweight: level=required | coverage=none | mechanical=none | residual=the required independence model is human attested
 - independence-minimum/standard: level=required | coverage=none | mechanical=none | residual=the required independence model is human attested
 - independence-minimum/high: level=required | coverage=none | mechanical=none | residual=the required independence model is human attested
-- harness-recorded-red-green/lightweight: level=required | coverage=full | mechanical=record-evidence ordering and outcome gates | residual=none
-- harness-recorded-red-green/standard: level=required | coverage=full | mechanical=check.evidence-anchors, check.tier.evidence-required | residual=none
-- harness-recorded-red-green/high: level=required | coverage=full | mechanical=check.evidence-anchors, check.tier.evidence-required, check.tier.high-attestation | residual=none
+- harness-recorded-red-green/lightweight: level=required | coverage=partial | mechanical=record-evidence ordering and outcome gates | residual=the recorded order of Vouch's own events is not proof of chronology relative to implementation; recording a command's exit status is not proof that the bound acceptance tests actually executed
+- harness-recorded-red-green/standard: level=required | coverage=partial | mechanical=check.evidence-anchors, check.tier.evidence-required, gate.dod.current-pack-green | residual=the recorded order of Vouch's own events is not proof of chronology relative to implementation; recording a command's exit status is not proof that the bound acceptance tests actually executed
+- harness-recorded-red-green/high: level=required | coverage=partial | mechanical=check.evidence-anchors, check.tier.evidence-required, gate.dod.current-pack-green, check.tier.high-attestation | residual=the recorded order of Vouch's own events is not proof of chronology relative to implementation; recording a command's exit status is not proof that the bound acceptance tests actually executed
 - real-boundary-tests/lightweight: level=required | coverage=none | mechanical=none | residual=boundary selection and test adequacy are human reviewed
 - real-boundary-tests/standard: level=required | coverage=none | mechanical=none | residual=boundary selection and test adequacy are human reviewed
 - real-boundary-tests/high: level=required | coverage=none | mechanical=none | residual=boundary selection, test adequacy, and fault injection are human reviewed
@@ -680,6 +680,15 @@ pack.
 - **Rejected:** a merge driver over snapshots alone (no safe rule without event order); making
   the log the *only* store (every read would replay; the derived snapshot is the cache that
   keeps reads O(1)).
+
+**D-16 correction (2026-08-17, recorded by the batch-A driver; append-only — the text above is left
+as decided).** `event_head` becomes **state format 4**, not 3. Unit `evidence-semantics@1` (D-17)
+landed first and needed format 3 for `EvidenceHead.unit_version` plus the per-pack-digest evidence
+summaries that D-17's pure publication gate reads (`EvidenceHead.pack_summaries`); `decide()` is a
+pure function of the snapshot and cannot open stored objects, so that summary has to live in the
+snapshot. D-16's substance is unchanged — an append-only event log, the snapshot derived from it and
+verified by replay — only the format number moves, and the 3→4 upgrader carries the same "no invented
+state" obligation D-16 already states.
 
 ## D-17 — Publication requires current-pack GREEN; evidence binds the pack it ran against
 

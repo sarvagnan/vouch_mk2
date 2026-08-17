@@ -5,13 +5,13 @@ is a coverage decision, not a fix.
 """
 
 # Pinned coverage counts (2026-08-17), states/transitions:
-# - core-v1 268,202/1,453,962: restored b's invalidate -> respecify -> re-freeze
-#   -> publish loop and added its fresh p-b2 label after pack-label reuse became
-#   a refusal.
+# - core-v1 264,462/1,381,350: evidence.no-pack removes the previously accepted
+#   RecordEvidence edges before freeze and after respecify clears the pack. No
+#   command was dropped; the smaller relation is the new D-17 refusal surface.
 # - history-v1 31,416/94,280: restored u's seeded-history respecify loop with
 #   fresh p3 (p2 is already current) while retaining pack-binding@1 coverage.
-# - tier-v1 12/39: pack-binding@1 added BindPack to cover binding after freeze;
-#   this command was restored after an owner recovery accidentally dropped it.
+# - tier-v1 66/230: adds a standard-tier frozen -> RED -> GREEN -> publish path
+#   so gate.dod.current-pack-green is exercised with its pack digest binding.
 
 from __future__ import annotations
 
@@ -142,6 +142,7 @@ CORE_V1 = Universe(
                 command_line="formal red",
                 outcome=EvidenceOutcome.TESTS_FAILED,
                 recorded_at="2026-08-13T00:00:00Z",
+                pack_digest="",
             ),
             event_digest=_FIRST_DIGEST,
         ),
@@ -154,6 +155,7 @@ CORE_V1 = Universe(
                 command_line="formal green",
                 outcome=EvidenceOutcome.TESTS_PASSED,
                 recorded_at="2026-08-13T00:01:00Z",
+                pack_digest="",
             ),
             event_digest=_SECOND_DIGEST,
         ),
@@ -268,6 +270,36 @@ TIER_V1 = Universe(
         SpecifyUnit(name="tier-unit", version="v1"),
         FreezeAcceptance(name="tier-unit", pack_version="pack-v1"),
         BindPack(name="tier-unit", pack_digest="e" * 64),
+        MarkReady(name="tier-unit"),
+        StartWork(name="tier-unit"),
+        RecordEvidence(
+            event=EvidenceEvent(
+                unit=UnitRef(name="tier-unit", version="v1"),
+                sequence=1,
+                parent="GENESIS",
+                kind=EvidenceKind.RED,
+                command_line="formal tier red",
+                outcome=EvidenceOutcome.TESTS_FAILED,
+                recorded_at="2026-08-17T00:00:00Z",
+                pack_digest="e" * 64,
+            ),
+            event_digest=_FIRST_DIGEST,
+        ),
+        RecordEvidence(
+            event=EvidenceEvent(
+                unit=UnitRef(name="tier-unit", version="v1"),
+                sequence=2,
+                parent=_FIRST_DIGEST,
+                kind=EvidenceKind.GREEN,
+                command_line="formal tier green",
+                outcome=EvidenceOutcome.TESTS_PASSED,
+                recorded_at="2026-08-17T00:01:00Z",
+                pack_digest="e" * 64,
+            ),
+            event_digest=_SECOND_DIGEST,
+        ),
+        MarkDone(name="tier-unit"),
+        Publish(name="tier-unit"),
     ),
     initial=Snapshot(tier=Tier.HIGH),
     invariant_ids=("M11.tier-never-lowers-after-commitment",),

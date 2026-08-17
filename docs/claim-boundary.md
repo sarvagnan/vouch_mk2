@@ -28,7 +28,7 @@ evaluator that ran, or the run fails.
 | Lifecycle legality | `decide(Snapshot, Command)` refuses every transition the IR does not license; gates are inside the transition | 1 |
 | Deviation blocking | a unit with any open deviation cannot advance; `NAME@VERSION` binding | 1 |
 | Claim-shape obligations | completion claims re-check units + criteria digest + roster; negative outcomes require criteria + outcome deviations; protective closures require trigger + roster snapshot + `no_completion_claim`, and are never blocked by contaminated state | 1 |
-| Evidence-chain validity and ordering | canonical-JSON hash chain; red-before-first-green ordering; anchor monotonicity (prior head remains an ancestor) | 1–2 |
+| Evidence-chain validity and ordering | canonical-JSON hash chain keyed by `NAME@VERSION`; each new record binds the current acceptance-pack digest; red-before-first-green ordering; anchor monotonicity (prior head remains an ancestor) | 1–2 |
 | Tier-scoped evidence requirements | the authoritative snapshot tier selects IR-bound chain, anchor, and high-attestation checks; no config authority exists | 1–2 |
 | Projection freshness | `check.map-freshness` and `check.context-freshness` regenerate and byte-compare in CI; staleness is a FAIL, never a broken commit | 1 |
 | Registry completeness | a check declared in the IR without an evaluator fails CI on the mk2 repo itself | 1 |
@@ -54,7 +54,12 @@ For `record-evidence`, the exact mk2 claim is: "the recorded outcome is the exit
 status of a process this verb spawned, at the time it spawned it". The child
 inherits the caller's environment and working directory. This is not a claim that
 the argv names a test runner, that the runner is honest, or that its exit status
-truthfully represents a test suite.
+truthfully represents a test suite. Recording before acceptance is frozen is
+refused. At `standard` and `high`, `gate.dod.current-pack-green` refuses publication
+unless the current pack has RED followed by GREEN and the latest evidence for the
+current pack is green; a later refactor preserves that result, while a later RED
+invalidates it. Legacy pre-D-17 objects remain immutable and readable as having no
+pack digest, and are reported by name rather than treated as current-pack GREEN.
 
 For acceptance-pack binding, the pack's EXECUTION is not verified — runner
 configuration (conftest.py, pytest.ini, pyproject testpaths) can deselect a bound

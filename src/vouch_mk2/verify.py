@@ -20,9 +20,11 @@ from vouch_mk2.core import (
     EvidenceEvent,
     EvidenceHead,
     EvidenceKind,
+    EvidencePackSummary,
     RecordEvidence,
     RecordFormalCertificate,
     Snapshot,
+    Tier,
     UnitStatus,
     apply,
     decide,
@@ -120,11 +122,11 @@ def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
         except StoreError as error:
             return _ChainWalk(head, tuple(events), f"object {digest!r}: {error}")
         events.append((digest, event))
-        if event.unit.name != head.unit_name:
+        if event.unit != head.ref():
             return _ChainWalk(
                 head,
                 tuple(events),
-                f"event binds unit {event.unit.name!r}, expected {head.unit_name!r}",
+                f"event binds unit {event.unit.label()!r}, expected {head.ref().label()!r}",
             )
         if event.sequence != expected_sequence:
             return _ChainWalk(
@@ -145,10 +147,10 @@ def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
 
 
 def _red_before_first_green(walk: _ChainWalk) -> str:
-    by_version: dict[str, list[EvidenceEvent]] = {}
+    by_pack: dict[tuple[str, str], list[EvidenceEvent]] = {}
     for _, event in reversed(walk.events):
-        by_version.setdefault(event.unit.version, []).append(event)
-    for version, events in by_version.items():
+        by_pack.setdefault((event.unit.version, event.pack_digest), []).append(event)
+    for (version, pack_digest), events in by_pack.items():
         first_green = next(
             (index for index, event in enumerate(events) if _is_green(event.kind)),
             None,
@@ -158,9 +160,54 @@ def _red_before_first_green(walk: _ChainWalk) -> str:
         ):
             return (
                 f"unit {walk.head.unit_name!r} version {version!r} has no RED "
-                "before its first GREEN"
+                f"before its first GREEN for pack {pack_digest or 'pre-D-17/label-only'!r}"
             )
     return ""
+
+
+def _pack_result(
+    events: tuple[tuple[str, EvidenceEvent], ...], pack_digest: str
+) -> tuple[bool, bool, bool]:
+    """Return (found, red_seen, green) for one pack in chronological order."""
+    found = False
+    red_seen = False
+    green = False
+    for _digest, event in reversed(events):
+        if event.pack_digest != pack_digest or event.evidence_format == 1:
+            continue
+        found = True
+        match event.kind:
+            case EvidenceKind.RED:
+                red_seen = True
+                green = False
+            case EvidenceKind.GREEN:
+                green = red_seen
+            case EvidenceKind.REFACTOR:
+                pass
+            case _:
+                assert_never(event.kind)
+    return found, red_seen, green
+
+
+def _pack_summaries(
+    events: tuple[tuple[str, EvidenceEvent], ...],
+) -> tuple[EvidencePackSummary, ...]:
+    """Recompute every distinct non-legacy digest summary from the chain."""
+    digests = tuple(
+        sorted(
+            {
+                event.pack_digest
+                for _, event in events
+                if event.evidence_format != 1
+            }
+        )
+    )
+    summaries: list[EvidencePackSummary] = []
+    for pack_digest in digests:
+        found, red_seen, green = _pack_result(events, pack_digest)
+        if found:
+            summaries.append(EvidencePackSummary(pack_digest, red_seen, green))
+    return tuple(summaries)
 
 
 def _is_green(kind: EvidenceKind) -> bool:
@@ -187,6 +234,7 @@ def _check_evidence_chains(
     snapshot: Snapshot, walks: tuple[_ChainWalk, ...]
 ) -> CheckResult:
     failures: list[str] = []
+    notices: list[str] = []
     for walk in walks:
         incoherent = tuple(
             event.sequence
@@ -198,41 +246,53 @@ def _check_evidence_chains(
                 f"unit {walk.head.unit_name!r}: incoherent outcome at evidence "
                 f"sequence(s) {incoherent!r}"
             )
-        # A head must bind a unit the snapshot actually contains — a chain for
-        # a ghost unit is fabricated ledger content, not evidence. Every event
-        # must bind the unit's current version: mk2 has no re-versioning
-        # command yet, so any other version in a chain is drift (revisit when
-        # amendment-driven version bumps arrive).
-        unit = snapshot.unit(walk.head.unit_name)
+        # A head and every event bind one exact historical or current record.
+        unit = snapshot.unit_ref(walk.head.ref())
         if unit is None:
             failures.append(
-                f"unit {walk.head.unit_name!r}: evidence head binds a unit "
+                f"unit {walk.head.ref().label()!r}: evidence head binds a unit "
                 "absent from the snapshot"
             )
             continue
         if walk.error:
             failures.append(f"unit {walk.head.unit_name!r}: {walk.error}")
             continue
-        stale = sorted(
-            {
-                event.unit.version
-                for _, event in walk.events
-                if event.unit.version != unit.version
-            }
-        )
-        if stale:
-            failures.append(
-                f"unit {walk.head.unit_name!r}: chain events bind versions "
-                f"{tuple(stale)!r}, unit is at {unit.version!r}"
-            )
-            continue
         history_error = _red_before_first_green(walk)
         if history_error:
             failures.append(history_error)
+        if walk.head.pack_summaries != _pack_summaries(walk.events):
+            failures.append(
+                f"unit {unit.ref().label()!r}: evidence-head per-pack summary "
+                "does not match its immutable chain"
+            )
+        has_legacy = any(
+            event.evidence_format == 1 for _, event in walk.events
+        )
+        all_legacy = all(
+            event.evidence_format == 1 for _, event in walk.events
+        )
+        if snapshot.tier is not Tier.LIGHTWEIGHT and has_legacy:
+            notices.append(
+                f"unit {unit.ref().label()!r}: pre-D-17 evidence is not "
+                "current-pack evidence"
+            )
+        found, red_seen, green = _pack_result(
+            walk.events, unit.acceptance_pack_digest
+        )
+        if (
+            snapshot.tier is not Tier.LIGHTWEIGHT
+            and unit.status in {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND}
+            and (not found or not red_seen or not green)
+            and not all_legacy
+        ):
+            failures.append(
+                f"unit {unit.ref().label()!r}: latest evidence for the "
+                "current pack is not GREEN"
+            )
     return CheckResult(
         check_id=mk2.CHECK_EVIDENCE_CHAINS,
         verdict=Verdict.FAIL if failures else Verdict.PASS,
-        detail="; ".join(failures),
+        detail="; ".join((*failures, *notices)),
     )
 
 
@@ -657,7 +717,9 @@ def upgrade_store(
     if dry_run:
         document = decode_raw_document(store.read_state_bytes())
         upgraded, steps = upgrade_document(
-            document, published_once=published_once
+            document,
+            published_once=published_once,
+            store_name=os.path.dirname(store.generated_path("map.json")),
         )
         encoded = encode_document(upgraded)
         decode_snapshot(encoded)
@@ -670,7 +732,9 @@ def upgrade_store(
     with store.write_locked():
         document = decode_raw_document(store.read_state_bytes())
         upgraded, steps = upgrade_document(
-            document, published_once=published_once
+            document,
+            published_once=published_once,
+            store_name=os.path.dirname(store.generated_path("map.json")),
         )
         encoded = encode_document(upgraded)
         decode_snapshot(encoded)

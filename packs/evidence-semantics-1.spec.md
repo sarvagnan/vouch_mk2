@@ -44,3 +44,12 @@ R6 Docs: quickstart §3/§4 and claim-boundary state the rule (`gate.dod.current
   `pack_digest == ""`; the check reports "pre-D-17 evidence" by name at standard+ rather than FAIL).
 - Every pre-existing test green (adjust coherently); new test functions for non-pack behavior;
   pyrefly 0; import-linter kept; README count is the owner's.
+
+## Amendment pack/2 (DEV-es-01, pack-defect, adjudicated amend)
+
+R1 said a new evidence format must "bump and refuse the old"; the ground rule said legacy evidence
+objects decode as `pack_digest == ""` and are reported by name. Raised by the implementer. R1 now
+reads: the evidence codec is versioned — new records carry `pack_digest` (and the new format
+number); legacy records (pre-D-17) remain immutable, decode as `pack_digest == ""`, and are
+reported at standard+ as "pre-D-17 evidence" naming the unit rather than refused or counted as
+current-pack green. No refusal of old objects.

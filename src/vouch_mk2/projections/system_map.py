@@ -139,7 +139,10 @@ def system_map(snapshot: Snapshot) -> SystemMap:
             )
         ),
         evidence_heads=tuple(
-            sorted(snapshot.evidence_heads, key=lambda head: head.unit_name)
+            sorted(
+                snapshot.evidence_heads,
+                key=lambda head: (head.unit_name, head.unit_version),
+            )
         ),
         anchor_mode=snapshot.anchor_mode.value,
         tier=snapshot.tier.value,

@@ -62,7 +62,14 @@ def commit_evidence_snapshot(root: Path, mode: AnchorMode, *, anchor: bool) -> N
         store.commit(
             Snapshot(
                 revision=1,
-                units=(Unit("u", "v1", UnitStatus.SPECIFIED),),
+                units=(
+                    Unit(
+                        "u",
+                        "v1",
+                        UnitStatus.ACCEPTANCE_FROZEN,
+                        acceptance_pack_version="p1",
+                    ),
+                ),
             )
         )
         red_event = EvidenceEvent(
@@ -271,11 +278,11 @@ def test_cli_formal_reports_closed_relation_and_discriminators(
     init_store(root)
     assert main(["formal", "--record", "--root", str(root)]) == 0
     output = capsys.readouterr().out
-    assert "states: 268202" in output
-    assert "transitions: 1453962" in output
+    assert "states: 264462" in output
+    assert "transitions: 1381350" in output
     assert "universe: tier-v1" in output
-    assert "states: 12" in output
-    assert "transitions: 39" in output
+    assert "states: 66" in output
+    assert "transitions: 230" in output
     assert "PASS  M1.no-direct-republication" in output
     assert "universe-bounded: label set exhausted for unit b: 2 labels" in output
     assert "PASS  M9.anchor-monotonic" in output

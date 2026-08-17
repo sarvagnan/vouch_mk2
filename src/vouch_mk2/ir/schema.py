@@ -409,6 +409,7 @@ def validate(ir: PolicyIr) -> tuple[Violation, ...]:
                         f"{requirement.control_id!r}/{tier_name}: {check_id!r}",
                     )
                 elif obligation.scope not in {
+                    ObligationScope.TRANSITION_GATE,
                     ObligationScope.STANDING_CHECK,
                     ObligationScope.ARTIFACT_CHECK,
                 }:

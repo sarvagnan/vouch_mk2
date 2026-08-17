@@ -14,6 +14,7 @@ from vouch_mk2.core.model import (
     UnitStatus,
     blocking_deviations,
 )
+from vouch_mk2.core.invariants import current_pack_evidence_is_green
 from vouch_mk2.ir import mk2
 
 
@@ -87,7 +88,7 @@ def _publication_gates_pass(snapshot: Snapshot, unit: Unit) -> bool:
         for requirement in mk2.MK2.tier_requirements
         if requirement.control_id == mk2.TIER_EVIDENCE_CONTROL
     ).cell(snapshot.tier)
-    head = snapshot.evidence_head(unit.name)
+    head = snapshot.evidence_head_ref(unit.ref())
     tier_evidence_passes = (
         mk2.CHECK_TIER_EVIDENCE_REQUIRED not in evidence.mechanical_checks
         or head is not None
@@ -98,6 +99,9 @@ def _publication_gates_pass(snapshot: Snapshot, unit: Unit) -> bool:
             and head.anchored != "GENESIS"
             and bool(snapshot.formal_certificate_digest)
         )
+    ) and (
+        mk2.GATE_DOD_CURRENT_PACK_GREEN not in evidence.mechanical_checks
+        or current_pack_evidence_is_green(snapshot, unit)
     )
     return (
         bool(unit.acceptance_pack_version)
@@ -239,7 +243,10 @@ def next_actions(snapshot: Snapshot) -> tuple[NextAction, ...]:
             pass
         case AnchorMode.CI:
             for head in snapshot.evidence_heads:
-                if head.anchored != head.head:
+                if (
+                    snapshot.evidence_head(head.unit_name) == head
+                    and head.anchored != head.head
+                ):
                     actions.append(
                         NextAction(
                             "evidence",

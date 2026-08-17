@@ -170,7 +170,7 @@ def test_p2_chain_walk_rejects_incoherent_red_that_passed(tmp_path: Path) -> Non
         snapshot = store.read_snapshot()
         forged = Snapshot(
             revision=snapshot.revision + 1, units=snapshot.units,
-            evidence_heads=(EvidenceHead("u", digest, 1, "GENESIS"),),
+            evidence_heads=(EvidenceHead("u", digest, 1, "GENESIS", "v1"),),
         )
         store.commit(forged)
         result = next(r for r in run_artifact_checks(store, forged) if r.check_id == mk2.CHECK_EVIDENCE_CHAINS)

@@ -68,6 +68,7 @@ def unit(
         status=status,
         depends_on=depends_on,
         acceptance_pack_version=pack,
+        acceptance_pack_digest="d" * 64 if pack else "",
     )
 
 
@@ -100,6 +101,7 @@ def test_publication_gate_record_is_carried_and_all_pass() -> None:
         "gate.dod.dependencies-satisfied",
         "gate.dod.no-blocking-deviations",
         "gate.dod.tier-evidence",
+        "gate.dod.current-pack-green",
     }
     assert all(c.verdict is Verdict.PASS for c in event.gate.checks)
     _regression_tier_evidence_gate_refuses_standard_and_high_publication()
@@ -108,18 +110,30 @@ def test_publication_gate_record_is_carried_and_all_pass() -> None:
 
 
 def _regression_tier_evidence_gate_refuses_standard_and_high_publication() -> None:
-    from vouch_mk2.core import EvidenceHead, Tier
+    from vouch_mk2.core import EvidenceHead, EvidencePackSummary, Tier
 
     standard = Snapshot(
         tier=Tier.STANDARD,
         units=(unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE),),
     )
-    assert refused_codes(standard, Publish("u")) == ("gate.dod.tier-evidence",)
+    assert refused_codes(standard, Publish("u")) == (
+        "gate.dod.tier-evidence",
+        "gate.dod.current-pack-green",
+    )
 
     unanchored = Snapshot(
         tier=Tier.HIGH,
         units=(unit("u", UnitStatus.DONE_PENDING_ACCEPTANCE),),
-        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                "a" * 64,
+                1,
+                "GENESIS",
+                "v1",
+                (EvidencePackSummary("d" * 64, True, True),),
+            ),
+        ),
     )
     decision = decide(unanchored, Publish("u"))
     assert isinstance(decision, Refused)
@@ -130,7 +144,16 @@ def _regression_tier_evidence_gate_refuses_standard_and_high_publication() -> No
     ready = Snapshot(
         tier=Tier.HIGH,
         units=unanchored.units,
-        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "a" * 64),),
+        evidence_heads=(
+            EvidenceHead(
+                "u",
+                "a" * 64,
+                1,
+                "a" * 64,
+                "v1",
+                (EvidencePackSummary("d" * 64, True, True),),
+            ),
+        ),
         formal_certificate_digest="f" * 64,
     )
     assert isinstance(decide(ready, Publish("u")), Accepted)
@@ -188,7 +211,7 @@ def _regression_high_attestation_scopes_to_superseded_publication_provenance() -
                 published_once=True,
             ),
         ),
-        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),),
+        evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS", "v1"),),
     )
     row = next(
         result

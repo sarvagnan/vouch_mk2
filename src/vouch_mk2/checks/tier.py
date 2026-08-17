@@ -89,7 +89,7 @@ def check_tier_evidence_required(snapshot: Snapshot) -> CheckResult:
             unit.ref().label()
             for unit in snapshot.units
             if (unit.status in _PUBLISHED_STATUSES or unit.published_once)
-            and snapshot.evidence_head(unit.name) is None
+            and snapshot.evidence_head_ref(unit.ref()) is None
         )
     )
     return CheckResult(
@@ -117,7 +117,7 @@ def check_tier_high_attestation(snapshot: Snapshot) -> CheckResult:
     for unit in sorted(snapshot.units, key=lambda item: item.ref().label()):
         if unit.status not in _PUBLISHED_STATUSES and not unit.published_once:
             continue
-        head = snapshot.evidence_head(unit.name)
+        head = snapshot.evidence_head_ref(unit.ref())
         if head is None:
             failures.append(f"unit {unit.ref().label()!r} has no chain to anchor")
         elif head.anchored == "GENESIS":

@@ -25,6 +25,24 @@ _KNOWN_STATUSES = frozenset(status.value for status in UnitStatus)
 class UpgradeRefused(StoreError):
     """A legacy document needs operator facts that it does not contain."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        operator_hint: str = (
+            "provide --was-published NAME@V or --never-published NAME@V"
+        ),
+    ) -> None:
+        self.operator_hint = operator_hint
+        super().__init__(message)
+
+
+class _AmbiguousEvidenceBinding(Exception):
+    def __init__(self, unit_name: str, candidates: tuple[str, ...]) -> None:
+        self.unit_name = unit_name
+        self.candidates = candidates
+        super().__init__(unit_name)
+
 
 def _upgrade_0_to_1(document: StateDocument) -> StateDocument:
     upgraded = dict(document)
@@ -73,7 +91,68 @@ def _upgrade_1_to_2(document: StateDocument) -> StateDocument:
     return upgraded
 
 
-UPGRADERS: dict[int, Upgrader] = {0: _upgrade_0_to_1, 1: _upgrade_1_to_2}
+def _upgrade_2_to_3(document: StateDocument) -> StateDocument:
+    """Make name-keyed evidence heads exact without inventing evidence results.
+
+    A sole active record, or a sole historical candidate when there is no
+    active record, is derivable. Multiple superseded candidates are not.
+    Per-pack RED/GREEN summary facts did not exist, so they truthfully upgrade
+    to an empty tuple; immutable legacy evidence remains independently readable.
+    """
+    upgraded = dict(document)
+    raw_units = document.get("units")
+    candidates: dict[str, list[tuple[str, str]]] = {}
+    if type(raw_units) is list:
+        for raw_unit in cast(list[object], raw_units):
+            if type(raw_unit) is not dict:
+                continue
+            unit = cast(dict[str, object], raw_unit)
+            name = unit.get("name")
+            version = unit.get("version")
+            status = unit.get("status")
+            if type(name) is str and type(version) is str and type(status) is str:
+                candidates.setdefault(name, []).append((version, status))
+
+    raw_heads = document.get("evidence_heads")
+    if type(raw_heads) is list:
+        heads: list[object] = []
+        for raw_head in cast(list[object], raw_heads):
+            if type(raw_head) is not dict:
+                heads.append(raw_head)
+                continue
+            copied = dict(cast(dict[str, object], raw_head))
+            name = copied.get("unit_name")
+            records = candidates.get(name, []) if type(name) is str else []
+            active = [
+                version
+                for version, status in records
+                if status != UnitStatus.SUPERSEDED.value
+            ]
+            if len(active) == 1:
+                version = active[0]
+            elif not active and len(records) == 1:
+                version = records[0][0]
+            elif not active and len(records) > 1 and type(name) is str:
+                raise _AmbiguousEvidenceBinding(
+                    name,
+                    tuple(sorted(f"{name}@{version}" for version, _ in records)),
+                )
+            else:
+                version = ""
+            copied["unit_version"] = version
+            copied["pack_summaries"] = []
+            heads.append(copied)
+        upgraded["evidence_heads"] = heads
+
+    upgraded["state_format"] = 3
+    return upgraded
+
+
+UPGRADERS: dict[int, Upgrader] = {
+    0: _upgrade_0_to_1,
+    1: _upgrade_1_to_2,
+    2: _upgrade_2_to_3,
+}
 
 
 def _prepare_format_zero_assertions(
@@ -140,6 +219,8 @@ def _prepare_format_zero_assertions(
 def upgrade_document(
     document: StateDocument,
     published_once: Mapping[str, bool] | None = None,
+    *,
+    store_name: str = "state document",
 ) -> tuple[StateDocument, list[tuple[int, int]]]:
     """Return an upgraded copy and the ordered ``(from, to)`` steps applied."""
     raw_format = document.get("state_format", 0)
@@ -170,7 +251,19 @@ def upgrade_document(
             raise DecodeError(
                 f"state_format: no upgrader exists for format {current}"
             )
-        upgraded = upgrader(upgraded)
+        try:
+            upgraded = upgrader(upgraded)
+        except _AmbiguousEvidenceBinding as error:
+            candidates = ", ".join(error.candidates)
+            raise UpgradeRefused(
+                f"store {store_name!r}: evidence head for unit "
+                f"{error.unit_name!r} has no active record and ambiguous candidates "
+                f"{candidates}",
+                operator_hint=(
+                    "restore the correct candidate as the one active record in the "
+                    "format-2 store, then retry the upgrade"
+                ),
+            ) from error
         if type(upgraded) is not dict:
             raise DecodeError(
                 f"state_format: upgrader {current} -> {current + 1} "

@@ -146,7 +146,7 @@ def test_high_tier_requires_anchored_chains_and_a_formal_certificate() -> None:
     from vouch_mk2.ir.schema import Verdict
 
     unanchored = Snapshot(revision=1, tier=Tier.HIGH, units=(_unit("u", UnitStatus.PUBLISHED),),
-                          evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS"),))
+                          evidence_heads=(EvidenceHead("u", "a" * 64, 1, "GENESIS", "v1"),))
     row = next(r for r in run_checks(unanchored).mechanical if r.check_id == mk2.CHECK_TIER_HIGH_ATTESTATION)
     assert row.verdict is Verdict.FAIL
     assert "anchor" in row.detail or "certificate" in row.detail

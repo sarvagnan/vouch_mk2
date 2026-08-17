@@ -9,6 +9,7 @@ from vouch_mk2.formal.invariants import INVARIANTS
 from vouch_mk2.formal.witnesses import WITNESSES
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Tier
+from vouch_mk2.ir.schema import Coverage
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,7 @@ def test_documented_check_ids_are_declared_ir_obligations() -> None:
     assert documented <= declared
     decisions = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
     d12 = decisions.split("## D-12", 1)[1]
+    d17 = decisions.split("## D-17", 1)[1]
     evidence = next(
         requirement
         for requirement in mk2.MK2.tier_requirements
@@ -39,14 +41,48 @@ def test_documented_check_ids_are_declared_ir_obligations() -> None:
         for cell in (evidence.lightweight, evidence.standard, evidence.high)
         for check_id in cell.mechanical_checks
     }
-    assert bound == {
+    assert {item for item in bound if item.startswith("check.")} == {
         mk2.CHECK_EVIDENCE_ANCHORS,
         mk2.CHECK_TIER_EVIDENCE_REQUIRED,
         mk2.CHECK_TIER_HIGH_ATTESTATION,
     }
+    assert {item for item in bound if item.startswith("gate.")} == {
+        mk2.GATE_DOD_CURRENT_PACK_GREEN,
+    }
     assert mk2.TIER_EVIDENCE_CONTROL in d12
-    assert bound <= set(re.findall(r"check(?:\.[a-z0-9-]+)+", d12))
+    assert {item for item in bound if item.startswith("check.")} <= set(
+        re.findall(r"check(?:\.[a-z0-9-]+)+", d12)
+    )
+    assert mk2.GATE_DOD_CURRENT_PACK_GREEN in d17
     assert mk2.ORG_TIER_CONTROLS in d12
+    residual = (
+        "the recorded order of Vouch's own events is not proof of chronology "
+        "relative to implementation; recording a command's exit status is not "
+        "proof that the bound acceptance tests actually executed"
+    )
+    assert evidence.lightweight.mechanical_checks == ()
+    assert evidence.lightweight.mechanical_evidence == (
+        "record-evidence ordering and outcome gates",
+    )
+    assert evidence.lightweight.coverage is Coverage.PARTIAL
+    assert evidence.lightweight.residual == residual
+    assert evidence.standard.mechanical_checks == (
+        mk2.CHECK_EVIDENCE_ANCHORS,
+        mk2.CHECK_TIER_EVIDENCE_REQUIRED,
+        mk2.GATE_DOD_CURRENT_PACK_GREEN,
+    )
+    assert evidence.standard.mechanical_evidence == ()
+    assert evidence.standard.coverage is Coverage.PARTIAL
+    assert evidence.standard.residual == residual
+    assert evidence.high.mechanical_checks == (
+        mk2.CHECK_EVIDENCE_ANCHORS,
+        mk2.CHECK_TIER_EVIDENCE_REQUIRED,
+        mk2.GATE_DOD_CURRENT_PACK_GREEN,
+        mk2.CHECK_TIER_HIGH_ATTESTATION,
+    )
+    assert evidence.high.mechanical_evidence == ()
+    assert evidence.high.coverage is Coverage.PARTIAL
+    assert evidence.high.residual == residual
     for requirement in mk2.MK2.tier_requirements:
         for tier in Tier:
             cell = requirement.cell(tier)
@@ -60,6 +96,25 @@ def test_documented_check_ids_are_declared_ir_obligations() -> None:
                 f"mechanical={mechanical} | residual={residual}"
             )
             assert binding in d12
+
+
+def test_harness_recorded_red_green_contract_names_both_residuals() -> None:
+    evidence = next(
+        requirement
+        for requirement in mk2.MK2.tier_requirements
+        if requirement.control_id == mk2.TIER_EVIDENCE_CONTROL
+    )
+    for tier in Tier:
+        cell = evidence.cell(tier)
+        assert cell.coverage is Coverage.PARTIAL
+        assert (
+            "recorded order of Vouch's own events is not proof of chronology "
+            "relative to implementation"
+        ) in cell.residual
+        assert (
+            "recording a command's exit status is not proof that the bound "
+            "acceptance tests actually executed"
+        ) in cell.residual
 
 
 def test_documented_formal_ids_exist_in_catalogs() -> None:

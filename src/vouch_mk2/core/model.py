@@ -109,6 +109,17 @@ class EvidenceEvent:
     command_line: str
     outcome: EvidenceOutcome
     recorded_at: str
+    pack_digest: str = ""
+    evidence_format: int = 2
+
+
+@dataclass(frozen=True, slots=True)
+class EvidencePackSummary:
+    """The immutable-chain result for one non-legacy pack digest."""
+
+    pack_digest: str
+    red_seen: bool
+    green: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +128,11 @@ class EvidenceHead:
     head: str
     head_sequence: int
     anchored: str
+    unit_version: str = ""
+    pack_summaries: tuple[EvidencePackSummary, ...] = ()
+
+    def ref(self) -> UnitRef:
+        return UnitRef(name=self.unit_name, version=self.unit_version)
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,8 +275,16 @@ class Snapshot:
         return None
 
     def evidence_head(self, unit_name: str) -> EvidenceHead | None:
+        """Resolve the evidence head for the ACTIVE record named ``unit_name``."""
+        unit = self.unit(unit_name)
+        if unit is None or unit.status is UnitStatus.SUPERSEDED:
+            return None
+        return self.evidence_head_ref(unit.ref())
+
+    def evidence_head_ref(self, ref: UnitRef) -> EvidenceHead | None:
+        """Resolve an exact historical or current evidence-chain head."""
         for head in self.evidence_heads:
-            if head.unit_name == unit_name:
+            if head.ref() == ref:
                 return head
         return None
 
