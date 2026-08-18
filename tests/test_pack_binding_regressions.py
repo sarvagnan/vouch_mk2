@@ -16,6 +16,7 @@ from vouch_mk2.store import (
     decode_system_map,
     encode_system_map,
 )
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 def _canonical(document: object) -> bytes:
@@ -377,7 +378,7 @@ def test_mcp_status_exposes_unbound_and_late_bound_pack_units(tmp_path: Path) ->
         ),
     )
     with Store.open(str(root)) as store:
-        store.commit(snapshot)
+        snapshot = commit_snapshot_fixture(store, snapshot)
     request = json.dumps(
         {
             "jsonrpc": "2.0",

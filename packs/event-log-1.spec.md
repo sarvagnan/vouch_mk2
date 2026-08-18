@@ -55,6 +55,17 @@ R7 **Cost is measured, not assumed.** `scripts/bench_store.py` is re-run and the
    and the store growth are recorded in `docs/performance.md` as real measured numbers.
    → `test_performance_doc_records_measured_event_log_cost`
 
+R8 **The store remembers the highest state format it has ever held** (a monotonic high-water mark
+   recorded in the store). `upgrade` refuses a document whose declared `state_format` is lower than
+   that mark, naming both numbers and telling the operator to restore the correct state from the
+   store's git history. This closes the re-baselining route that remains open when a caller removes
+   BOTH `event_head` and every event object: without a mark, such a store is indistinguishable from a
+   genuine legacy store, and a fresh baseline would silently become the trust root for arbitrary
+   state. What this does NOT claim: a store is a directory of files, so a caller who also removes the
+   mark is outside any repository-local trust root — the backstop is the store's own git history, and
+   docs/claim-boundary.md must say so rather than implying Vouch prevents what it only detects.
+   → `test_a_format_downgrade_cannot_re_baseline_the_log`
+
 ## Ground rules
 - Formal: the universes gain no new commands unless a refusal is added; M1–M11 hold; the certificate is
   recomputed; every count change is explained in DONE (a shrink must be explained).
@@ -64,3 +75,14 @@ R7 **Cost is measured, not assumed.** `scripts/bench_store.py` is re-run and the
 - New test functions for non-pack behaviour; pyrefly 0; import-linter contracts kept.
 - `check --ci --project .` on the dogfood store must exit 0 for the owner when the unit is done, and it
   must also exit 0 when run FROM THE LOCK.
+
+## Amendments (recorded; the requirement text above is edited in place)
+
+- **pack/2 (DEV-el-01, pack-defect, adjudicated amend by the owner).** Raised by the implementer.
+  R2's fixture simulated a "legacy" format-3 store by DOWNGRADING a format-4 store that already held
+  event objects — which is exactly the re-baselining path the H1 review finding requires `upgrade` to
+  refuse. No implementation could satisfy both. The fixture now builds a genuine legacy store from the
+  owner-pinned format-3 golden, and the requirement that made the conflict visible is promoted to R8
+  with a stronger rule than the review proposed: a monotonic state-format high-water mark, so the
+  downgrade is refused even when `event_head` AND every event object have been removed. This
+  amendment changes a test file, so RED is re-recorded.

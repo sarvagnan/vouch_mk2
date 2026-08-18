@@ -71,14 +71,17 @@ def test_store_lock_is_project_local_not_tempdir_derived(tmp_path: Path) -> None
     Store.init(str(root)).close()
     assert (root / ".lock").exists()
     code = (
-        "import sys, os\n"
-        "from vouch_mk2.store import Store\n"
-        "from vouch_mk2.core.model import Snapshot\n"
-        "with Store.open(sys.argv[1]) as s:\n"
-        "    for _ in range(25):\n"
-        "        with s.write_locked():\n"
-        "            snap = s.read_snapshot(); s.commit(Snapshot(revision=snap.revision + 1, tier=snap.tier))\n"
-    )
+            "import sys, os\n"
+            "from vouch_mk2.store import Store\n"
+            "from vouch_mk2.core import Accepted, SpecifyUnit, decide\n"
+            "from vouch_mk2.store.event_log import commit_events\n"
+            "with Store.open(sys.argv[1]) as s:\n"
+            "    for _ in range(25):\n"
+            "        with s.write_locked():\n"
+            "            snap = s.read_snapshot(); decision = decide(snap, SpecifyUnit(f'{os.getpid()}-{_}', 'v1'))\n"
+            "            assert isinstance(decision, Accepted)\n"
+            "            commit_events(s, snap, decision.events, actor='test', run_id='')\n"
+        )
     procs = []
     for tmp in ("a", "b", "c"):
         d = tmp_path / f"tmp-{tmp}"

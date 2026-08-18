@@ -6,33 +6,32 @@ from pathlib import Path
 
 import pytest
 
-from vouch_mk2.core.model import Snapshot, Unit, UnitStatus
+from vouch_mk2.core import Accepted, Snapshot, SpecifyUnit, decide
 from vouch_mk2.store import (
     COMMIT_STEPS,
     ArtifactKind,
     Store,
     digest_of,
 )
+from vouch_mk2.store.event_log import build_event_records, commit_events
 
 
 class CrashError(Exception):
     pass
 
 
-_PAYLOAD = b"committed object"
-_OBJECT_DIGEST = digest_of(ArtifactKind.OBJECT, _PAYLOAD)
 _OLD = Snapshot()
-_NEW = Snapshot(
-    revision=1,
-    units=(
-        Unit(
-            name="unit",
-            version="1",
-            status=UnitStatus.SPECIFIED,
-            acceptance_pack_version="pack-1",
-        ),
-    ),
+_DECISION = decide(_OLD, SpecifyUnit("unit", "1"))
+assert isinstance(_DECISION, Accepted)
+_NEW, _EVENT_OBJECTS, _RECORDS = build_event_records(
+    _OLD,
+    _DECISION.events,
+    actor="test",
+    run_id="",
+    recorded_at="2026-08-18T00:00:00+00:00",
 )
+_PAYLOAD = _EVENT_OBJECTS[0][1]
+_OBJECT_DIGEST = digest_of(ArtifactKind.EVENT, _PAYLOAD)
 
 
 def _raise_at(step_to_fail: str, error: BaseException) -> Callable[[str], None]:
@@ -51,21 +50,23 @@ def _assert_visible_invariant(root: Path, step: str) -> None:
         object_directory = root / "objects" / "sha256"
         for object_path in object_directory.iterdir():
             payload = object_path.read_bytes()
-            assert object_path.name == digest_of(ArtifactKind.OBJECT, payload)
+            assert object_path.name == digest_of(ArtifactKind.EVENT, payload)
 
         if after_replace:
-            assert reopened.get_object(ArtifactKind.OBJECT, _OBJECT_DIGEST) == _PAYLOAD
+            assert reopened.get_object(ArtifactKind.EVENT, _OBJECT_DIGEST) == _PAYLOAD
 
         # Raised exceptions model abrupt failure at completed-operation boundaries.
         # The finally path may remove only an unplaced temp and must release flock;
         # this next commit proves the latter within the same process.
         current = reopened.read_snapshot()
-        reopened.commit(
-            Snapshot(
-                revision=current.revision + 1,
-                units=current.units,
-                deviations=current.deviations,
-            )
+        decision = decide(current, SpecifyUnit("next", "1"))
+        assert isinstance(decision, Accepted)
+        commit_events(
+            reopened,
+            current,
+            decision.events,
+            actor="test",
+            run_id="",
         )
 
 
@@ -75,7 +76,7 @@ def test_normal_commit_emits_the_declared_steps_in_order(tmp_path: Path) -> None
         pass
     seen: list[str] = []
     with Store.open(str(root), on_step=seen.append) as store:
-        store.commit(_NEW, ((ArtifactKind.OBJECT, _PAYLOAD),))
+        store.commit(_NEW, ((ArtifactKind.EVENT, _PAYLOAD),))
     assert tuple(seen) == COMMIT_STEPS
 
 
@@ -104,7 +105,7 @@ def test_crash_at_every_commit_boundary_preserves_invariants(
         on_step=_raise_at(step, CrashError(step)),
     ) as failing:
         with pytest.raises(CrashError, match=step):
-            failing.commit(_NEW, ((ArtifactKind.OBJECT, _PAYLOAD),))
+            failing.commit(_NEW, ((ArtifactKind.EVENT, _PAYLOAD),))
     _assert_visible_invariant(root, step)
 
 
@@ -124,7 +125,7 @@ def test_fsync_failure_at_every_fsync_boundary_preserves_invariants(
         on_step=_raise_at(step, OSError(step)),
     ) as failing:
         with pytest.raises(OSError, match=step):
-            failing.commit(_NEW, ((ArtifactKind.OBJECT, _PAYLOAD),))
+            failing.commit(_NEW, ((ArtifactKind.EVENT, _PAYLOAD),))
     _assert_visible_invariant(root, step)
 
 
@@ -161,7 +162,7 @@ def test_genuine_fsync_failure_preserves_invariants(
     with Store.open(str(root)) as failing:
         active = True
         with pytest.raises(OSError, match="injected fsync failure"):
-            failing.commit(_NEW, ((ArtifactKind.OBJECT, _PAYLOAD),))
+            failing.commit(_NEW, ((ArtifactKind.EVENT, _PAYLOAD),))
         active = False
     monkeypatch.undo()
 
@@ -170,14 +171,16 @@ def test_genuine_fsync_failure_preserves_invariants(
         assert reopened.read_snapshot() == (_NEW if replaced else _OLD)
         for object_path in (root / "objects" / "sha256").iterdir():
             payload = object_path.read_bytes()
-            assert object_path.name == digest_of(ArtifactKind.OBJECT, payload)
+            assert object_path.name == digest_of(ArtifactKind.EVENT, payload)
         current = reopened.read_snapshot()
-        reopened.commit(
-            Snapshot(
-                revision=current.revision + 1,
-                units=current.units,
-                deviations=current.deviations,
-            )
+        decision = decide(current, SpecifyUnit("next", "1"))
+        assert isinstance(decision, Accepted)
+        commit_events(
+            reopened,
+            current,
+            decision.events,
+            actor="test",
+            run_id="",
         )
 
 
@@ -196,10 +199,10 @@ def test_short_writes_are_completed_by_the_write_loop(
 
     with Store.open(str(root)) as store:
         monkeypatch.setattr(os, "write", dribble)
-        store.commit(_NEW, ((ArtifactKind.OBJECT, _PAYLOAD),))
+        store.commit(_NEW, ((ArtifactKind.EVENT, _PAYLOAD),))
         monkeypatch.undo()
         assert store.read_snapshot() == _NEW
-        assert store.get_object(ArtifactKind.OBJECT, _OBJECT_DIGEST) == _PAYLOAD
+        assert store.get_object(ArtifactKind.EVENT, _OBJECT_DIGEST) == _PAYLOAD
 
 
 def test_zero_progress_write_raises_and_leaves_state_intact(
@@ -216,8 +219,8 @@ def test_zero_progress_write_raises_and_leaves_state_intact(
     with Store.open(str(root)) as store:
         monkeypatch.setattr(os, "write", stalled)
         with pytest.raises(OSError, match="short write made no progress"):
-            store.commit(_NEW, ((ArtifactKind.OBJECT, _PAYLOAD),))
+            store.commit(_NEW, ((ArtifactKind.EVENT, _PAYLOAD),))
         monkeypatch.undo()
         assert store.read_snapshot() == _OLD
-        store.commit(_NEW, ((ArtifactKind.OBJECT, _PAYLOAD),))
+        store.commit(_NEW, ((ArtifactKind.EVENT, _PAYLOAD),))
         assert store.read_snapshot() == _NEW

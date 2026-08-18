@@ -69,17 +69,23 @@ def test_state_format_4_upgrader_records_the_pre_log_gap(tmp_path: Path) -> None
     from vouch_mk2.store.codec import CURRENT_STATE_FORMAT
 
     assert CURRENT_STATE_FORMAT == 4
-    _project, root = _specified(tmp_path)
-    # Simulate a store written before the log existed: drop the head, keep the revision.
-    state = Path(root) / "state.json"
-    document = json.loads(state.read_text())
-    revision = document["revision"]
-    document["state_format"] = 3
-    document.pop("event_head", None)
-    state.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
-    code, out = _run("upgrade", "--root", root)
+    # A GENUINE legacy store: the owner-pinned canonical format-3 document, with no event
+    # objects at all. (Downgrading a format-4 store instead would be the very re-baselining
+    # path R8 refuses -- see the pack/2 amendment.)
+    root = tmp_path / "legacy" / ".vouch"
+    (root / "objects" / "sha256").mkdir(parents=True)
+    golden = json.loads((ROOT / "tests" / "fixtures" / "state-format" / "format3.golden.json").read_text())
+    revision = golden["revision"]
+    assert golden["state_format"] == 3 and "event_head" not in golden
+    # The golden names evidence objects a bare directory does not hold; a legacy store with no
+    # evidence is still a genuine legacy store, and keeps this fixture self-contained.
+    golden["evidence_heads"] = []
+    (root / "state.json").write_text(
+        json.dumps(golden, sort_keys=True, separators=(",", ":")) + "\n"
+    )
+    code, out = _run("upgrade", "--root", str(root))
     assert code == 0, out
-    with Store.open(root, read_only=True) as store:
+    with Store.open(str(root), read_only=True) as store:
         snapshot = store.read_snapshot()
         assert snapshot.event_head, "the upgrader must start the log"
         raw = store.get_object(ArtifactKind.EVENT, snapshot.event_head)
@@ -88,6 +94,29 @@ def test_state_format_4_upgrader_records_the_pre_log_gap(tmp_path: Path) -> None
     assert "pre-log" in blob and str(revision) in blob, (
         f"the upgrader must record the pre-log gap naming the revision range; got {blob}"
     )
+
+
+def test_a_format_downgrade_cannot_re_baseline_the_log(tmp_path: Path) -> None:
+    """R8: the store remembers the highest state format it has ever held."""
+    from vouch_mk2.store import Store
+
+    _project, root = _specified(tmp_path)
+    with Store.open(root, read_only=True) as store:
+        assert store.read_snapshot().event_head
+    state = Path(root) / "state.json"
+    document = json.loads(state.read_text())
+    # Remove BOTH signals the upgrader currently keys on, leaving only the high-water mark.
+    document["state_format"] = 3
+    document.pop("event_head", None)
+    state.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
+    for path in (Path(root) / "objects" / "sha256").glob("*"):
+        path.unlink()
+    code, out = _run("upgrade", "--root", str(root))
+    assert code != 0, (
+        "a store that has already been at format 4 must refuse to be re-baselined at 3, "
+        f"even with event_head and the event objects removed; got: {out}"
+    )
+    assert "format" in out.lower()
 
 
 # ---- R3 atomicity ----

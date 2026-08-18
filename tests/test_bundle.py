@@ -30,6 +30,7 @@ from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.store import ArtifactKind, RelPath, Store, decode_bundle_inventory
 from vouch_mk2.verify import run_artifact_checks
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 def test_d_pruning_exclusion_examples() -> None:
@@ -90,7 +91,9 @@ def test_build_and_bind_bundle_round_trip(tmp_path: Path) -> None:
             criteria=None,
             closure=None,
         )
-        store.commit(Snapshot(revision=1, units=(unit,), releases=(release,)))
+        commit_snapshot_fixture(
+            store, Snapshot(revision=1, units=(unit,), releases=(release,))
+        )
         digest = bind_bundle(store, "r1", inventory)
         decoded = decode_bundle_inventory(
             store.get_object(ArtifactKind.BUNDLE_INVENTORY, digest)
@@ -116,7 +119,8 @@ def test_corrupt_bound_bundle_inventory_fails_with_release(tmp_path: Path) -> No
     root = tmp_path / "store"
     with Store.init(str(root)) as store:
         unit = Unit("u", "v1", UnitStatus.SPECIFIED)
-        store.commit(
+        commit_snapshot_fixture(
+            store,
             Snapshot(
                 revision=1,
                 units=(unit,),
@@ -130,7 +134,7 @@ def test_corrupt_bound_bundle_inventory_fails_with_release(tmp_path: Path) -> No
                         None,
                     ),
                 ),
-            )
+            ),
         )
         digest = bind_bundle(store, "r1", inventory)
     (root / "objects" / "sha256" / digest).write_bytes(b"corrupt")

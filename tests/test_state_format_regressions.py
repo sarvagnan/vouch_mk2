@@ -20,6 +20,7 @@ from vouch_mk2.mcp import serve
 from vouch_mk2.store import Store, StoreError, encode_snapshot
 from vouch_mk2.store.upgrade import UPGRADERS, UpgradeRefused, upgrade_document
 from vouch_mk2.verify import run_artifact_checks
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 def _make_stale_store(root: Path) -> bytes:
@@ -188,7 +189,11 @@ def test_upgraded_format2_legacy_chain_has_an_honest_empty_summary(
         evidence_heads=(EvidenceHead("u", digest, 1, "GENESIS", "v1"),),
     )
     with Store.init(str(root)) as store:
-        store.commit(snapshot, objects=((ArtifactKind.EVIDENCE, data),))
+        snapshot = commit_snapshot_fixture(
+            store,
+            snapshot,
+            objects=((ArtifactKind.EVIDENCE, data),),
+        )
     document = json.loads((root / "state.json").read_bytes())
     document["state_format"] = 2
     for head in cast(list[dict[str, object]], document["evidence_heads"]):

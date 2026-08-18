@@ -21,7 +21,7 @@ evaluator that ran, or the run fails.
 
 | Claim | Mechanism | Threat level |
 |---|---|---|
-| Event chronology and derived-snapshot consistency | the authoritative append-only event log is replayed by `check.event-log` through `apply()` and byte-compared with the derived `state.json` cache; event objects are written before the state swap | 1 |
+| Recorded-chain replay and derived-snapshot consistency | replay proves the snapshot is derivable from the recorded chain; it does not prove that the recorded order is the order in which events really occurred. `check.event-log` replays the chain through `apply()` and byte-compares it with the derived `state.json` cache | 1 |
 | Artifact integrity | content-addressed objects; a digest mismatch refuses to load | 1–2 |
 | Reference integrity | every cross-artifact reference is a typed `{kind, digest}` field, resolved or failing | 1 |
 | Schema conformance | one strict decoder per artifact type; unknown field = error, coercion = error | 1–2 |
@@ -42,9 +42,12 @@ including `record-formal-certificate` through the revision it reports. Writers
 wait on a blocking exclusive lock. Read-only handles never acquire that lock.
 Standalone projection generation reads unlocked and holds the writer lock only
 while replacing generated files; upgrade holds its outer writer lock through
-regeneration. Orphan-temp cleanup is opportunistic and skipped when a writer
-holds the lock. The MCP transport remains read-only; these verbs do not add a
-remote mutation path.
+regeneration. Commits deliberately place objects before replacing `state.json`:
+this asymmetry guarantees that a committed snapshot never names a missing object.
+An interrupted pre-swap commit can leave an inert content-addressed event object
+that no snapshot reaches; the opportunistic orphan/temp cleanup removes it on a
+later writable open and is skipped while another writer holds the lock. The MCP
+transport remains read-only; these verbs do not add a remote mutation path.
 
 Every lifecycle event records an actor and a run ID. Both are **claims**: the
 actor is exactly the caller's `--actor` value (defaulting to the OS user), and
@@ -59,6 +62,19 @@ checks adjacent revisions and links, replays every recorded event through
 `apply()` from the empty snapshot, and compares the canonical snapshot bytes.
 Only `event_head` is handled specially: replay sets it to the digest of the last
 record replayed because a record cannot contain the digest that names itself.
+This proves self-consistency of the chain currently presented and derivability of
+its snapshot, not true wall-clock chronology. Vouch has no independent monotonic
+trust root that could prove when two commuting events really occurred; run-ID and
+anchor claims remain the only external ties and retain their stated claim boundary.
+
+For a format-3 upgrade, the first record is a **pre-log checkpoint** that preserves
+the whole caller/store-asserted snapshot. Everything before that checkpoint is
+attested rather than verified, and replay proves nothing about pre-log history.
+The upgrader refuses format 3 when the raw document still has an `event_head` key
+or when a canonical event object remains. These two signals make a casual downgrade
+detectable, but a store is a directory of files: someone who removes both signals
+is outside any repository-local trust root. The backstop is the store's own git
+history, not Vouch; Vouch does not prevent deletion of both signals.
 
 Format 1 and later declare `state_format`; absence denotes legacy format 0.
 Strict reads accept exactly the current format. Older stores require the explicit,

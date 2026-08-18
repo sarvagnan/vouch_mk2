@@ -49,6 +49,7 @@ from vouch_mk2.verify import (
     record_formal_certificate,
     run_artifact_checks,
 )
+from vouch_mk2.store.event_log import commit_events
 
 
 @pytest.fixture(scope="module")
@@ -415,8 +416,13 @@ def test_recorded_certificate_is_checked_cheaply_and_names_unexplored_properties
             )
         decision = decide(snapshot, RecordFormalCertificate(tampered_digest))
         assert isinstance(decision, Accepted)
-        tampered_snapshot = apply(snapshot, decision.events)
-        store.commit(tampered_snapshot)
+        tampered_snapshot = commit_events(
+            store,
+            snapshot,
+            decision.events,
+            actor="test",
+            run_id="",
+        )
         tampered_result = next(
             result
             for result in run_artifact_checks(store, tampered_snapshot)
@@ -434,7 +440,13 @@ def test_recorded_certificate_is_checked_cheaply_and_names_unexplored_properties
             )
         decision = decide(tampered_snapshot, RecordFormalCertificate(stale_digest))
         assert isinstance(decision, Accepted)
-        store.commit(apply(tampered_snapshot, decision.events))
+        commit_events(
+            store,
+            tampered_snapshot,
+            decision.events,
+            actor="test",
+            run_id="",
+        )
         stale_result = next(
             result
             for result in run_artifact_checks(store, store.read_snapshot())

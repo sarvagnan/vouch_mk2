@@ -26,7 +26,7 @@ from vouch_mk2.store import (
     encode_bundle_inventory,
     encode_pack_inventory,
 )
-from vouch_mk2.store.event_log import commit_events, default_actor
+from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
 
 
 class BundleError(StoreError):
@@ -376,7 +376,14 @@ def build_inventory(root: str, exclusions: tuple[str, ...]) -> BundleInventory:
     )
 
 
-def bind_bundle(store: Store, release_id: str, inventory: BundleInventory) -> str:
+def bind_bundle(
+    store: Store,
+    release_id: str,
+    inventory: BundleInventory,
+    *,
+    actor: str | None = None,
+    run_id: str | None = None,
+) -> str:
     snapshot = store.read_snapshot()
     data = encode_bundle_inventory(inventory)
     digest = digest_of(ArtifactKind.BUNDLE_INVENTORY, data)
@@ -388,14 +395,21 @@ def bind_bundle(store: Store, release_id: str, inventory: BundleInventory) -> st
         store,
         snapshot,
         decision.events,
-        actor=default_actor(),
-        run_id="",
+        actor=default_actor() if actor is None else actor,
+        run_id=ci_run_id() if run_id is None else run_id,
         objects=((ArtifactKind.BUNDLE_INVENTORY, data),),
     )
     return digest
 
 
-def bind_pack(store: Store, name: str, inventory: PackInventory) -> str:
+def bind_pack(
+    store: Store,
+    name: str,
+    inventory: PackInventory,
+    *,
+    actor: str | None = None,
+    run_id: str | None = None,
+) -> str:
     """Atomically bind an inventory object to the unit's current pack version."""
     if not inventory.entries:
         raise StoreError("bind-pack refuses an empty acceptance pack inventory")
@@ -413,8 +427,8 @@ def bind_pack(store: Store, name: str, inventory: PackInventory) -> str:
         store,
         snapshot,
         decision.events,
-        actor=default_actor(),
-        run_id="",
+        actor=default_actor() if actor is None else actor,
+        run_id=ci_run_id() if run_id is None else run_id,
         objects=((ArtifactKind.ACCEPTANCE_PACK, data),),
     )
     return digest

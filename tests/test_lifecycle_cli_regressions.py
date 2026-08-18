@@ -52,6 +52,8 @@ from vouch_mk2.verify import (
     record_evidence,
     record_formal_certificate,
 )
+from vouch_mk2.store.event_log import commit_events
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,7 +61,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def _init_store(root: Path, *, unit_name: str | None = None) -> None:
     with Store.init(str(root)) as store:
         if unit_name is not None:
-            store.commit(
+            commit_snapshot_fixture(
+                store,
                 Snapshot(
                     revision=1,
                     units=(
@@ -70,7 +73,7 @@ def _init_store(root: Path, *, unit_name: str | None = None) -> None:
                             acceptance_pack_version="pack/1",
                         ),
                     ),
-                )
+                ),
             )
 
 
@@ -249,7 +252,13 @@ def test_shared_store_threads_serialize_before_revision_cas(tmp_path: Path) -> N
             snapshot = store.read_snapshot()
             decision = decide(snapshot, SpecifyUnit(name, "1"))
             assert isinstance(decision, Accepted)
-            store.commit(apply(snapshot, decision.events))
+            commit_events(
+                store,
+                snapshot,
+                decision.events,
+                actor="test",
+                run_id="",
+            )
         outcomes.append(name)
 
     with Store.open(str(root), on_step=on_step) as store:
@@ -350,7 +359,8 @@ def test_stale_label_specified_evidence_cannot_poison_later_publication(
 ) -> None:
     root = tmp_path / "stale-label"
     with Store.init(str(root)) as store:
-        store.commit(
+        commit_snapshot_fixture(
+            store,
             Snapshot(
                 revision=1,
                 tier=Tier.STANDARD,
@@ -363,7 +373,7 @@ def test_stale_label_specified_evidence_cannot_poison_later_publication(
                         acceptance_pack_version="stale-label",
                     ),
                 ),
-            )
+            ),
         )
     for kind, exit_code in (("red", 1), ("green", 0)):
         assert main(
@@ -587,7 +597,15 @@ def test_record_formal_certificate_json_reports_its_own_commit_revision(
         with store.write_locked():
             snapshot = store.read_snapshot()
             own_revision.append(snapshot.revision + 1)
-            store.commit(replace(snapshot, revision=snapshot.revision + 1))
+            decision = decide(snapshot, SpecifyUnit("formal-writer", "v1"))
+            assert isinstance(decision, Accepted)
+            commit_events(
+                store,
+                snapshot,
+                decision.events,
+                actor="test",
+                run_id="",
+            )
         recorded.set()
         competing_done.wait(timeout=0.25)
         return "a" * 64
@@ -599,7 +617,15 @@ def test_record_formal_certificate_json_reports_its_own_commit_revision(
         with Store.open(str(root)) as store:
             with store.write_locked():
                 snapshot = store.read_snapshot()
-                store.commit(replace(snapshot, revision=snapshot.revision + 1))
+                decision = decide(snapshot, SpecifyUnit("competing-writer", "v1"))
+                assert isinstance(decision, Accepted)
+                commit_events(
+                    store,
+                    snapshot,
+                    decision.events,
+                    actor="test",
+                    run_id="",
+                )
         competing_done.set()
 
     competitor = threading.Thread(target=competing_writer)

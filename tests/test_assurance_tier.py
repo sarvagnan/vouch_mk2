@@ -17,12 +17,15 @@ import pytest
 from vouch_mk2.core import Accepted, Refused, apply, decide
 from vouch_mk2.core.model import Snapshot, Unit, UnitStatus
 from vouch_mk2.store import Store, decode_snapshot, encode_snapshot
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 @contextlib.contextmanager
-def _tmp_store():  # type: ignore[no-untyped-def]
+def _tmp_store(snapshot: Snapshot | None = None):  # type: ignore[no-untyped-def]
     with tempfile.TemporaryDirectory() as d:
         store = Store.init(d + "/s")
         try:
+            if snapshot is not None:
+                commit_snapshot_fixture(store, snapshot)
             yield store
         finally:
             store.close()
@@ -103,9 +106,8 @@ def test_standard_tier_makes_missing_anchoring_a_fail_not_not_applicable() -> No
     from vouch_mk2.ir.schema import Verdict
     from vouch_mk2.verify import run_artifact_checks
 
-    with _tmp_store() as store:
-        store.commit(Snapshot(revision=1, tier=Tier.STANDARD, anchor_mode=AnchorMode.NONE,
-                              units=(_unit("u", UnitStatus.PUBLISHED),)))
+    with _tmp_store(Snapshot(revision=1, tier=Tier.STANDARD, anchor_mode=AnchorMode.NONE,
+                             units=(_unit("u", UnitStatus.PUBLISHED),))) as store:
         snapshot = store.read_snapshot()
         anchors = next(r for r in run_artifact_checks(store, snapshot) if r.check_id == mk2.CHECK_EVIDENCE_ANCHORS)
         assert anchors.verdict is Verdict.FAIL
@@ -118,9 +120,8 @@ def test_lightweight_tier_keeps_anchoring_not_applicable_under_mode_none() -> No
     from vouch_mk2.ir.schema import Verdict
     from vouch_mk2.verify import run_artifact_checks
 
-    with _tmp_store() as store:
-        store.commit(Snapshot(revision=1, tier=Tier.LIGHTWEIGHT, anchor_mode=AnchorMode.NONE,
-                              units=(_unit("u", UnitStatus.PUBLISHED),)))
+    with _tmp_store(Snapshot(revision=1, tier=Tier.LIGHTWEIGHT, anchor_mode=AnchorMode.NONE,
+                             units=(_unit("u", UnitStatus.PUBLISHED),))) as store:
         snapshot = store.read_snapshot()
         anchors = next(r for r in run_artifact_checks(store, snapshot) if r.check_id == mk2.CHECK_EVIDENCE_ANCHORS)
         assert anchors.verdict is Verdict.NOT_APPLICABLE

@@ -40,6 +40,7 @@ from vouch_mk2.store import (
 )
 from vouch_mk2.verify import record_evidence, run_artifact_checks
 from vouch_mk2.store.event_log import build_event_records, commit_events
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 def _unit(name: str, version: str = "v1") -> Unit:
@@ -283,12 +284,13 @@ def test_corrupt_evidence_and_absent_head_fail(tmp_path: Path) -> None:
     missing = "f" * 64
     absent_root = tmp_path / "absent"
     with Store.init(str(absent_root)) as store:
-        store.commit(
+        snapshot = commit_snapshot_fixture(
+            store,
             Snapshot(
                 revision=1,
                 units=(_unit("u"),),
                 evidence_heads=(EvidenceHead("u", missing, 1, "GENESIS", "v1"),),
-            )
+            ),
         )
         found = _result(store, store.read_snapshot(), mk2.CHECK_EVIDENCE_CHAINS)
         assert found.verdict is Verdict.FAIL and "u" in found.detail
@@ -332,9 +334,9 @@ def test_anchor_applicability_stagnation_ancestor_and_dangling(tmp_path: Path) -
         store.commit(
             replace(
                 snapshot,
-                revision=snapshot.revision + 1,
                 evidence_heads=(replace(head, anchored="d" * 64),),
-            )
+            ),
+            expected_revision=snapshot.revision,
         )
         dangling = _result(store, store.read_snapshot(), mk2.CHECK_EVIDENCE_ANCHORS)
         assert dangling.verdict is Verdict.FAIL
@@ -355,9 +357,9 @@ def test_anchor_fail_precedes_stagnant_not_checked(tmp_path: Path) -> None:
         store.commit(
             replace(
                 snapshot,
-                revision=snapshot.revision + 1,
                 evidence_heads=heads,
-            )
+            ),
+            expected_revision=snapshot.revision,
         )
         found = _result(store, store.read_snapshot(), mk2.CHECK_EVIDENCE_ANCHORS)
         assert found.verdict is Verdict.FAIL
@@ -502,7 +504,9 @@ def test_pack_digest_a_to_b_to_a_retains_a_green_summary(tmp_path: Path) -> None
         acceptance_pack_digest=digest_a,
     )
     with Store.init(str(root)) as store:
-        store.commit(Snapshot(revision=1, tier=Tier.STANDARD, units=(unit,)))
+        commit_snapshot_fixture(
+            store, Snapshot(revision=1, tier=Tier.STANDARD, units=(unit,))
+        )
         red_a = record_evidence(
             store,
             replace(_event("u", 1, "GENESIS", EvidenceKind.RED), pack_digest=digest_a),
@@ -515,7 +519,6 @@ def test_pack_digest_a_to_b_to_a_retains_a_green_summary(tmp_path: Path) -> None
         store.commit(
             replace(
                 snapshot,
-                revision=snapshot.revision + 1,
                 units=(
                     replace(
                         unit,
@@ -524,7 +527,8 @@ def test_pack_digest_a_to_b_to_a_retains_a_green_summary(tmp_path: Path) -> None
                         acceptance_test_set_digest=digest_b,
                     ),
                 ),
-            )
+            ),
+            expected_revision=snapshot.revision,
         )
         head = store.read_snapshot().evidence_head("u")
         assert head is not None
@@ -585,7 +589,11 @@ def test_all_legacy_chain_rejects_forged_cached_summary(tmp_path: Path) -> None:
         ),
     )
     with Store.init(str(tmp_path / "legacy-forged")) as store:
-        store.commit(snapshot, objects=((ArtifactKind.EVIDENCE, data),))
+        snapshot = commit_snapshot_fixture(
+            store,
+            snapshot,
+            objects=((ArtifactKind.EVIDENCE, data),),
+        )
         result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
     assert result.verdict is Verdict.FAIL
     assert "u@v1" in result.detail and "summary" in result.detail
@@ -622,7 +630,11 @@ def test_cached_pack_digest_set_must_match_the_nonlegacy_chain(tmp_path: Path) -
         ),
     )
     with Store.init(str(tmp_path / "wrong-digest")) as store:
-        store.commit(snapshot, objects=((ArtifactKind.EVIDENCE, data),))
+        snapshot = commit_snapshot_fixture(
+            store,
+            snapshot,
+            objects=((ArtifactKind.EVIDENCE, data),),
+        )
         result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
     assert result.verdict is Verdict.FAIL
     assert "u@v1" in result.detail and "summary" in result.detail
@@ -677,7 +689,7 @@ def test_chain_check_validates_every_cached_pack_summary(tmp_path: Path) -> None
     )
     objects = tuple((ArtifactKind.EVIDENCE, data) for _event_value, data, _ in events)
     with Store.init(str(tmp_path / "all-summaries")) as store:
-        store.commit(snapshot, objects=objects)
+        snapshot = commit_snapshot_fixture(store, snapshot, objects=objects)
         result = _result(store, snapshot, mk2.CHECK_EVIDENCE_CHAINS)
     assert result.verdict is Verdict.FAIL
     assert "u@v1" in result.detail and "summary" in result.detail
@@ -733,7 +745,8 @@ def test_mixed_legacy_chain_is_reported_for_nonpublished_green_unit(
         ),
     )
     with Store.init(str(tmp_path / tier.value)) as store:
-        store.commit(
+        snapshot = commit_snapshot_fixture(
+            store,
             snapshot,
             objects=tuple((ArtifactKind.EVIDENCE, data) for data, _ in rows),
         )
@@ -781,7 +794,8 @@ def test_pre_d17_notice_survives_a_current_pack_failure(tmp_path: Path) -> None:
         ),
     )
     with Store.init(str(tmp_path / "legacy-and-failure")) as store:
-        store.commit(
+        snapshot = commit_snapshot_fixture(
+            store,
             snapshot,
             objects=(
                 (ArtifactKind.EVIDENCE, legacy_data),
@@ -823,7 +837,8 @@ def test_pre_d17_chain_is_reported_without_failing_a_published_unit(
         evidence_heads=(EvidenceHead("u", green_digest, 2, "GENESIS", "v1"),),
     )
     with Store.init(str(tmp_path / "legacy")) as store:
-        store.commit(
+        snapshot = commit_snapshot_fixture(
+            store,
             snapshot,
             objects=(
                 (ArtifactKind.EVIDENCE, red_data),

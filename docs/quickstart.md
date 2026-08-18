@@ -42,10 +42,14 @@ and, when you pass `--pack-file`, stores an inventory of the pack's files (path,
 as a content-addressed object bound to the unit. From then on `check --project .` re-hashes
 those files and FAILs if any moved — the goalposts are mechanically pinned. What Vouch still
 cannot prove is *chronology relative to unrecorded implementation work*: that the freeze
-preceded the implementation is your method's control. The event log is authoritative for the
-recorded order of Vouch's own events, and `check.event-log` verifies that order by replaying it
-through `apply()` and byte-comparing the derived snapshot cache. Here the pack is one failing
-test.
+preceded the implementation is your method's control. The event log is the authoritative chain
+Vouch presents, and `check.event-log` proves the snapshot is derivable from that recorded chain by
+replaying it through `apply()` and byte-comparing the derived cache. It does not independently
+prove the real-world order in which events occurred. Here the pack is one failing test.
+
+On a store upgraded from before event logging, the chain begins with a **pre-log checkpoint**.
+Everything before that checkpoint is attested rather than verified, and replay proves nothing
+about pre-log history; the store's git history is the backstop for those earlier revisions.
 
 ```sh
 python3 vouch.lock specify --root .vouch --name greeter --version v1
@@ -247,6 +251,10 @@ python3 vouch.lock complete --root .vouch --release-id r1
 freshness against the state they were generated from.
 `check.event-log` also walks the authoritative event log and replays it from the empty snapshot;
 the committed snapshot is the O(1)-read derived cache and must reproduce byte-for-byte.
+That derivation starts at a pre-log checkpoint for an upgraded legacy store: everything before
+the checkpoint is attested rather than verified, and replay proves nothing about pre-log history.
+Replay establishes consistency of the recorded chain presented to it, not independent wall-clock
+proof that the events really occurred in that order.
 
 `check` does not re-explore the bounded formal model. At `high` it cheaply verifies the
 recorded certificate, current policy tables, and checker identity, then reports

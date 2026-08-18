@@ -16,6 +16,8 @@ import pytest
 from vouch_mk2.cli import main
 from vouch_mk2.core.model import Snapshot, UnitStatus
 from vouch_mk2.store import Store, decode_snapshot, encode_snapshot
+from vouch_mk2.verify import run_artifact_checks
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -220,12 +222,14 @@ def test_bound_object_missing_from_store_is_a_fail(tmp_path: Path) -> None:
     from vouch_mk2.core.model import Tier, Unit
     from vouch_mk2.ir import mk2
     from vouch_mk2.ir.schema import Verdict
-    from vouch_mk2.verify import run_artifact_checks
 
     root = str(tmp_path / "s")
     Store.init(root).close()
     with Store.open(root) as store:
-        store.commit(Snapshot(revision=1, tier=Tier.STANDARD, units=(Unit("u", "1", UnitStatus.ACCEPTANCE_FROZEN, (), "p", False, acceptance_pack_digest="f" * 64),)))
+        commit_snapshot_fixture(
+            store,
+            Snapshot(revision=1, tier=Tier.STANDARD, units=(Unit("u", "1", UnitStatus.ACCEPTANCE_FROZEN, (), "p", False, acceptance_pack_digest="f" * 64),)),
+        )
         rows = {r.check_id: r for r in run_artifact_checks(store, store.read_snapshot())}
     assert rows[mk2.CHECK_PACK_BOUND].verdict is Verdict.FAIL and "missing" in rows[mk2.CHECK_PACK_BOUND].detail
 

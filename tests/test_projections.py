@@ -75,6 +75,7 @@ from vouch_mk2.store import (
     encode_system_map,
 )
 from vouch_mk2.verify import emit_context, emit_system_map, run_artifact_checks
+from vouch_mk2.store.event_log import commit_events
 
 
 def _criteria() -> LaunchCriteria:
@@ -614,7 +615,15 @@ def test_map_freshness_passes_then_detects_stale_and_undecodable(
             _artifact_result(store, snapshot, mk2.CHECK_MAP_FRESHNESS)
             is Verdict.PASS
         )
-        store.commit(Snapshot(revision=1))
+        decision = decide(snapshot, SpecifyUnit("stale-map", "v1"))
+        assert isinstance(decision, Accepted)
+        commit_events(
+            store,
+            snapshot,
+            decision.events,
+            actor="test",
+            run_id="",
+        )
         stale = next(
             result
             for result in run_artifact_checks(store, store.read_snapshot())
@@ -667,7 +676,15 @@ def _regression_context_freshness_requires_context_with_map_and_detects_drift(
             _artifact_result(store, snapshot, mk2.CHECK_CONTEXT_FRESHNESS)
             is Verdict.PASS
         )
-        store.commit(Snapshot(revision=1))
+        decision = decide(snapshot, SpecifyUnit("stale-context", "v1"))
+        assert isinstance(decision, Accepted)
+        commit_events(
+            store,
+            snapshot,
+            decision.events,
+            actor="test",
+            run_id="",
+        )
         stale = next(
             result
             for result in run_artifact_checks(store, store.read_snapshot())

@@ -21,7 +21,6 @@ from vouch_mk2.core import (
     EventRecord,
     EvidenceHead,
     EvidenceKind,
-    PreLogHistoryRecorded,
     PackRebound,
     RecordEvidence,
     RecordFormalCertificate,
@@ -65,9 +64,10 @@ from vouch_mk2.store import (
     encode_system_map,
 )
 from vouch_mk2.store.codec import decode_raw_document
-from vouch_mk2.store.upgrade import upgrade_document
+from vouch_mk2.store.upgrade import UpgradeRefused, upgrade_document
 from vouch_mk2.store.event_log import (
     build_event_records,
+    build_pre_log_checkpoint,
     ci_run_id,
     commit_events,
     default_actor,
@@ -978,6 +978,30 @@ def _rebuild_evidence_head_summaries(
     return replace(snapshot, evidence_heads=tuple(heads)), rebuilt
 
 
+def _refuse_event_log_downgrade_signals(
+    store: Store, document: Mapping[str, object]
+) -> None:
+    """Refuse to turn evidence of prior format 4 use into a fresh baseline."""
+    if document.get("state_format") != 3:
+        return
+    found: list[str] = []
+    if "event_head" in document:
+        found.append("raw state.json contains an 'event_head' key")
+    event_objects = store.canonical_object_digests(ArtifactKind.EVENT)
+    if event_objects:
+        found.append(
+            f"canonical event object in ArtifactKind.EVENT {event_objects[0]!r}"
+        )
+    if found:
+        raise UpgradeRefused(
+            "format 3 -> 4 refused because " + " and ".join(found),
+            operator_hint=(
+                "restore the format-4 state and its event head from the store's "
+                "git history, then retry; do not create a new pre-log baseline"
+            ),
+        )
+
+
 def upgrade_store(
     store: Store,
     *,
@@ -994,6 +1018,7 @@ def upgrade_store(
     """
     if dry_run:
         document = decode_raw_document(store.read_state_bytes())
+        _refuse_event_log_downgrade_signals(store, document)
         upgraded, steps = upgrade_document(
             document,
             published_once=published_once,
@@ -1012,6 +1037,7 @@ def upgrade_store(
     with store.write_locked():
         original = store.read_state_bytes()
         document = decode_raw_document(original)
+        _refuse_event_log_downgrade_signals(store, document)
         upgraded, steps = upgrade_document(
             document,
             published_once=published_once,
@@ -1022,15 +1048,11 @@ def upgrade_store(
         event_objects: tuple[tuple[ArtifactKind, bytes], ...] = ()
         if (3, 4) in steps:
             baseline = replace(snapshot, event_head="")
-            marker = PreLogHistoryRecorded(
+            snapshot, event_objects, _records = build_pre_log_checkpoint(
+                baseline,
                 description=(
                     f"pre-log revisions 1..{baseline.revision}: git history only"
                 ),
-                baseline=baseline,
-            )
-            snapshot, event_objects, _records = build_event_records(
-                Snapshot(),
-                (marker,),
                 actor=default_actor() if actor is None else actor,
                 run_id=ci_run_id() if run_id is None else run_id,
             )

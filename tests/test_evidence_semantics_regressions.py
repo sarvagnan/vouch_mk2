@@ -48,6 +48,7 @@ from vouch_mk2.store import (
 )
 from vouch_mk2.store.upgrade import UPGRADERS
 from vouch_mk2.verify import run_artifact_checks
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -236,7 +237,7 @@ def test_superseded_digest_green_without_same_digest_red_keeps_evidence_chain_re
         ),
     )
     with Store.init(str(tmp_path / "store")) as store:
-        store.commit(snapshot, objects=tuple(events))
+        snapshot = commit_snapshot_fixture(store, snapshot, objects=tuple(events))
         result = next(
             check
             for check in run_artifact_checks(store, snapshot)
@@ -688,7 +689,8 @@ def test_upgrade_rebuilds_stale_head_summaries_but_refuses_inconsistent_evidence
     )
     stale_root = tmp_path / "stale-summary"
     with Store.init(str(stale_root)) as store:
-        store.commit(
+        stale = commit_snapshot_fixture(
+            store,
             stale,
             objects=(
                 (ArtifactKind.EVIDENCE, legacy_data),
@@ -748,7 +750,8 @@ def test_upgrade_rebuilds_stale_head_summaries_but_refuses_inconsistent_evidence
     )
     inconsistent_root = tmp_path / "inconsistent-object"
     with Store.init(str(inconsistent_root)) as store:
-        store.commit(
+        inconsistent = commit_snapshot_fixture(
+            store,
             inconsistent,
             objects=((ArtifactKind.EVIDENCE, incoherent_data),),
         )

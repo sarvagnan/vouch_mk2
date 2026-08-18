@@ -11,6 +11,7 @@ from vouch_mk2.cli import main
 from vouch_mk2.core.model import Deviation, DeviationStatus, DeviationType, Snapshot, Unit, UnitRef, UnitStatus
 from vouch_mk2.hook import HookError, hook_message, resolve_root
 from vouch_mk2.store import Store
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 def _store(path: Path) -> None:
@@ -19,7 +20,8 @@ def _store(path: Path) -> None:
 
 def _drift(path: Path) -> None:
     with Store.open(str(path)) as store:
-        store.commit(
+        commit_snapshot_fixture(
+            store,
             Snapshot(
                 revision=1,
                 units=(Unit("u", "v1", UnitStatus.IN_PROGRESS, acceptance_pack_version="p1"),),
@@ -31,7 +33,7 @@ def _drift(path: Path) -> None:
                         DeviationStatus.OPEN,
                     ),
                 ),
-            )
+            ),
         )
 
 

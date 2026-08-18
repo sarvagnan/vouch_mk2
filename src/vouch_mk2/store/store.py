@@ -10,12 +10,15 @@ import stat
 import threading
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Iterator
 
+from vouch_mk2.core.events import EventRecord, PreLogHistoryRecorded
 from vouch_mk2.core.invariants import validate_snapshot
 from vouch_mk2.core.model import Snapshot
 from vouch_mk2.store.codec import (
     CURRENT_STATE_FORMAT,
+    decode_event_record,
     decode_raw_document,
     decode_snapshot,
     encode_snapshot,
@@ -138,11 +141,11 @@ class Store:
     ) -> Store:
         """Open an existing store with one root directory capability.
 
-        Writable handles opportunistically sweep orphan temps only when they can
-        acquire ``LOCK_EX | LOCK_NB`` immediately. Actual writers use blocking
-        ``LOCK_EX`` and wait for the current writer. ``read_only=True`` handles
-        never create or acquire the lock, skip the sweep, and refuse every store
-        mutation."""
+        Writable handles opportunistically sweep orphan temps and unreachable
+        event objects only when they can acquire ``LOCK_EX | LOCK_NB``
+        immediately. Actual writers use blocking ``LOCK_EX`` and wait for the
+        current writer. ``read_only=True`` handles never create or acquire the
+        lock, skip the sweep, and refuse every store mutation."""
         store = cls(root, on_step=on_step, max_artifact_bytes=max_artifact_bytes)
         store._read_only = read_only
         try:
@@ -248,13 +251,15 @@ class Store:
         objects_fd = self._open_objects_directory()
         os.close(objects_fd)
         if not self._read_only:
-            self._sweep_orphan_temps()
+            self._sweep_orphans()
 
-    def _sweep_orphan_temps(self) -> None:
-        """Reclaim temp files orphaned by a killed process.
+    def _sweep_orphans(self) -> None:
+        """Reclaim temps and unreachable events orphaned by a killed process.
 
         A non-blocking lock probe makes this opportunistic garbage collection:
-        a live writer's temps are skipped, never swept or waited on."""
+        a live writer's objects are skipped, never swept or waited on. Event
+        objects are swept only for a strictly decodable current-format snapshot;
+        older raw documents retain them as downgrade-detection evidence."""
         lock_fd = self._open_lock()
         locked = False
         try:
@@ -276,10 +281,99 @@ class Store:
                         self._unlink_if_present(name, objects_fd)
             finally:
                 os.close(objects_fd)
+            self._sweep_unreachable_event_objects()
         finally:
             if locked:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
+
+    @staticmethod
+    def _looks_like_digest(name: str) -> bool:
+        return len(name) == _DIGEST_LENGTH and all(
+            character in "0123456789abcdef" for character in name
+        )
+
+    def _canonical_object_digests_at(
+        self, objects_fd: int, kind: ArtifactKind
+    ) -> tuple[str, ...]:
+        found: list[str] = []
+        for name in sorted(os.listdir(objects_fd)):
+            if not self._looks_like_digest(name):
+                continue
+            try:
+                payload = self._read_file(
+                    objects_fd,
+                    name,
+                    f"objects/sha256/{name}",
+                )
+            except IntegrityError:
+                continue
+            if digest_of(kind, payload) == name:
+                found.append(name)
+        return tuple(found)
+
+    def canonical_object_digests(self, kind: ArtifactKind) -> tuple[str, ...]:
+        """Return canonical object filenames belonging to one digest domain."""
+        objects_fd = self._open_objects_directory()
+        try:
+            return self._canonical_object_digests_at(objects_fd, kind)
+        finally:
+            os.close(objects_fd)
+
+    def _reachable_event_digests(self) -> frozenset[str] | None:
+        """Return the valid current event chain, or ``None`` when not sweepable."""
+        try:
+            state_bytes = self.read_state_bytes()
+            document = decode_raw_document(state_bytes)
+            if document.get("state_format") != CURRENT_STATE_FORMAT:
+                return None
+            snapshot = decode_snapshot(state_bytes)
+            reachable: set[str] = set()
+            digest = snapshot.event_head
+            while digest and digest != "GENESIS":
+                if digest in reachable:
+                    return None
+                record = decode_event_record(self.get_object(ArtifactKind.EVENT, digest))
+                reachable.add(digest)
+                digest = record.prev
+            return frozenset(reachable)
+        except StoreError:
+            return None
+
+    def _sweep_unreachable_event_objects(self) -> None:
+        # A successful objects-first commit replaces state.json after the last
+        # object-directory mutation. Only a directory newer than state can be
+        # carrying a pre-swap orphan, so ordinary opens avoid a full object scan.
+        try:
+            state_info = os.stat(
+                "state.json", dir_fd=self._root_fd, follow_symlinks=False
+            )
+        except OSError:
+            return
+        probe_fd = self._open_objects_directory()
+        try:
+            objects_info = os.fstat(probe_fd)
+        finally:
+            os.close(probe_fd)
+        if objects_info.st_mtime_ns <= state_info.st_mtime_ns:
+            return
+
+        reachable = self._reachable_event_digests()
+        if reachable is None:
+            return
+        objects_fd = self._open_objects_directory()
+        removed = False
+        try:
+            for digest in self._canonical_object_digests_at(
+                objects_fd, ArtifactKind.EVENT
+            ):
+                if digest not in reachable:
+                    self._unlink_if_present(digest, objects_fd)
+                    removed = True
+            if removed:
+                os.fsync(objects_fd)
+        finally:
+            os.close(objects_fd)
 
     @staticmethod
     def _open_directory(name: str, parent_fd: int) -> int:
@@ -716,7 +810,15 @@ class Store:
         expected_revision: int | None = None,
         allow_format_upgrade: bool = False,
     ) -> None:
-        """CAS-commit objects first, then atomically replace authoritative state."""
+        """CAS-commit objects first, then atomically replace authoritative state.
+
+        The ordering is deliberately asymmetric: a committed snapshot can never
+        name a missing object, while a killed pre-swap writer may leave inert,
+        unreachable content-addressed objects for the next writable open to
+        sweep. Advancing a current-format revision requires the matching event
+        chain extension in ``objects``; unchanged-revision upgrade/repair
+        re-encodes remain legal without a new record.
+        """
         self._require_writable("commit")
         violations = validate_snapshot(snapshot)
         if violations:
@@ -744,8 +846,10 @@ class Store:
                 current_revision = raw.get("revision")
                 if type(current_revision) is not int:
                     raise StoreError("revision: current raw document must declare an integer")
+                current_snapshot: Snapshot | None = None
             else:
-                current_revision = self.read_snapshot().revision
+                current_snapshot = self.read_snapshot()
+                current_revision = current_snapshot.revision
             expected = (
                 snapshot.revision - 1
                 if expected_revision is None
@@ -756,6 +860,18 @@ class Store:
                     f"revision: expected on-disk {expected}, found {current_revision}"
                 )
             self._step("cas-checked")
+
+            if snapshot.revision > current_revision:
+                if current_snapshot is None:
+                    raise StoreError(
+                        f"revision {snapshot.revision}: a format-upgrade commit must "
+                        "preserve the on-disk revision"
+                    )
+                self._require_event_extension(
+                    current_snapshot,
+                    snapshot,
+                    objects,
+                )
 
             for kind, payload in objects:
                 self.put_object(kind, payload)
@@ -770,3 +886,75 @@ class Store:
                     ) from error
 
             self._replace_state_bytes(data)
+
+    @staticmethod
+    def _require_event_extension(
+        current: Snapshot,
+        candidate: Snapshot,
+        objects: Sequence[tuple[ArtifactKind, bytes]],
+    ) -> None:
+        """Require supplied records to extend the current head through candidate."""
+        supplied: dict[str, EventRecord] = {}
+        event_object_count = 0
+        for kind, payload in objects:
+            if kind is not ArtifactKind.EVENT:
+                continue
+            event_object_count += 1
+            digest = digest_of(ArtifactKind.EVENT, payload)
+            try:
+                supplied[digest] = decode_event_record(payload)
+            except StoreError as error:
+                raise StoreError(
+                    f"revision {candidate.revision}: supplied event record "
+                    f"{digest!r} is invalid: {error}"
+                ) from error
+
+        if not candidate.event_head or not supplied:
+            raise StoreError(
+                f"revision {candidate.revision}: event_head for a snapshot revision "
+                "advance requires its matching event record(s) to be supplied"
+            )
+
+        if current == Snapshot() and len(supplied) == 1:
+            baseline_record = supplied.get(candidate.event_head)
+            if (
+                baseline_record is not None
+                and isinstance(
+                    baseline_record.folded_event, PreLogHistoryRecorded
+                )
+                and baseline_record.revision == candidate.revision
+                and baseline_record.prev == "GENESIS"
+                and baseline_record.folded_event.baseline
+                == replace(candidate, event_head="")
+            ):
+                return
+
+        used: set[str] = set()
+        digest = candidate.event_head
+        for revision in range(candidate.revision, current.revision, -1):
+            record = supplied.get(digest)
+            if record is None:
+                raise StoreError(
+                    f"revision {candidate.revision}: event record for revision "
+                    f"{revision} was not supplied"
+                )
+            actual_revision = record.revision
+            if actual_revision != revision:
+                raise StoreError(
+                    f"revision {candidate.revision}: supplied event record "
+                    f"{digest!r} declares revision {actual_revision}, expected {revision}"
+                )
+            used.add(digest)
+            digest = record.prev
+
+        expected_prev = current.event_head or "GENESIS"
+        if digest != expected_prev:
+            raise StoreError(
+                f"revision {candidate.revision}: supplied event records do not "
+                f"extend on-disk head {expected_prev!r}"
+            )
+        if len(used) != len(supplied) or event_object_count != len(supplied):
+            raise StoreError(
+                f"revision {candidate.revision}: supplied EVENT objects must be "
+                "exactly the matching event chain extension"
+            )

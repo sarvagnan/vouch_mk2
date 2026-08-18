@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from vouch_mk2.core.model import Snapshot
+from vouch_mk2.core import Accepted, Snapshot, SpecifyUnit, decide
 from vouch_mk2.store import (
     ArtifactKind,
     CasConflict,
@@ -15,6 +15,7 @@ from vouch_mk2.store import (
     Store,
     StoreError,
 )
+from vouch_mk2.store.event_log import build_event_records, commit_events
 
 
 def test_init_open_read_round_trip(tmp_path: Path) -> None:
@@ -64,8 +65,15 @@ def test_reput_detects_tampered_existing_object(tmp_path: Path) -> None:
 
 def test_cas_conflict_has_no_partial_state_effect(tmp_path: Path) -> None:
     with Store.init(str(tmp_path / "store")) as store:
-        committed = Snapshot(revision=1)
-        store.commit(committed)
+        decision = decide(Snapshot(), SpecifyUnit("committed", "v1"))
+        assert isinstance(decision, Accepted)
+        committed = commit_events(
+            store,
+            Snapshot(),
+            decision.events,
+            actor="test",
+            run_id="",
+        )
         state_bytes = state_path(tmp_path).read_bytes()
 
         with pytest.raises(CasConflict):
@@ -118,16 +126,24 @@ def test_permission_flip_fails_typed_and_leaves_state_intact(tmp_path: Path) -> 
     root = tmp_path / "store"
     sha_dir = root / "objects" / "sha256"
     with Store.init(str(root)) as store:
+        decision = decide(Snapshot(), SpecifyUnit("permission", "v1"))
+        assert isinstance(decision, Accepted)
+        candidate, event_objects, _records = build_event_records(
+            Snapshot(),
+            decision.events,
+            actor="test",
+            run_id="",
+        )
         sha_dir.chmod(0o500)
         try:
             with pytest.raises(StoreError):
                 store.commit(
-                    Snapshot(revision=1), ((ArtifactKind.OBJECT, b"payload"),)
+                    candidate, event_objects
                 )
         finally:
             sha_dir.chmod(0o700)
         assert store.read_snapshot() == Snapshot()
-        store.commit(Snapshot(revision=1), ((ArtifactKind.OBJECT, b"payload"),))
+        store.commit(candidate, event_objects)
         assert store.read_snapshot().revision == 1
 
 
@@ -156,12 +172,21 @@ def test_concurrent_cas_contention_has_no_lost_updates(tmp_path: Path) -> None:
     # commit lands, so contention is an asserted fact, not a scheduling accident.
     def commit_once() -> None:
         nonlocal conflicts
+        name = f"worker-{threading.get_ident()}"
         with Store.open(root) as store:
             current = store.read_snapshot()
             barrier.wait()
             while True:
+                decision = decide(current, SpecifyUnit(name, "v1"))
+                assert isinstance(decision, Accepted)
                 try:
-                    store.commit(Snapshot(revision=current.revision + 1))
+                    commit_events(
+                        store,
+                        current,
+                        decision.events,
+                        actor="test",
+                        run_id="",
+                    )
                 except CasConflict:
                     with conflict_lock:
                         conflicts += 1

@@ -52,6 +52,8 @@ from vouch_mk2.store import (
     encode_evidence_event,
     encode_snapshot,
 )
+from vouch_mk2.verify import run_artifact_checks
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 CRITERIA = LaunchCriteria(("healthy",), "1h", ("errors",), "ops")
 
@@ -152,12 +154,14 @@ def test_p1_migration_refuses_structurally_invalid_candidate_before_touching_tar
 
 def test_p2_chain_walk_rejects_incoherent_red_that_passed(tmp_path: Path) -> None:
     from vouch_mk2.core import RecordEvidence
-    from vouch_mk2.verify import run_artifact_checks
     from vouch_mk2.ir import mk2
     from vouch_mk2.ir.schema import Verdict
 
     with Store.init(str(tmp_path / "s")) as store:
-        store.commit(Snapshot(revision=1, units=(_unit("u", status=UnitStatus.SPECIFIED),)))
+        commit_snapshot_fixture(
+            store,
+            Snapshot(revision=1, units=(_unit("u", status=UnitStatus.SPECIFIED),)),
+        )
         # A canonical, correctly content-addressed RED event whose outcome is PASSED.
         bad = EvidenceEvent(UnitRef("u", "v1"), 1, "GENESIS", EvidenceKind.RED, "pytest", EvidenceOutcome.TESTS_PASSED, "t")
         data = encode_evidence_event(bad)
@@ -169,10 +173,10 @@ def test_p2_chain_walk_rejects_incoherent_red_that_passed(tmp_path: Path) -> Non
         from vouch_mk2.core.model import EvidenceHead
         snapshot = store.read_snapshot()
         forged = Snapshot(
-            revision=snapshot.revision + 1, units=snapshot.units,
+            revision=snapshot.revision, units=snapshot.units,
             evidence_heads=(EvidenceHead("u", digest, 1, "GENESIS", "v1"),),
         )
-        store.commit(forged)
+        store.commit(forged, expected_revision=snapshot.revision)
         result = next(r for r in run_artifact_checks(store, forged) if r.check_id == mk2.CHECK_EVIDENCE_CHAINS)
         assert result.verdict is Verdict.FAIL
         assert "coheren" in result.detail or "outcome" in result.detail

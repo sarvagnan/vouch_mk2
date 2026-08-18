@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"DeviationAmended","pack_digest":"","payload":{"amendment_version":"event-log-pack/2@0aaef0d7c8d0422f","deviation_id":"DEV-el-01","impact_set":["event-log"],"release_impact_set":[]},"prev":"80f6e7a662b9ce1de4f624a0df144b9e971235167716d09c6a7585c447f094a0","recorded_at":"2026-08-18T08:37:13+00:00","revision":280,"run_id":""}

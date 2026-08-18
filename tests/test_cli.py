@@ -31,6 +31,7 @@ from vouch_mk2.ir import mk2
 from vouch_mk2.store import Store
 from vouch_mk2.verify import record_evidence
 from vouch_mk2.store.event_log import build_event_records, commit_events
+from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 def init_store(root: Path) -> None:
@@ -42,7 +43,8 @@ def commit_drifted_snapshot(root: Path) -> None:
     # A blocking deviation bound to an in-progress unit: decodable, but
     # unreachable through decide() — the standing checks must catch it.
     with Store.open(str(root)) as store:
-        store.commit(
+        commit_snapshot_fixture(
+            store,
             Snapshot(
                 revision=1,
                 units=(
@@ -61,7 +63,7 @@ def commit_drifted_snapshot(root: Path) -> None:
                         status=DeviationStatus.OPEN,
                     ),
                 ),
-            )
+            ),
         )
 
 

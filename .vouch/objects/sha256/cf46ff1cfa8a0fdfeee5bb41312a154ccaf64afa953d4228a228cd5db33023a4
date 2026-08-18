@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_event_log.py -q","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"1a1b981dc647a757280aa9a720bc44511a885e3b3276a10741390aec767aada1","parent":"5f4417d7bfcafad45f1dc9af4a13a537d42d6fa945c5620240663d69c1c51dd9","recorded_at":"2026-08-18T08:37:14+00:00","sequence":2,"unit":{"name":"event-log","version":"1"}}
