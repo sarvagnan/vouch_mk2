@@ -209,3 +209,31 @@ def test_generated_workflow_is_structurally_sane_without_a_yaml_parser() -> None
     for name in job_names:
         block = re.search(rf"^  {name}:\n(.*?)(?=^  [\w-]+:$|\Z)", jobs_block, re.M | re.S)
         assert block and "runs-on:" in block.group(1), f"job {name} has no runs-on"
+
+
+def test_generated_workflow_parses_as_yaml_with_the_intended_shape() -> None:
+    """Real parse, not the structural floor above. `pyyaml` is a DEV dependency only —
+    the vendored lock stays dependency-free — so CI validates the fragment it hands adopters
+    with an actual parser. Pinned action SHAs were verified against the GitHub API on
+    2026-08-18: actions/checkout@11d5960a… is the v4 tag, actions/setup-python@ece7cb06… is v6.
+    """
+    import yaml
+
+    from vouch_mk2.init import generated_workflow
+
+    document = yaml.safe_load(generated_workflow())
+    jobs = document["jobs"]
+    assert set(jobs) == {"validation", "anchor"}
+    assert jobs["validation"]["permissions"] == {"contents": "read"}
+    assert jobs["anchor"]["permissions"] == {"contents": "write"}
+    assert jobs["anchor"]["needs"] == "validation" or "validation" in jobs["anchor"]["needs"]
+    assert document["concurrency"]["group"]
+    assert document["concurrency"]["cancel-in-progress"] is False
+    checkout = next(s for s in jobs["validation"]["steps"] if "checkout" in str(s.get("uses", "")))
+    assert checkout["with"]["persist-credentials"] is False
+    for job in jobs.values():
+        assert job["runs-on"]
+        for step in job["steps"]:
+            uses = step.get("uses")
+            if uses:
+                assert len(uses.split("@")[1]) == 40, uses
