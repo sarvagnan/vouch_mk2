@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"ci-anchor-closure@1","reason":"unit in progress: closing the CI-anchor loop batch A left open (DEV-cac-01)"},"prev":"0747419711e725aa9ad79864a6a639ffd4815838ff9867182578fb0e45b423f0","recorded_at":"2026-08-18T14:12:11+00:00","revision":359,"run_id":""}

@@ -22,8 +22,15 @@ import sys
 import tempfile
 
 
-def _run(lock: str, *args: str, cwd: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    lock: str,
+    *args: str,
+    cwd: str,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": "", "PYTHONDONTWRITEBYTECODE": "1"}
+    if extra_env is not None:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, lock, *args], cwd=cwd, env=env, capture_output=True, text=True
     )
@@ -122,6 +129,67 @@ def _drive_lifecycle(lock: str, project: str) -> None:
     verb("record-formal-certificate")
 
 
+def _assert_pending_anchor(lock: str, project: str) -> None:
+    check = _run(
+        lock, "check", "--ci", "--root", ".vouch", "--project", ".", cwd=project
+    )
+    _step("check --ci (local anchor pending)", check, expect=1)
+    mechanical_not_checked = [
+        line
+        for line in check.stdout.splitlines()
+        if line.startswith("NOT-CHECKED")
+        and line.split()[1].startswith("check.")
+    ]
+    if (
+        "composed: NOT-CHECKED" not in check.stdout
+        or len(mechanical_not_checked) != 1
+        or "check.evidence-anchors" not in mechanical_not_checked[0]
+        or "no workflow run claim" not in mechanical_not_checked[0]
+    ):
+        print(check.stdout)
+        print(
+            "expected composed: NOT-CHECKED with exactly one mechanical row "
+            "for check.evidence-anchors: no workflow run claim"
+        )
+        raise SystemExit(1)
+    print(
+        "[walkthrough] anchor pending: composed: NOT-CHECKED, exactly 1 mechanical "
+        "NOT_CHECKED (check.evidence-anchors: no workflow run claim)"
+    )
+
+
+def _simulate_ci_anchor(lock: str, project: str) -> None:
+    ci_env = {"GITHUB_RUN_ID": "walkthrough-simulated-ci-run"}
+
+    def ci_verb(name: str, *args: str) -> None:
+        _step(
+            f"{name} (simulated CI run)",
+            _run(
+                lock,
+                name,
+                "--root",
+                ".vouch",
+                *args,
+                cwd=project,
+                extra_env=ci_env,
+            ),
+        )
+
+    ci_verb(
+        "record-evidence",
+        "--unit",
+        "core@v1",
+        "--kind",
+        "refactor",
+        "--",
+        sys.executable,
+        "-c",
+        "raise SystemExit(0)",
+    )
+    ci_verb("advance-anchor", "--unit-name", "core")
+    ci_verb("record-formal-certificate")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--lock", required=True)
@@ -158,6 +226,16 @@ def main() -> int:
     _drive_lifecycle(lock, project)
     _step("generate map", _run(lock, "generate", "--root", ".vouch", cwd=project))
     _step("emit-context", _run(lock, "emit-context", "--root", ".vouch", cwd=project))
+    _assert_pending_anchor(lock, project)
+    _simulate_ci_anchor(lock, project)
+    _step(
+        "regenerate map after simulated CI run",
+        _run(lock, "generate", "--root", ".vouch", cwd=project),
+    )
+    _step(
+        "emit-context after simulated CI run",
+        _run(lock, "emit-context", "--root", ".vouch", cwd=project),
+    )
     check = _run(
         lock, "check", "--ci", "--root", ".vouch", "--project", ".", cwd=project
     )

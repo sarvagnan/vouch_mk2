@@ -93,6 +93,26 @@ def test_mk2_ci_advances_anchors_before_asserting_its_own_store_is_clean() -> No
     assert anchor_at < dogfood_at, "anchors must be advanced before the dogfood step asserts no mechanical NOT-CHECKED"
 
 
+def test_the_suite_can_pass_before_ci_has_anchored(tmp_path: Path) -> None:
+    """pack/2 (DEV-cac-01): `pytest` runs BEFORE the anchor step, so any test that reads mk2's
+    own store must tolerate exactly one pending-anchor row — otherwise CI goes red at the test
+    gate and never reaches the job that would resolve it. It must still refuse everything else.
+    """
+    text = (ROOT / "tests" / "test_cli.py").read_text()
+    assert "no workflow run claim" in text, "the dogfood tests must name the one row they tolerate"
+    # And the tolerance must be exactly that: a planted FAIL is still caught.
+    from vouch_mk2.ir import mk2
+    from vouch_mk2.ir.schema import Verdict
+    from vouch_mk2.store import Store
+    from vouch_mk2.verify import run_artifact_checks
+
+    with Store.open(str(ROOT / ".vouch"), read_only=True) as store:
+        rows = {r.check_id: r for r in run_artifact_checks(store, store.read_snapshot())}
+    pending = rows[mk2.CHECK_EVIDENCE_ANCHORS]
+    assert pending.verdict is Verdict.NOT_CHECKED and "run claim" in pending.detail
+    assert all(r.verdict is not Verdict.FAIL for r in rows.values()), "no FAIL row may be tolerated"
+
+
 def test_mk2_ci_still_refuses_any_mechanical_not_checked_row() -> None:
     # guard: the strict dogfood assertion must survive this unit — it is the D-10 promise.
     text = CI.read_text()

@@ -738,6 +738,13 @@ state" obligation D-16 already states.
   workflow run N" — verifiable against the run URL, not asserted. Rejected: an observation
   artifact imported later (a second trust root); dropping the CI meaning (would make `ci` mode a
   rename of today's convention).
+
+**CI-anchor closure note (2026-08-18, unit `ci-anchor-closure@1`).** At anchor mode `ci`,
+no project composes PASS until a real CI run has advanced its current evidence anchor, including
+mk2 itself. A locally advanced anchor has no workflow-run claim and is therefore honestly
+`NOT_CHECKED`; lowering the anchor mode to conceal that state would bend the gate, which D-11
+forbids. The first eligible CI run records its run-ID claim and resolves the row.
+
 - **Python (B4).** 3.14 stays; it is stated in README, the quickstart, `init`'s output, the
   generated workflow (`actions/setup-python` with 3.14), and a bootstrap message in the lock that
   says "Vouch requires Python 3.14+" instead of a `SyntaxError` on older interpreters.

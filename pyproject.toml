@@ -53,6 +53,7 @@ forbidden_modules = ["vouch_mk2.store"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["slow: longer-running end-to-end acceptance probes"]
 
 [dependency-groups]
 dev = [

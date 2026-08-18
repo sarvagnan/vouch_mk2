@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-cac-01","deviation_type":"pack-defect","unit":{"name":"ci-anchor-closure","version":"1"}},"prev":"3cee7782f54ef4b23ae73480c2d6911606afd87cd62094c088d51e544bd0696e","recorded_at":"2026-08-18T12:47:01+00:00","revision":349,"run_id":""}

@@ -15,7 +15,13 @@ R2 `.github/workflows/ci.yml` (mk2's OWN workflow, hand-maintained — not the f
    request (same guard shape as the generated fragment); advances every unit whose head lacks a run
    claim; commits `.vouch/` (state + regenerated projections) with `[skip ci]` and pushes to the
    branch; positioned AFTER the test gates and BEFORE the dogfood step, so the dogfood assertion sees
-   anchors that carry run identities. → `test_mk2_ci_advances_anchors_before_asserting_its_own_store_is_clean`
+   anchors that carry run identities. **pack/2 (DEV-cac-01):** because `uv run pytest` is itself one
+   of those earlier gates, the two dogfood tests in `tests/test_cli.py` must accept a store whose
+   ONLY mechanical NOT-CHECKED row is `check.evidence-anchors` "no workflow run claim", and must
+   still refuse any FAIL row or any other NOT-CHECKED row — otherwise CI goes red at the test gate
+   and never reaches the job that resolves it. This is D-10's promise restated against the anchor
+   rule, not a weakening of it.
+   → `test_mk2_ci_advances_anchors_before_asserting_its_own_store_is_clean`, `test_the_suite_can_pass_before_ci_has_anchored`
 R3 (guard) The dogfood step keeps its strict assertion — no mechanical NOT-CHECKED row in mk2's own
    store — unweakened. → `test_mk2_ci_still_refuses_any_mechanical_not_checked_row`
 R4 `scripts/walkthrough.py` demonstrates BOTH states of the anchor rule on its scratch project:

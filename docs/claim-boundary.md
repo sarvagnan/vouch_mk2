@@ -63,6 +63,11 @@ person, workflow, repository, or event. No check reports an actor as verified.
 The caller's environment asserted the run-ID claim. A human can verify it
 against the workflow run URL; Vouch never opens that URL or verifies the claim.
 
+In operator terms, a project in anchor mode `ci` remains composed `NOT_CHECKED` until a real CI run
+advances the current evidence anchor. A local advance cannot supply that workflow-run claim:
+`check.evidence-anchors` reports `no workflow run claim` honestly. One eligible CI run records
+the claim and resolves the row; lowering the anchor mode would hide the stated trust boundary.
+
 The event log is authoritative; `state.json` is a derived cache. A mechanical
 `check.event-log` walk resolves every content-addressed record back to genesis,
 checks adjacent revisions and links, replays every recorded event through

@@ -210,6 +210,12 @@ python3 vouch.lock set-anchor-mode --root .vouch --mode ci
 GITHUB_RUN_ID=123456 python3 vouch.lock advance-anchor --root .vouch --unit-name greeter
 ```
 
+Consequently, in anchor mode `ci`, no project can compose `PASS` until a real CI run advances
+its current evidence anchor. Before that first run, even a local `advance-anchor` leaves
+`check.evidence-anchors` honestly `NOT_CHECKED` with `no workflow run claim`; this is expected,
+not a reason to lower the anchor mode. One eligible CI run records the run-ID claim and resolves
+the row.
+
 The tier governs only what Vouch can mechanically check. Everything else in the tier matrix
 appears in `check` as an organizational NOT-CHECKED row naming the tier and the control — a
 declared tier never makes a report imply a control was checked.

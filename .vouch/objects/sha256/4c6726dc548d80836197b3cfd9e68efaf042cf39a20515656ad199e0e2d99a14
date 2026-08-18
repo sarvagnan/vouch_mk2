@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"UnitRespecified","pack_digest":"","payload":{"gate":{"checks":[{"obligation_id":"gate.unblock.no-blocking-deviations","verdict":"pass"}],"transition":"invalidated->specified"},"name":"ci-anchor-closure"},"prev":"28ace103439399dab613b27a9dff4b4f51132085fe5270a88c5739b0eb534edc","recorded_at":"2026-08-18T12:47:01+00:00","revision":354,"run_id":""}

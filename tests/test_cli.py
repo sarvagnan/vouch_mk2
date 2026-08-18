@@ -339,7 +339,35 @@ def test_cli_formal_record_requires_explicit_root(
     assert "requires --root" in captured.err
 
 
-def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: Path) -> None:
+def _assert_clean_or_pending_ci_anchor(exit_code: int, output: str) -> None:
+    mechanical_fail = [
+        line
+        for line in output.splitlines()
+        if line.startswith("FAIL") and line.split()[1].startswith("check.")
+    ]
+    assert mechanical_fail == [], "the dogfood store must refuse every mechanical FAIL row"
+
+    mechanical_not_checked = [
+        line
+        for line in output.splitlines()
+        if line.startswith("NOT-CHECKED") and line.split()[1].startswith("check.")
+    ]
+    if mechanical_not_checked:
+        assert len(mechanical_not_checked) == 1
+        pending = mechanical_not_checked[0]
+        assert pending.split()[1] == mk2.CHECK_EVIDENCE_ANCHORS
+        assert "no workflow run claim" in pending
+        assert (exit_code, output.rstrip().splitlines()[-1]) == (
+            1,
+            "composed: NOT-CHECKED",
+        )
+    else:
+        assert (exit_code, output.rstrip().splitlines()[-1]) == (0, "composed: PASS")
+
+
+def test_store_checked_out_without_runtime_lock_file_opens_and_checks(
+    tmp_path: Path, capsys: CaptureFixture[str]
+) -> None:
     # A store checked out from version control arrives WITHOUT .lock (it is
     # gitignored as a runtime primitive). Read verbs must not create it — this
     # is exactly the shape CI sees for the committed dogfood store.
@@ -350,7 +378,8 @@ def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: 
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".lock"))
     assert not (dst / ".lock").exists()
     # A copied store has no project context; at tier standard the pack-files check needs it.
-    assert main(["check", "--ci", "--root", str(dst), "--project", str(src.parent)]) == 0
+    exit_code = main(["check", "--ci", "--root", str(dst), "--project", str(src.parent)])
+    _assert_clean_or_pending_ci_anchor(exit_code, capsys.readouterr().out)
     assert not (dst / ".lock").exists()
     # A planted symlink at .lock is still refused, not followed.
     (dst / ".lock").symlink_to(dst / "state.json")
@@ -358,19 +387,15 @@ def test_store_checked_out_without_runtime_lock_file_opens_and_checks(tmp_path: 
 
 
 def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[str]) -> None:
-    # D-10: mk2's own committed store must pass check --ci with zero mechanical
-    # NOT_CHECKED and every organizational row visibly NOT_CHECKED. Tier controls
-    # deliberately render one row per control so none is hidden in a long detail.
+    # D-10: mk2's own committed store must be clean, or clean except for the one
+    # pending CI anchor, and every organizational row must be visibly NOT_CHECKED.
+    # Tier controls deliberately render one row per control so none is hidden in
+    # a long detail.
     root = Path(__file__).resolve().parents[1] / ".vouch"
     assert (root / "state.json").exists(), "the dogfood store must be committed"
-    assert main(["check", "--ci", "--root", str(root)]) == 0
+    exit_code = main(["check", "--ci", "--root", str(root)])
     out = capsys.readouterr().out
-    assert out.rstrip().endswith("composed: PASS")
-    mechanical_not_checked = [
-        line for line in out.splitlines()
-        if line.startswith("NOT-CHECKED") and line.split()[1].startswith("check.")
-    ]
-    assert mechanical_not_checked == []
+    _assert_clean_or_pending_ci_anchor(exit_code, out)
     org_rows = [line for line in out.splitlines() if line.startswith("NOT-CHECKED") and "org." in line]
     tier_rows = [line for line in org_rows if "org.tier-controls" in line]
     assert len(org_rows) == 5 + len(tier_rows)
