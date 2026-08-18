@@ -130,7 +130,11 @@ status of a process this verb spawned, at the time it spawned it". The child
 inherits the caller's environment and working directory. This is not a claim that
 the argv names a test runner, that the runner is honest, or that its exit status
 truthfully represents a test suite. Recording before acceptance is frozen is
-refused. At `standard` and `high`, `gate.dod.current-pack-green` refuses publication
+refused. The exact unit ref, acceptance test-set digest, and store revision are captured before
+the command runs. After it exits, recording re-enters the writer lock and `decide()` refuses
+`evidence.pack-moved` if that unit ref is no longer current or its test-set digest changed; the
+observed outcome is never rebound to the replacement pack. An unrelated revision bump alone does
+not refuse the record. At `standard` and `high`, `gate.dod.current-pack-green` refuses publication
 unless the current pack's test-set digest has RED followed by GREEN and the latest
 evidence for that test set is green; a later refactor preserves that result, while a
 later RED invalidates it. Legacy pack format 1 uses its whole inventory digest, so its

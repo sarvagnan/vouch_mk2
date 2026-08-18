@@ -39,3 +39,15 @@ R4 `docs/claim-boundary.md` (and the quickstart where evidence is introduced) st
 - Do not touch `.vouch/`, README's test-count line, git. Pyrefly strict; import-linter kept; every
   pre-existing test green. New test functions for anything the pack does not cover (a superseded or
   re-versioned unit mid-run, a revision bump that must NOT refuse).
+
+## Amendment pack/2 (DEV-ea-01, pack-defect, adjudicated amend)
+
+Raised by the implementer. R3's acceptance case built its noisy child as an inline
+`python -c` program containing literal newlines, which `valid_command_line` refuses on ingress
+(`evidence.command-line-invalid`) — so the test failed on an unrelated, correct contract rather
+than on buffering. The child program now lives in a file and the argv carries no control
+characters; the recorded command line stays verbatim and the control-character rejection pinned
+by `tests/test_lifecycle_cli_regressions.py` is untouched. R3 is otherwise unchanged. The same amendment strengthens the case to DISCRIMINATE streaming
+from buffering: 64 MiB arriving after the child exits proves only forwarding, which a buffering
+implementation also satisfies. The child now emits a marker and blocks; the marker must already
+be at stderr while the child is still running.

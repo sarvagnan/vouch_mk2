@@ -36,6 +36,7 @@ from vouch_mk2.core import (
     Refused,
     Snapshot,
     Tier,
+    UnitStatus,
     UnitRef,
     decide,
 )
@@ -878,6 +879,14 @@ _SECRET_OPTIONS = frozenset(
 _OPAQUE_SECRET = re.compile(r"(?=.{24,}$)(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9_-]+")
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _EvidenceCapture:
+    unit: UnitRef
+    test_set_digest: str
+    revision: int
+    enforce_current: bool
+
+
 def _secret_looking_command(command_argv: Sequence[str]) -> bool:
     for index, argument in enumerate(command_argv):
         lowered = argument.lower()
@@ -895,6 +904,25 @@ def _secret_looking_command(command_argv: Sequence[str]) -> bool:
     return False
 
 
+def _stream_child_stdout(command_argv: Sequence[str]) -> int:
+    process = subprocess.Popen(command_argv, stdout=subprocess.PIPE)
+    child_stdout = process.stdout
+    if child_stdout is None:  # pragma: no cover - guaranteed by stdout=PIPE
+        raise RuntimeError("child stdout pipe was not created")
+    binary_stderr = getattr(sys.stderr, "buffer", None)
+    try:
+        while chunk := child_stdout.read(64 * 1024):
+            if binary_stderr is None:
+                sys.stderr.write(chunk.decode("utf-8", errors="replace"))
+                sys.stderr.flush()
+            else:
+                binary_stderr.write(chunk)
+                binary_stderr.flush()
+    finally:
+        child_stdout.close()
+    return process.wait()
+
+
 def _record_evidence_handler(namespace: argparse.Namespace) -> int:
     command_argv = cast(list[str], namespace.command_argv)
     if not command_argv:
@@ -907,16 +935,32 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     try:
-        with Store.open(namespace.root, read_only=True) as store:
-            store.read_snapshot()
+        with Store.open(namespace.root) as store:
+            with store.write_locked():
+                snapshot = store.read_snapshot()
+                requested_unit = cast(UnitRef, namespace.unit)
+                resolved = snapshot.unit_ref(requested_unit)
+                capture = _EvidenceCapture(
+                    unit=requested_unit if resolved is None else resolved.ref(),
+                    test_set_digest=(
+                        "" if resolved is None else resolved.acceptance_test_set_digest
+                    ),
+                    revision=snapshot.revision,
+                    enforce_current=(
+                        resolved is not None
+                        and resolved.status is not UnitStatus.SUPERSEDED
+                        and resolved.status is not UnitStatus.SPECIFIED
+                        and bool(resolved.acceptance_pack_version)
+                    ),
+                )
     except StoreError as error:
         print(f"vouch-mk2: {error}", file=sys.stderr)
         return 2
     try:
-        completed = subprocess.run(
-            command_argv,
-            check=False,
-            stdout=subprocess.PIPE if namespace.json_output else None,
+        returncode = (
+            _stream_child_stdout(command_argv)
+            if namespace.json_output
+            else subprocess.run(command_argv, check=False).returncode
         )
     except OSError as error:
         print(
@@ -924,29 +968,20 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    if namespace.json_output and completed.stdout:
-        child_stdout = cast(bytes, completed.stdout)
-        stream = getattr(sys.stderr, "buffer", None)
-        if stream is None:
-            sys.stderr.write(child_stdout.decode("utf-8", errors="replace"))
-            sys.stderr.flush()
-        else:
-            stream.write(child_stdout)
-            stream.flush()
-    if completed.returncode < 0:
+    if returncode < 0:
         print(
             "vouch-mk2: record-evidence refused: child produced no verdict "
-            f"(terminated by signal {-completed.returncode})",
+            f"(terminated by signal {-returncode})",
             file=sys.stderr,
         )
         return 2
     outcome = (
         EvidenceOutcome.TESTS_PASSED
-        if completed.returncode == 0
+        if returncode == 0
         else EvidenceOutcome.TESTS_FAILED
     )
     kind = EvidenceKind(namespace.kind)
-    unit = cast(UnitRef, namespace.unit)
+    unit = capture.unit
     try:
         with Store.open(namespace.root) as store:
             with store.write_locked():
@@ -954,7 +989,6 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                 head = snapshot.evidence_head_ref(unit)
                 sequence = 1 if head is None else head.head_sequence + 1
                 parent = "GENESIS" if head is None else head.head
-                resolved = snapshot.unit_ref(unit)
                 event = EvidenceEvent(
                     unit=unit,
                     sequence=sequence,
@@ -965,17 +999,17 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                     recorded_at=datetime.datetime.now(datetime.UTC).isoformat(
                         timespec="seconds"
                     ),
-                    pack_digest=(
-                        ""
-                        if resolved is None
-                        else resolved.acceptance_test_set_digest
-                    ),
+                    pack_digest=capture.test_set_digest,
                 )
                 digest = record_evidence(
                     store,
                     event,
                     actor=namespace.actor,
                     run_id=ci_run_id(),
+                    captured_pack_digest=(
+                        capture.test_set_digest if capture.enforce_current else None
+                    ),
+                    captured_revision=capture.revision,
                 )
                 revision = store.read_snapshot().revision
     except RefusedError as error:

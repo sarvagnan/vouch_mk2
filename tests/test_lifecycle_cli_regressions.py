@@ -546,8 +546,10 @@ def test_cli_never_presents_store_errors_as_policy_refusals(
         *,
         actor: str | None = None,
         run_id: str = "",
+        captured_pack_digest: str | None = None,
+        captured_revision: int | None = None,
     ) -> str:
-        del actor, run_id
+        del actor, run_id, captured_pack_digest, captured_revision
         raise StoreError("disk unavailable: refused: not a policy code")
 
     monkeypatch.setattr(cli_module, "record_evidence", fail_infrastructure)

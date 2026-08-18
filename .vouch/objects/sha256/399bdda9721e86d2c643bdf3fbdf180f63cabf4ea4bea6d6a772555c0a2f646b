@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/evidence-atomicity-1.spec.md","role":"spec","sha256":"b6ae28c3e4a7d224abe25ad58cf4cc2bf5baf9aad3d8fbbf5f48748407a5f07f","size":3825},{"path":"tests/test_evidence_atomicity.py","role":"test","sha256":"e7dc00861a83a1683d1dccc07a97df5431bb8d223593abc7b52d6736b9260413","size":8525}],"pack_format":2}

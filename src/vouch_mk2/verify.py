@@ -1112,12 +1112,22 @@ def record_evidence(
     *,
     actor: str | None = None,
     run_id: str = "",
+    captured_pack_digest: str | None = None,
+    captured_revision: int | None = None,
 ) -> str:
     with store.write_locked():
         snapshot = store.read_snapshot()
         data = encode_evidence_event(event)
         digest = digest_of(ArtifactKind.EVIDENCE, data)
-        decision = decide(snapshot, RecordEvidence(event, digest))
+        decision = decide(
+            snapshot,
+            RecordEvidence(
+                event,
+                digest,
+                captured_pack_digest=captured_pack_digest,
+                captured_revision=captured_revision,
+            ),
+        )
         if not isinstance(decision, Accepted):
             raise RefusedError(decision.violations)
         commit_events(

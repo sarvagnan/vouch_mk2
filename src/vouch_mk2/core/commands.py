@@ -161,6 +161,8 @@ class RecordEvidence:
     ir_command: ClassVar[str] = mk2.CMD_RECORD_EVIDENCE
     event: EvidenceEvent
     event_digest: str
+    captured_pack_digest: str | None = None
+    captured_revision: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

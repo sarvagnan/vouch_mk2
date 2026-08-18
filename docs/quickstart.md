@@ -82,8 +82,11 @@ There is no flag to type an outcome by hand. What Vouch claims about this record
 the recorded outcome is the exit status of a process this verb spawned, at the time it
 spawned it. It does not claim the command was a test runner, or that the runner was honest —
 that is your harness's job. Recording is refused until the unit has a frozen acceptance
-pack, and each record binds the current pack's test-set digest read while the store is
-locked. Format-2 inventories mark `--pack-test-file` entries as executable tests and
+pack. The exact unit ref, test-set digest, and store revision are captured before the command
+runs. After the child exits, Vouch re-enters the store lock and refuses `evidence.pack-moved`
+instead of rebinding the outcome if a concurrent pack change, supersession, or re-versioning
+moved that unit or digest; an unrelated revision bump does not refuse it. Format-2 inventories
+mark `--pack-test-file` entries as executable tests and
 `--pack-file` entries as specs; legacy format-1 packs keep binding the whole inventory.
 
 The pack test fails now, because `greeter` does not exist yet. That is the point: a `red`

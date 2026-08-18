@@ -196,6 +196,10 @@ def _valid_digest(digest: str) -> bool:
     return len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)
 
 
+def _short_digest(digest: str) -> str:
+    return digest[:16] if digest else "<none>"
+
+
 # --- gate evaluation -----------------------------------------------------------
 
 
@@ -1010,6 +1014,41 @@ def _decide_record_evidence(
 ) -> Decision:
     event = command.event
     unit = snapshot.unit_ref(event.unit)
+    captured_pack_digest = command.captured_pack_digest
+
+    # The CLI captures this digest before it spawns the evidence command. Keep
+    # the comparison in the pure decision boundary so every caller supplying a
+    # capture gets the same atomicity guarantee under the commit lock.
+    if captured_pack_digest is not None:
+        if event.pack_digest != captured_pack_digest:
+            return _refuse(
+                "evidence.pack-mismatch",
+                "evidence event does not bind the acceptance test-set digest "
+                "captured before its command ran",
+            )
+        if (
+            unit is None
+            or unit.status is UnitStatus.SUPERSEDED
+            or unit.status is UnitStatus.SPECIFIED
+            or not unit.acceptance_pack_version
+            or unit.acceptance_test_set_digest != captured_pack_digest
+        ):
+            current_unit = snapshot.unit(event.unit.name)
+            current_digest = (
+                "" if current_unit is None else current_unit.acceptance_test_set_digest
+            )
+            current_binding = (
+                "missing"
+                if current_unit is None
+                else f"{current_unit.ref().label()} ({current_unit.status.value})"
+            )
+            return _refuse(
+                "evidence.pack-moved",
+                f"evidence for {event.unit.label()!r} captured test-set "
+                f"{_short_digest(captured_pack_digest)} before the command ran; "
+                f"current binding is {current_binding!r} with test-set "
+                f"{_short_digest(current_digest)}",
+            )
     # Evidence may bind only the CURRENT record. Heads are exact NAME@VERSION
     # bindings, so superseded history stays inspectable but inert (D-9/D-17).
     if unit is None or unit.status is UnitStatus.SUPERSEDED:

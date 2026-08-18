@@ -114,31 +114,61 @@ def test_evidence_binds_the_digest_captured_before_the_command_ran(tmp_path: Pat
 
 
 def test_json_mode_does_not_buffer_the_child_output_in_memory(tmp_path: Path) -> None:
+    """pack/2 (DEV-ea-01): this must DISCRIMINATE streaming from buffering — 64 MiB arriving at
+    the end proves only that the bytes were forwarded, which a buffering implementation also
+    does. The child emits a marker, then blocks until released: the marker must already be at
+    stderr while the child is still running. Then a 64 MiB body checks nothing accumulates.
+    """
     project, root = _frozen(tmp_path)
-    lock = ROOT / "vouch.lock"
-    if not lock.exists():
-        from vouch_mk2.lock import build_lock
+    from vouch_mk2.lock import build_lock
 
-        lock = tmp_path / "vouch.lock"
-        lock.write_bytes(build_lock(str(ROOT / "src")))
-    # 64 MiB of child stdout: a buffering implementation grows by that much. stderr goes to a
-    # file so this test does not itself hold the output in memory.
-    noisy = [sys.executable, "-c",
-             "import sys\nblock='x'*65536\nfor _ in range(1024): sys.stdout.write(block)\nsys.stdout.flush()\nraise SystemExit(1)"]
+    lock = tmp_path / "vouch.lock"
+    lock.write_bytes(build_lock(str(ROOT / "src")))
+    # The program lives in a FILE: an inline `python -c` carries literal newlines in argv, which
+    # `valid_command_line` refuses on ingress — a correct, unrelated contract.
+    release = tmp_path / "release"
+    script = tmp_path / "noisy.py"
+    script.write_text(
+        "import sys, time, pathlib\n"
+        "sys.stdout.write('MARKER' + 'y' * 65536)\n"
+        "sys.stdout.flush()\n"
+        f"target = pathlib.Path({str(release)!r})\n"
+        "for _ in range(600):\n"
+        "    if target.exists():\n"
+        "        break\n"
+        "    time.sleep(0.05)\n"
+        "block = 'x' * 65536\n"
+        "for _ in range(1024):\n"
+        "    sys.stdout.write(block)\n"
+        "sys.stdout.flush()\n"
+        "raise SystemExit(1)\n"
+    )
     err_path = tmp_path / "child.err"
     out_path = tmp_path / "child.out"
     with err_path.open("wb") as err_file, out_path.open("wb") as out_file:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, str(lock), "record-evidence", "--root", root, "--unit", "u@v1",
-             "--kind", "red", "--json", "--", *noisy],
-            stdout=out_file, stderr=err_file, env={**os.environ, "PYTHONPATH": ""}, check=False,
+             "--kind", "red", "--json", "--", sys.executable, str(script)],
+            stdout=out_file, stderr=err_file, env={**os.environ, "PYTHONPATH": ""},
         )
+        try:
+            arrived = False
+            for _ in range(400):
+                if err_path.stat().st_size >= 65536 and b"MARKER" in err_path.read_bytes()[:128]:
+                    arrived = True
+                    break
+                assert proc.poll() is None, "the child exited before the marker was forwarded"
+                time.sleep(0.05)
+            assert arrived, "the child's early output must reach stderr while it is still running"
+        finally:
+            release.write_text("go")
+            proc.wait(timeout=120)
     assert proc.returncode == 0, err_path.read_bytes()[-2000:]
     import json as _json
 
     document = _json.loads(out_path.read_text())
     assert document["accepted"] is True
-    assert err_path.stat().st_size >= 64 * 1024 * 1024, "the child's stdout must still reach stderr"
+    assert err_path.stat().st_size >= 64 * 1024 * 1024, "the whole body must still arrive"
 
 
 def test_json_mode_still_keeps_stdout_to_exactly_one_document(tmp_path: Path) -> None:

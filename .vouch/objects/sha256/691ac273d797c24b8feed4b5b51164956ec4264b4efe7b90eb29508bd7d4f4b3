@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"UnitRespecified","pack_digest":"","payload":{"gate":{"checks":[{"obligation_id":"gate.unblock.no-blocking-deviations","verdict":"pass"}],"transition":"invalidated->specified"},"name":"evidence-atomicity"},"prev":"414b8c0d52f9ea74a21cb2b9e3c0db46dd182e1df0927a01552ac6f0c691697f","recorded_at":"2026-08-18T17:10:43+00:00","revision":390,"run_id":""}
