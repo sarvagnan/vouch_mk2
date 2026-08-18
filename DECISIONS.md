@@ -797,3 +797,13 @@ is no licence, tag, release artifact, or version command.
 - **Standing rule from #1:** when a defect is found in an instance mk2 maintains for itself, the
   acceptance pack must assert the property on the *generated* artifact adopters receive, not on
   mk2's own copy. Fixing the instance is not fixing the class.
+
+**D-14 amendment note (2026-08-18, DEV-ca-01):** `rebind-pack` also covers the case where a
+published unit's pack asserted a *detail it over-specified* which a later recorded decision
+superseded, provided the unit's own promise is unchanged and a fresh RED would be artificial.
+First instance: `ci-anchor@1`'s pack froze `[skip ci]` and "anchoring must come after the check
+step" — the second of which was the external review's blocker, specified rather than merely
+implemented. D-19 supersedes both; the generated workflow's shape is now owned by
+`generated-ci@1`'s pack, `ci-anchor@1` keeps its real promise (CI advances anchors and commits
+the result), and the rebind's reason names the superseding decision. A changed *promise* still
+requires the full deviation → amend → respecify → re-freeze path; this is narrower than that.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -145,11 +146,12 @@ def test_generated_workflow_uses_a_real_repository_identity_guard(tmp_path: Path
     project.mkdir()
     assert _run("init", "--project", str(project))[0] == 0
     workflow = (project / ".github" / "workflows" / "vouch.yml").read_text()
-    guard = "github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name"
-    assert f"if: github.event_name != 'pull_request' || {guard}" in workflow
+    assert "github.event_name == 'push'" in workflow
+    assert "github.event.repository.fork == false" in workflow
+    assert "github.event.repository.default_branch" in workflow
     assert workflow.index("python vouch.lock formal") < workflow.index("advance-anchor")
     assert "git add -- .vouch/" in workflow
-    assert "git push origin" in workflow and "[skip ci]" in workflow
+    assert "git push origin" in workflow and "[skip ci]" not in workflow
 
 
 def test_system_map_refuses_an_anchor_claim_that_disagrees_with_its_head() -> None:
@@ -175,3 +177,35 @@ def test_system_map_refuses_an_anchor_claim_that_disagrees_with_its_head() -> No
     )
     with pytest.raises(DecodeError, match="anchor_run_claims"):
         decode_system_map(tampered)
+
+
+def test_generated_workflow_is_structurally_sane_without_a_yaml_parser() -> None:
+    """Catch the failure class this project already hit ("Invalid workflow file: ci.yml#L64").
+
+    mk2 has no dependencies, so no YAML parser is available to validate the fragment it hands
+    adopters. This is a floor, not a substitute: full validation happens the first time a real
+    repository runs the workflow. It checks the things that broke before — tabs, a `run: |`
+    block whose body is not more-indented than its key, and unbalanced block scalars.
+    """
+    from vouch_mk2.init import generated_workflow
+
+    text = generated_workflow()
+    lines = text.splitlines()
+    assert "\t" not in text, "tabs are invalid in YAML indentation"
+    assert text.endswith("\n") and not text.startswith("\n")
+    for index, line in enumerate(lines):
+        stripped = line.rstrip()
+        assert stripped == line.rstrip(" "), f"line {index + 1} has trailing whitespace"
+        if re.search(r":\s*[|>][-+]?\s*$", line):
+            key_indent = len(line) - len(line.lstrip())
+            body = next((l for l in lines[index + 1 :] if l.strip()), "")
+            assert len(body) - len(body.lstrip()) > key_indent, (
+                f"line {index + 1}: block scalar body is not more-indented than its key"
+            )
+    # every mapping key at the same depth under `jobs:` is a job; each must declare runs-on
+    jobs_block = text.split("\njobs:\n", 1)[1]
+    job_names = re.findall(r"^  ([\w-]+):$", jobs_block, re.M)
+    assert len(job_names) >= 2
+    for name in job_names:
+        block = re.search(rf"^  {name}:\n(.*?)(?=^  [\w-]+:$|\Z)", jobs_block, re.M | re.S)
+        assert block and "runs-on:" in block.group(1), f"job {name} has no runs-on"

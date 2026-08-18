@@ -5,7 +5,8 @@ from pathlib import Path
 
 from pytest import CaptureFixture
 
-from vouch_mk2.cli import main
+from vouch_mk2.checks import CheckReport, CheckResult
+from vouch_mk2.cli import _only_pending_anchor_is_not_checked, main
 from vouch_mk2.core.model import (
     AnchorMode,
     CiPolicy,
@@ -28,6 +29,7 @@ from vouch_mk2.core import (
     decide,
 )
 from vouch_mk2.ir import mk2
+from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.store import Store
 from vouch_mk2.verify import record_evidence
 from vouch_mk2.store.event_log import build_event_records, commit_events
@@ -37,6 +39,26 @@ from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapsh
 def init_store(root: Path) -> None:
     store = Store.init(str(root))
     store.close()
+
+
+def test_pending_anchor_tolerance_rejects_another_not_checked_row() -> None:
+    report = CheckReport(
+        revision=1,
+        mechanical=(
+            CheckResult(
+                mk2.CHECK_EVIDENCE_ANCHORS,
+                Verdict.NOT_CHECKED,
+                "unit 'u' anchor has no workflow run claim",
+            ),
+            CheckResult(
+                mk2.CHECK_EVENT_LOG,
+                Verdict.NOT_CHECKED,
+                "another mechanical row was not checked",
+            ),
+        ),
+        organizational=(),
+    )
+    assert not _only_pending_anchor_is_not_checked(report, Snapshot())
 
 
 def commit_drifted_snapshot(root: Path) -> None:

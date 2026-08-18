@@ -11,7 +11,7 @@ import pytest
 from pytest import CaptureFixture
 
 from vouch_mk2.cli import main
-from vouch_mk2.init import InitError, InitStatus, init_project
+from vouch_mk2.init import InitError, InitStatus, generated_workflow, init_project
 from vouch_mk2.lock import build_lock
 from vouch_mk2.store import ArtifactKind, digest_of
 
@@ -64,6 +64,14 @@ def test_init_fresh_project_writes_only_closed_set_and_valid_config(tmp_path: Pa
     }
     assert "check --ci" in (project / ".github/workflows/vouch.yml").read_text()
     assert stat.S_IMODE((project / "vouch.lock").stat().st_mode) == 0o755
+
+
+def test_init_writes_exactly_generated_workflow(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    init_project(str(project), LOCK_BYTES)
+    assert (
+        project / ".github/workflows/vouch.yml"
+    ).read_text() == generated_workflow()
 
 
 def test_second_init_refuses_existing_store(tmp_path: Path) -> None:
@@ -197,6 +205,4 @@ def test_init_dangling_github_symlink_is_typed_and_leaves_no_store(tmp_path: Pat
 
 
 def test_generated_workflow_pins_the_lock_digest() -> None:
-    from vouch_mk2.init import _WORKFLOW
-
-    assert b"self-check --expect @.vouch/config.json" in _WORKFLOW
+    assert "self-check --expect @.vouch/config.json" in generated_workflow()

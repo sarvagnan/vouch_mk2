@@ -56,14 +56,17 @@ def _unit_with_evidence(project: Path, root: str, name: str = "u") -> None:
 # ---- R1 ----
 
 
-def test_workflow_anchors_after_checks_and_commits_with_skip_ci(tmp_path: Path) -> None:
+def test_workflow_anchors_and_commits_the_result(tmp_path: Path) -> None:
+    # pack/2 (DEV-ca-01): this test used to require `[skip ci]` and `advance-anchor` AFTER
+    # `check --ci` in the same job. D-19 superseded both: that ordering made an adopter's
+    # workflow permanently red (check exits 1 before the anchor step runs) and a skipped bot
+    # commit can strand a required check. The SHAPE of the generated workflow is owned by
+    # generated-ci@1's pack; this unit's own promise — CI advances anchors and commits the
+    # result — is unchanged and asserted here.
     project, _root = _project(tmp_path)
     workflow = _workflow(project)
     assert "advance-anchor" in workflow, workflow
-    assert "[skip ci]" in workflow, workflow
-    check_at = workflow.index("check --ci")
-    anchor_at = workflow.index("advance-anchor")
-    assert anchor_at > check_at, "anchoring must come after the check step"
+    assert "git commit" in workflow and ".vouch/" in workflow, workflow
 
 
 # ---- R2 ----

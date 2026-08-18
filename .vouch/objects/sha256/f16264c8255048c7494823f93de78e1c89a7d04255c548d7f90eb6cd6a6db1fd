@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_ci_anchor.py -q","evidence_format":2,"kind":"green","outcome":"tests-passed","pack_digest":"32760f42bc1cff235dac2ff5d3d82645ad97359ce63ce66ca869d5f4026b76f3","parent":"1d391b4d44923c22f1efdf4b97317878c4138db715cc9618d6dca1686d30c5b4","recorded_at":"2026-08-18T15:50:37+00:00","sequence":3,"unit":{"name":"ci-anchor","version":"1"}}

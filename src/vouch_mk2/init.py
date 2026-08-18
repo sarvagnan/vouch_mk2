@@ -40,23 +40,28 @@ class _PlannedFile:
     status: InitStatus
 
 
-_WORKFLOW = b"""name: vouch
+_WORKFLOW = """name: vouch
 
 on:
   push:
   pull_request:
 
-permissions:
-  contents: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  check:
+  validation:
+    # Add your own test job to this validation job's `needs:` before adopting it.
+    # needs: [your-test-job]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.head_ref || github.ref }}
-      - uses: actions/setup-python@v6
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.14'
       - name: Verify vouch.lock against the recorded digest
@@ -64,12 +69,23 @@ jobs:
         run: python vouch.lock self-check --expect @.vouch/config.json
       - name: Vouch check
         shell: bash
-        run: python vouch.lock check --ci --root .vouch --project .
+        run: python vouch.lock check --ci --root .vouch --project . --pending-anchor-ok
       - name: Exhaustive Vouch formal check
         shell: bash
         run: python vouch.lock formal
+
+  anchor:
+    needs: validation
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
       - name: Advance evidence anchors and commit projections
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
         shell: bash
         run: |
           python - <<'PY' > "$RUNNER_TEMP/vouch-evidence-heads"
@@ -78,7 +94,8 @@ jobs:
 
           state = json.loads(Path(".vouch/state.json").read_text())
           for head in state["evidence_heads"]:
-              print(head["unit_name"])
+              if not head["anchor_run_id"]:
+                  print(head["unit_name"])
           PY
           while IFS= read -r unit_name; do
             python vouch.lock advance-anchor --root .vouch --unit-name "$unit_name"
@@ -90,9 +107,14 @@ jobs:
           fi
           git config user.name "vouch-anchor-bot"
           git config user.email "vouch-anchor-bot@users.noreply.github.com"
-          git commit -m "vouch: advance evidence anchors [skip ci]"
-          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
+          git commit -m "vouch: advance evidence anchors"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"
 """
+
+
+def generated_workflow() -> str:
+    """Return the exact GitHub Actions workflow fragment written by ``init``."""
+    return _WORKFLOW
 
 
 def _canonical_json(document: object) -> bytes:
@@ -250,7 +272,7 @@ def init_project(
         workflow_plan = _plan_file(
             root,
             ".github/workflows/vouch.yml",
-            _WORKFLOW,
+            generated_workflow().encode("utf-8"),
             0o644,
         )
     except StoreError as error:
@@ -299,4 +321,10 @@ def init_project(
     )
 
 
-__all__ = ["InitError", "InitResult", "InitStatus", "init_project"]
+__all__ = [
+    "InitError",
+    "InitResult",
+    "InitStatus",
+    "generated_workflow",
+    "init_project",
+]

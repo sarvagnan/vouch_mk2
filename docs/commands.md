@@ -5,15 +5,18 @@
 ## check
 
 ```text
-usage: vouch-mk2 check [-h] [--ci] [--json] [--root ROOT] [--project PROJECT]
+usage: vouch-mk2 check [-h] [--ci] [--pending-anchor-ok] [--json] [--root ROOT]
+                       [--project PROJECT]
 
 options:
-  -h, --help         show this help message and exit
-  --ci               enforce and name the store's recorded CI policy
-  --json             emit one JSON report instead of text
-  --root ROOT        store root directory (default: current directory)
-  --project PROJECT  project root for acceptance-pack file verification (default: parent of --root
-                     when its basename is .vouch)
+  -h, --help           show this help message and exit
+  --ci                 enforce and name the store's recorded CI policy
+  --pending-anchor-ok  exit successfully when the only mechanical NOT-CHECKED row is
+                       check.evidence-anchors reporting no workflow run claim
+  --json               emit one JSON report instead of text
+  --root ROOT          store root directory (default: current directory)
+  --project PROJECT    project root for acceptance-pack file verification (default: parent of
+                       --root when its basename is .vouch)
 ```
 
 ## formal

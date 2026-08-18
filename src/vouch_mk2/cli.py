@@ -90,6 +90,7 @@ class _Arguments(argparse.Namespace):
     root: str
     json_output: bool
     ci: bool
+    pending_anchor_ok: bool
     record: bool
     target: str | None
     output: str
@@ -124,6 +125,14 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "enforce and name the store's recorded CI policy"
+        ),
+    )
+    check.add_argument(
+        "--pending-anchor-ok",
+        action="store_true",
+        help=(
+            "exit successfully when the only mechanical NOT-CHECKED row is "
+            "check.evidence-anchors reporting no workflow run claim"
         ),
     )
     check.add_argument(
@@ -391,6 +400,30 @@ def _present_json(report: CheckReport) -> None:
         "composed": report.composed().value,
     }
     print(json.dumps(payload, sort_keys=True))
+
+
+def _only_pending_anchor_is_not_checked(
+    report: CheckReport, snapshot: Snapshot
+) -> bool:
+    """Whether a report is clean apart from unclaimed CI evidence anchors."""
+    if any(result.verdict is Verdict.FAIL for result in report.organizational):
+        return False
+    if any(result.verdict is Verdict.FAIL for result in report.mechanical):
+        return False
+    not_checked = tuple(
+        result
+        for result in report.mechanical
+        if result.verdict is Verdict.NOT_CHECKED
+    )
+    if len(not_checked) != 1:
+        return False
+    row = not_checked[0]
+    if row.check_id != "check.evidence-anchors":
+        return False
+    return bool(snapshot.evidence_heads) and all(
+        head.anchored != "GENESIS" and not head.anchor_run_id
+        for head in snapshot.evidence_heads
+    )
 
 
 def _present_formal(run: FormalRun) -> None:
@@ -1308,6 +1341,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         root=".",
         json_output=False,
         ci=False,
+        pending_anchor_ok=False,
         record=False,
         target=None,
         output="",
@@ -1652,4 +1686,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         _present_json(report)
     else:
         _present_text(report)
-    return 0 if report.composed() is Verdict.PASS else 1
+    if report.composed() is Verdict.PASS:
+        return 0
+    if parsed.pending_anchor_ok and _only_pending_anchor_is_not_checked(
+        report, snapshot
+    ):
+        return 0
+    return 1
