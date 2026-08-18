@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"UnitSpecified","pack_digest":"","payload":{"depends_on":["generated-ci","init-recovery"],"name":"ci-adoption-closure","version":"1"},"prev":"d0fff0e9e09bf08fed0b428adc3cd72398b194cc48d5b80d3a75152336ecfb8b","recorded_at":"2026-08-18T20:16:23+00:00","revision":420,"run_id":""}
