@@ -18,8 +18,10 @@ from vouch_mk2.core import (
     Accepted,
     AnchorMode,
     EvidenceEvent,
+    EventRecord,
     EvidenceHead,
     EvidenceKind,
+    PreLogHistoryRecorded,
     PackRebound,
     RecordEvidence,
     RecordFormalCertificate,
@@ -48,6 +50,7 @@ from vouch_mk2.store import (
     StoreError,
     decode_bundle_inventory,
     decode_evidence_event,
+    decode_event_record,
     decode_formal_certificate,
     decode_pack_inventory,
     decode_snapshot,
@@ -63,6 +66,12 @@ from vouch_mk2.store import (
 )
 from vouch_mk2.store.codec import decode_raw_document
 from vouch_mk2.store.upgrade import upgrade_document
+from vouch_mk2.store.event_log import (
+    build_event_records,
+    ci_run_id,
+    commit_events,
+    default_actor,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +79,91 @@ class _ChainWalk:
     head: EvidenceHead
     events: tuple[tuple[str, EvidenceEvent], ...]
     error: str
+
+
+def _check_event_log(store: Store, snapshot: Snapshot) -> CheckResult:
+    """Resolve and replay the authoritative event chain from the empty state."""
+    if not snapshot.event_head:
+        if snapshot == Snapshot():
+            return CheckResult(mk2.CHECK_EVENT_LOG, Verdict.PASS, "empty genesis")
+        return CheckResult(
+            mk2.CHECK_EVENT_LOG,
+            Verdict.FAIL,
+            f"revision {snapshot.revision}: non-empty snapshot has no event head",
+        )
+
+    reverse_chain: list[tuple[str, EventRecord]] = []
+    digest = snapshot.event_head
+    expected_revision = snapshot.revision
+    visited: set[str] = set()
+    while digest != "GENESIS":
+        if digest in visited:
+            return CheckResult(
+                mk2.CHECK_EVENT_LOG,
+                Verdict.FAIL,
+                f"revision {expected_revision}: event chain cycle at {digest!r}",
+            )
+        visited.add(digest)
+        try:
+            record = decode_event_record(
+                store.get_object(ArtifactKind.EVENT, digest)
+            )
+        except StoreError as error:
+            return CheckResult(
+                mk2.CHECK_EVENT_LOG,
+                Verdict.FAIL,
+                f"revision {expected_revision}: missing or invalid event {digest!r}: {error}",
+            )
+        if record.revision != expected_revision:
+            return CheckResult(
+                mk2.CHECK_EVENT_LOG,
+                Verdict.FAIL,
+                f"revision {expected_revision}: event records revision {record.revision}",
+            )
+        reverse_chain.append((digest, record))
+        digest = record.prev
+        expected_revision = record.revision - 1
+
+    replay = Snapshot()
+    for record_digest, record in reversed(reverse_chain):
+        try:
+            replay = apply(
+                replay,
+                (record.folded_event,),
+                event_digests=(record_digest,),
+            )
+        except (LookupError, ValueError) as error:
+            return CheckResult(
+                mk2.CHECK_EVENT_LOG,
+                Verdict.FAIL,
+                f"revision {record.revision}: replay refused event: {error}",
+            )
+        if replay.revision != record.revision:
+            return CheckResult(
+                mk2.CHECK_EVENT_LOG,
+                Verdict.FAIL,
+                f"revision {record.revision}: replay produced revision {replay.revision}",
+            )
+
+    replay_without_head = encode_snapshot(replace(replay, event_head=""))
+    committed_without_head = encode_snapshot(replace(snapshot, event_head=""))
+    if replay_without_head != committed_without_head:
+        return CheckResult(
+            mk2.CHECK_EVENT_LOG,
+            Verdict.FAIL,
+            f"revision {snapshot.revision}: replay diverges from committed snapshot",
+        )
+    if replay.event_head != snapshot.event_head:
+        return CheckResult(
+            mk2.CHECK_EVENT_LOG,
+            Verdict.FAIL,
+            f"revision {snapshot.revision}: replay event head does not name the last record",
+        )
+    return CheckResult(
+        mk2.CHECK_EVENT_LOG,
+        Verdict.PASS,
+        f"replayed {len(reverse_chain)} event records through revision {snapshot.revision}",
+    )
 
 
 class RefusedError(StoreError):
@@ -804,6 +898,7 @@ def run_artifact_checks(
         sorted(
             (
                 _check_evidence_chains(snapshot, walks),
+                _check_event_log(store, snapshot),
                 _check_evidence_anchors(snapshot, walks),
                 _check_bundle_inventories(store, snapshot),
                 _check_formal_certificate(store, snapshot),
@@ -888,6 +983,8 @@ def upgrade_store(
     *,
     dry_run: bool,
     published_once: Mapping[str, bool],
+    actor: str | None = None,
+    run_id: str | None = None,
 ) -> UpgradeResult:
     """Validate and apply one format upgrade, then regenerate projections.
 
@@ -922,10 +1019,33 @@ def upgrade_store(
         )
         snapshot = decode_snapshot(encode_document(upgraded))
         snapshot, rebuilt = _rebuild_evidence_head_summaries(store, snapshot)
+        event_objects: tuple[tuple[ArtifactKind, bytes], ...] = ()
+        if (3, 4) in steps:
+            baseline = replace(snapshot, event_head="")
+            marker = PreLogHistoryRecorded(
+                description=(
+                    f"pre-log revisions 1..{baseline.revision}: git history only"
+                ),
+                baseline=baseline,
+            )
+            snapshot, event_objects, _records = build_event_records(
+                Snapshot(),
+                (marker,),
+                actor=default_actor() if actor is None else actor,
+                run_id=ci_run_id() if run_id is None else run_id,
+            )
         encoded = encode_snapshot(snapshot)
         state_upgraded = bool(steps) or encoded != original
         if state_upgraded:
-            store.replace_state_for_upgrade(encoded)
+            if event_objects:
+                store.commit(
+                    snapshot,
+                    objects=event_objects,
+                    expected_revision=snapshot.revision,
+                    allow_format_upgrade=True,
+                )
+            else:
+                store.replace_state_for_upgrade(encoded)
         try:
             emit_system_map(store)
             emit_context(store, None)
@@ -942,7 +1062,13 @@ def upgrade_store(
     )
 
 
-def record_evidence(store: Store, event: EvidenceEvent) -> str:
+def record_evidence(
+    store: Store,
+    event: EvidenceEvent,
+    *,
+    actor: str | None = None,
+    run_id: str = "",
+) -> str:
     with store.write_locked():
         snapshot = store.read_snapshot()
         data = encode_evidence_event(event)
@@ -950,14 +1076,24 @@ def record_evidence(store: Store, event: EvidenceEvent) -> str:
         decision = decide(snapshot, RecordEvidence(event, digest))
         if not isinstance(decision, Accepted):
             raise RefusedError(decision.violations)
-        store.commit(
-            apply(snapshot, decision.events),
+        commit_events(
+            store,
+            snapshot,
+            decision.events,
+            actor=default_actor() if actor is None else actor,
+            run_id=run_id,
             objects=((ArtifactKind.EVIDENCE, data),),
         )
     return digest
 
 
-def record_formal_certificate(store: Store, run: FormalRun | None = None) -> str:
+def record_formal_certificate(
+    store: Store,
+    run: FormalRun | None = None,
+    *,
+    actor: str | None = None,
+    run_id: str = "",
+) -> str:
     if run is None:
         run = run_formal()
     if not passed(run):
@@ -987,8 +1123,12 @@ def record_formal_certificate(store: Store, run: FormalRun | None = None) -> str
             (ArtifactKind.FORMAL_CERTIFICATE, data),
             (ArtifactKind.FORMAL_TABLES, encode_formal_tables(run.tables)),
         )
-        store.commit(
-            apply(snapshot, decision.events),
+        commit_events(
+            store,
+            snapshot,
+            decision.events,
+            actor=default_actor() if actor is None else actor,
+            run_id=run_id,
             objects=formal_objects,
         )
     return digest

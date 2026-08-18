@@ -176,7 +176,7 @@ def test_core_enums_conform_to_ir() -> None:
     assert {tier.value for tier in Tier} == set(MK2.vocabulary("tiers").values)
 
 
-def test_artifact_obligations_are_exactly_six_and_never_gates() -> None:
+def test_artifact_obligations_are_exactly_eight_and_never_gates() -> None:
     artifact_ids = {
         obligation.obligation_id
         for obligation in MK2.obligations
@@ -190,6 +190,7 @@ def test_artifact_obligations_are_exactly_six_and_never_gates() -> None:
         "check.map-freshness",
         "check.context-freshness",
         "check.pack-files-match",
+        "check.event-log",
     }
     bound = {
         gate

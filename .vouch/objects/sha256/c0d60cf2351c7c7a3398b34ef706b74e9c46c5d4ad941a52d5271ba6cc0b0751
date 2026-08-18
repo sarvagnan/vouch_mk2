@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_pack_binding.py -q","evidence_format":2,"kind":"green","outcome":"tests-passed","pack_digest":"eeff245075e4c006e1ba66ba294393701f12092719d026a3852af07b49dabfa7","parent":"e0ce257770c4117dd2573af2a51069a613d27f1cb80655669fc59271c4e11505","recorded_at":"2026-08-18T07:29:35+00:00","sequence":6,"unit":{"name":"pack-binding","version":"1"}}

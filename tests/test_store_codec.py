@@ -96,6 +96,7 @@ def _populated_snapshot() -> Snapshot:
 def _baseline_document() -> dict[str, object]:
     return {
         "anchor_mode": "none",
+        "event_head": "",
         "tier": "lightweight",
         "evidence_heads": [],
         "formal_certificate_digest": "",

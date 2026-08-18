@@ -157,10 +157,19 @@ def _upgrade_2_to_3(document: StateDocument) -> StateDocument:
     return upgraded
 
 
+def _upgrade_3_to_4(document: StateDocument) -> StateDocument:
+    """Add the truthful pre-log sentinel; the store layer records its checkpoint."""
+    upgraded = dict(document)
+    upgraded["event_head"] = ""
+    upgraded["state_format"] = 4
+    return upgraded
+
+
 UPGRADERS: dict[int, Upgrader] = {
     0: _upgrade_0_to_1,
     1: _upgrade_1_to_2,
     2: _upgrade_2_to_3,
+    3: _upgrade_3_to_4,
 }
 
 
@@ -287,7 +296,7 @@ def upgrade_document(
                 + ", ".join(sorted(assertions))
             )
         upgraded = dict(document)
-    if raw_format == CURRENT_STATE_FORMAT:
+    if raw_format == 3:
         upgraded = _repair_pre_extension_format_three(upgraded)
     steps: list[tuple[int, int]] = []
     current = raw_format

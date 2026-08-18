@@ -81,14 +81,14 @@ def test_upgrade_waits_for_the_writer_lock(tmp_path: Path) -> None:
     stdout, stderr = process.communicate(timeout=5)
     assert process.returncode == 0, stderr
     assert "0 -> 1" in stdout
-    assert json.loads((root / "state.json").read_bytes())["state_format"] == 3
+    assert json.loads((root / "state.json").read_bytes())["state_format"] == 4
 
 
 def test_format2_head_upgrade_binds_the_active_ref_without_inventing_results() -> None:
     fixture = Path("tests/fixtures/state-format/format2.golden.json")
     original = json.loads(fixture.read_bytes())
     upgraded, steps = upgrade_document(original)
-    assert steps == [(2, 3)]
+    assert steps == [(2, 3), (3, 4)]
     heads = cast(list[dict[str, object]], upgraded["evidence_heads"])
     by_name = {cast(str, head["unit_name"]): head for head in heads}
     assert by_name["core"]["unit_version"] == "v1"
@@ -132,7 +132,7 @@ def test_format2_upgrade_derives_a_single_superseded_candidate() -> None:
         if unit["name"] == "core":
             unit["status"] = UnitStatus.SUPERSEDED.value
     upgraded, steps = upgrade_document(original)
-    assert steps == [(2, 3)]
+    assert steps == [(2, 3), (3, 4)]
     core = next(
         head
         for head in cast(list[dict[str, object]], upgraded["evidence_heads"])
@@ -352,15 +352,15 @@ def test_projection_failure_reports_committed_upgrade_and_retry_repairs(
     assert main(["upgrade", "--root", str(root)]) == 2
     error = capsys.readouterr().err
     assert (
-        "state upgraded to format 3; projection regeneration failed: "
+        "state upgraded to format 4; projection regeneration failed: "
         "synthetic map failure — run 'vouch-mk2 generate'"
     ) in error
-    assert json.loads((root / "state.json").read_bytes())["state_format"] == 3
+    assert json.loads((root / "state.json").read_bytes())["state_format"] == 4
 
     monkeypatch.setattr(verify_module, "emit_system_map", real_emit_system_map)
     assert main(["upgrade", "--root", str(root)]) == 0
     assert (
-        "already at format 3; projections regenerated"
+        "already at format 4; projections regenerated"
         in capsys.readouterr().out
     )
     with Store.open(str(root), read_only=True) as store:
@@ -383,7 +383,7 @@ def test_already_current_upgrade_repairs_stale_and_missing_projections(
 
     assert main(["upgrade", "--root", str(root)]) == 0
     assert (
-        "already at format 3; projections regenerated"
+        "already at format 4; projections regenerated"
         in capsys.readouterr().out
     )
     with Store.open(str(root), read_only=True) as store:

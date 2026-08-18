@@ -12,7 +12,7 @@ import json
 import os
 import stat
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 from vouch_mk2.checks import MECHANICAL_CHECKS, CheckResult
@@ -24,6 +24,7 @@ from vouch_mk2.core import (
     DeviationStatus,
     DeviationType,
     LaunchCriteria,
+    PreLogHistoryRecorded,
     Release,
     ReleaseArchetype,
     ReleaseState,
@@ -45,6 +46,7 @@ from vouch_mk2.store import (
     decode_snapshot,
     encode_snapshot,
 )
+from vouch_mk2.store.event_log import build_event_records, ci_run_id, default_actor
 
 
 @dataclass(frozen=True, slots=True)
@@ -1060,7 +1062,11 @@ def _require_target(target_root: str) -> str:
 
 
 def apply_migration(
-    plan: MigrationPlan, target_root: str, lock_bytes: bytes | None
+    plan: MigrationPlan,
+    target_root: str,
+    lock_bytes: bytes | None,
+    *,
+    actor: str | None = None,
 ) -> str:
     """Approve one valid plan into a fresh store and persist its report."""
     if plan.refusals:
@@ -1092,7 +1098,24 @@ def apply_migration(
         init_project(target_root, lock_bytes)
         store = Store.open(store_path)
     with store:
-        store.commit(plan.candidate)
+        baseline = replace(plan.candidate, event_head="")
+        marker = PreLogHistoryRecorded(
+            description=(
+                f"pre-log revisions 1..{baseline.revision}: imported Vouch 0.6 history only"
+            ),
+            baseline=baseline,
+        )
+        candidate, event_objects, _records = build_event_records(
+            Snapshot(),
+            (marker,),
+            actor=default_actor() if actor is None else actor,
+            run_id=ci_run_id(),
+        )
+        store.commit(
+            candidate,
+            objects=event_objects,
+            expected_revision=0,
+        )
         store.write_generated("migration-report.md", report)
         return store.generated_path("migration-report.md")
 

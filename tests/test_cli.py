@@ -8,6 +8,7 @@ from pytest import CaptureFixture
 from vouch_mk2.cli import main
 from vouch_mk2.core.model import (
     AnchorMode,
+    CiPolicy,
     Deviation,
     DeviationStatus,
     DeviationType,
@@ -19,10 +20,17 @@ from vouch_mk2.core.model import (
     UnitRef,
     UnitStatus,
 )
-from vouch_mk2.core import Accepted, AdvanceAnchor, SetAnchorMode, apply, decide
+from vouch_mk2.core import (
+    Accepted,
+    AdvanceAnchor,
+    PreLogHistoryRecorded,
+    SetAnchorMode,
+    decide,
+)
 from vouch_mk2.ir import mk2
 from vouch_mk2.store import Store
 from vouch_mk2.verify import record_evidence
+from vouch_mk2.store.event_log import build_event_records, commit_events
 
 
 def init_store(root: Path) -> None:
@@ -59,19 +67,30 @@ def commit_drifted_snapshot(root: Path) -> None:
 
 def commit_evidence_snapshot(root: Path, mode: AnchorMode, *, anchor: bool) -> None:
     with Store.open(str(root)) as store:
-        store.commit(
-            Snapshot(
-                revision=1,
-                units=(
-                    Unit(
-                        "u",
-                        "v1",
-                        UnitStatus.ACCEPTANCE_FROZEN,
-                        acceptance_pack_version="p1",
-                    ),
+        baseline = Snapshot(
+            revision=1,
+            ci_policy=CiPolicy.LEDGER,
+            units=(
+                Unit(
+                    "u",
+                    "v1",
+                    UnitStatus.ACCEPTANCE_FROZEN,
+                    acceptance_pack_version="p1",
                 ),
-            )
+            ),
         )
+        checkpoint, objects, _records = build_event_records(
+            Snapshot(),
+            (
+                PreLogHistoryRecorded(
+                    "pre-log revisions 1..1: test fixture only",
+                    baseline,
+                ),
+            ),
+            actor="test",
+            run_id="",
+        )
+        store.commit(checkpoint, objects=objects, expected_revision=0)
         red_event = EvidenceEvent(
             UnitRef("u", "v1"),
             1,
@@ -97,12 +116,24 @@ def commit_evidence_snapshot(root: Path, mode: AnchorMode, *, anchor: bool) -> N
         snapshot = store.read_snapshot()
         mode_decision = decide(snapshot, SetAnchorMode(mode))
         assert isinstance(mode_decision, Accepted)
-        store.commit(apply(snapshot, mode_decision.events))
+        commit_events(
+            store,
+            snapshot,
+            mode_decision.events,
+            actor="test",
+            run_id="",
+        )
         if anchor:
             snapshot = store.read_snapshot()
             anchor_decision = decide(snapshot, AdvanceAnchor("u"))
             assert isinstance(anchor_decision, Accepted)
-            store.commit(apply(snapshot, anchor_decision.events))
+            commit_events(
+                store,
+                snapshot,
+                anchor_decision.events,
+                actor="test",
+                run_id="",
+            )
 
 
 def test_cli_check_on_fresh_store_passes(
@@ -183,6 +214,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_MAP_FRESHNESS,
         mk2.CHECK_CONTEXT_FRESHNESS,
         mk2.CHECK_PACK_FILES_MATCH,
+        mk2.CHECK_EVENT_LOG,
     ):
         assert check_id in text
     assert main(["check", "--ci", "--json", "--root", str(root)]) == 0
@@ -197,6 +229,7 @@ def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: Captu
         mk2.CHECK_MAP_FRESHNESS,
         mk2.CHECK_CONTEXT_FRESHNESS,
         mk2.CHECK_PACK_FILES_MATCH,
+        mk2.CHECK_EVENT_LOG,
     } <= ids
 
 

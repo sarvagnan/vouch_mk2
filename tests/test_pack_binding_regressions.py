@@ -250,6 +250,7 @@ def test_pack_files_check_is_tier_scoped_before_io_and_defaults_dot_vouch_parent
     pack.write_text("assert False\n")
     root = project / ".vouch"
     Store.init(str(root)).close()
+    assert main(["set-ci-policy", "--root", str(root), "--policy", "ledger"]) == 0
     assert main(["set-tier", "--root", str(root), "--tier", "standard"]) == 0
     assert main(["set-anchor-mode", "--root", str(root), "--mode", "ci"]) == 0
     assert main(["specify", "--root", str(root), "--name", "u", "--version", "1"]) == 0

@@ -21,7 +21,7 @@ evaluator that ran, or the run fails.
 
 | Claim | Mechanism | Threat level |
 |---|---|---|
-| Snapshot consistency | one authoritative `state.json`, CAS on a monotonic revision; objects written before the swap | 1 |
+| Event chronology and derived-snapshot consistency | the authoritative append-only event log is replayed by `check.event-log` through `apply()` and byte-compared with the derived `state.json` cache; event objects are written before the state swap | 1 |
 | Artifact integrity | content-addressed objects; a digest mismatch refuses to load | 1–2 |
 | Reference integrity | every cross-artifact reference is a typed `{kind, digest}` field, resolved or failing | 1 |
 | Schema conformance | one strict decoder per artifact type; unknown field = error, coercion = error | 1–2 |
@@ -45,6 +45,20 @@ while replacing generated files; upgrade holds its outer writer lock through
 regeneration. Orphan-temp cleanup is opportunistic and skipped when a writer
 holds the lock. The MCP transport remains read-only; these verbs do not add a
 remote mutation path.
+
+Every lifecycle event records an actor and a run ID. Both are **claims**: the
+actor is exactly the caller's `--actor` value (defaulting to the OS user), and
+the run ID is exactly the recognized CI-provider environment value when one is
+present. Vouch records both and verifies event structure and replay only. It
+never verifies the actor's identity or that a run ID belongs to the asserted
+person, workflow, repository, or event. No check reports an actor as verified.
+
+The event log is authoritative; `state.json` is a derived cache. A mechanical
+`check.event-log` walk resolves every content-addressed record back to genesis,
+checks adjacent revisions and links, replays every recorded event through
+`apply()` from the empty snapshot, and compares the canonical snapshot bytes.
+Only `event_head` is handled specially: replay sets it to the digest of the last
+record replayed because a record cannot contain the digest that names itself.
 
 Format 1 and later declare `state_format`; absence denotes legacy format 0.
 Strict reads accept exactly the current format. Older stores require the explicit,

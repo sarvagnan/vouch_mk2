@@ -269,6 +269,7 @@ class Deviation:
 @dataclass(frozen=True, slots=True)
 class Snapshot:
     revision: int = 0
+    event_head: str = ""
     units: tuple[Unit, ...] = ()
     deviations: tuple[Deviation, ...] = ()
     releases: tuple[Release, ...] = ()
@@ -276,7 +277,7 @@ class Snapshot:
     anchor_mode: AnchorMode = AnchorMode.NONE
     tier: Tier = Tier.LIGHTWEIGHT
     formal_certificate_digest: str = ""
-    ci_policy: CiPolicy = CiPolicy.LEDGER
+    ci_policy: CiPolicy = CiPolicy.STRICT
     ci_exceptions: tuple[CiException, ...] = ()
 
     def unit(self, name: str) -> Unit | None:

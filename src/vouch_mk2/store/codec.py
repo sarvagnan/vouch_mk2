@@ -7,8 +7,11 @@ Strict reads accept only :data:`CURRENT_STATE_FORMAT`; older formats require
 from __future__ import annotations
 
 import json
+import types
 from collections.abc import Callable
-from typing import cast
+from dataclasses import fields, is_dataclass
+from enum import Enum
+from typing import cast, get_args, get_origin, get_type_hints
 
 from vouch_mk2.core.invariants import (
     valid_command_line,
@@ -44,6 +47,8 @@ from vouch_mk2.core.model import (
     UnitRef,
     UnitStatus,
 )
+from vouch_mk2.core import events as event_module
+from vouch_mk2.core.events import Event, EventRecord, PreLogHistoryRecorded
 from vouch_mk2.formal.certificate import FormalCertificate
 from vouch_mk2.formal.explore import EmittedTables, Relation
 from vouch_mk2.projections.next_actions import NextAction
@@ -58,7 +63,7 @@ from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
 
-CURRENT_STATE_FORMAT = 3
+CURRENT_STATE_FORMAT = 4
 CURRENT_EVIDENCE_FORMAT = 2
 
 
@@ -75,6 +80,50 @@ def _canonical_json(document: object) -> bytes:
 def encode_document(document: object) -> bytes:
     """Encode a raw state document with the codec's canonical JSON spelling."""
     return _canonical_json(document)
+
+
+def _event_wire_value(value: object) -> object:
+    if isinstance(value, Enum):
+        return value.value
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _event_wire_value(getattr(value, field.name))
+            for field in fields(value)
+        }
+    if isinstance(value, tuple | list):
+        return [_event_wire_value(item) for item in value]
+    return value
+
+
+def _event_payload(event: Event) -> dict[str, object]:
+    if isinstance(event, PreLogHistoryRecorded):
+        return {
+            "baseline": cast(
+                dict[str, object],
+                json.loads(encode_snapshot(event.baseline)),
+            ),
+            "description": event.description,
+        }
+    value = _event_wire_value(event)
+    if type(value) is not dict:
+        raise StoreError(f"event {type(event).__name__}: payload must encode as an object")
+    return cast(dict[str, object], value)
+
+
+def encode_event_record(record: EventRecord) -> bytes:
+    """Encode one canonical event-log record."""
+    return _canonical_json(
+        {
+            "actor": record.actor,
+            "event": type(record.folded_event).__name__,
+            "pack_digest": record.pack_digest,
+            "payload": _event_payload(record.folded_event),
+            "prev": record.prev,
+            "recorded_at": record.recorded_at,
+            "revision": record.revision,
+            "run_id": record.run_id,
+        }
+    )
 
 
 def _pack_rebound_object(rebound: PackRebound) -> dict[str, object]:
@@ -110,6 +159,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
             for deviation in snapshot.deviations
         ],
         "revision": snapshot.revision,
+        "event_head": snapshot.event_head,
         "state_format": CURRENT_STATE_FORMAT,
         "evidence_heads": [
             {
@@ -184,10 +234,16 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
                 "depends_on": list(unit.depends_on),
                 "name": unit.name,
                 "pack_history": list(unit.pack_history),
-                "rebound_history": [
-                    _pack_rebound_object(rebound)
-                    for rebound in unit.rebound_history
-                ],
+                **(
+                    {
+                        "rebound_history": [
+                            _pack_rebound_object(rebound)
+                            for rebound in unit.rebound_history
+                        ]
+                    }
+                    if unit.rebound_history
+                    else {}
+                ),
                 "published_once": unit.published_once,
                 "status": unit.status.value,
                 "version": unit.version,
@@ -397,6 +453,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
         "map_format": 4,
         "source_state_digest": source_state_digest,
         "map": {
+            "event_head": map.event_head,
             "anchor_mode": map.anchor_mode,
             "tier": map.tier,
             **(
@@ -619,11 +676,10 @@ _UNIT_FIELDS = frozenset(
         "acceptance_pack_digest",
         "acceptance_test_set_digest",
         "pack_history",
-        "rebound_history",
         "published_once",
     }
 )
-_UNIT_OPTIONAL_FIELDS = frozenset({"pack_binding"})
+_UNIT_OPTIONAL_FIELDS = frozenset({"pack_binding", "rebound_history"})
 _UNIT_REF_FIELDS = frozenset({"name", "version"})
 _DEVIATION_FIELDS = frozenset(
     {
@@ -722,6 +778,7 @@ _FORMAL_RELATION_FIELDS = frozenset({"initial", "states", "transitions"})
 _SNAPSHOT_FIELDS = frozenset(
     {
         "revision",
+        "event_head",
         "units",
         "deviations",
         "releases",
@@ -739,6 +796,7 @@ _SYSTEM_MAP_DOCUMENT_FIELDS = frozenset(
 _SYSTEM_MAP_FIELDS = frozenset(
     {
         "revision",
+        "event_head",
         "units",
         "producer_edges",
         "deviations",
@@ -800,6 +858,176 @@ def _digest(value: object, path: str, *, allow_empty: bool = False) -> str:
     return digest
 
 
+_EVENT_RECORD_FIELDS = frozenset(
+    {
+        "event",
+        "payload",
+        "recorded_at",
+        "prev",
+        "revision",
+        "actor",
+        "run_id",
+        "pack_digest",
+    }
+)
+_EVENT_TYPE_NAMES = (
+    "PreLogHistoryRecorded",
+    "UnitSpecified",
+    "AcceptanceFrozen",
+    "AcceptancePackBound",
+    "AcceptancePackRebound",
+    "UnitMarkedReady",
+    "WorkStarted",
+    "UnitMarkedDone",
+    "UnitPublished",
+    "UnitSuperseded",
+    "UnitRespecified",
+    "ReverificationStarted",
+    "DeviationOpened",
+    "UnitBlocked",
+    "DeviationAmended",
+    "UnitInvalidated",
+    "DeviationRejected",
+    "DeviationClosed",
+    "ReleasePrepared",
+    "UnitReleaseBound",
+    "ReleaseCriteriaSet",
+    "BundleBound",
+    "EvidenceRecorded",
+    "AnchorAdvanced",
+    "AnchorModeSet",
+    "TierSet",
+    "CiPolicySet",
+    "OpenInCiMarked",
+    "OpenInCiCleared",
+    "FormalCertificateRecorded",
+    "DeploymentStarted",
+    "VerificationStarted",
+    "ReleaseSucceeded",
+    "ReleaseRolledBack",
+    "ReleaseFailedUnrecovered",
+    "ReleaseRetired",
+    "ReleaseInvalidated",
+)
+_EVENT_TYPES: dict[str, type[object]] = {
+    name: cast(type[object], getattr(event_module, name))
+    for name in _EVENT_TYPE_NAMES
+}
+
+
+def _decode_event_value(value: object, annotation: object, path: str) -> object:
+    if annotation is str:
+        return _string(value, path)
+    if annotation is int:
+        return _integer(value, path)
+    if annotation is bool:
+        return _boolean(value, path)
+    origin = get_origin(annotation)
+    arguments = get_args(annotation)
+    if origin is tuple:
+        values = _array(value, path)
+        if len(arguments) == 2 and arguments[1] is Ellipsis:
+            return tuple(
+                _decode_event_value(item, arguments[0], f"{path}[{index}]")
+                for index, item in enumerate(values)
+            )
+        if len(values) != len(arguments):
+            raise DecodeError(f"{path}: expected {len(arguments)} items")
+        return tuple(
+            _decode_event_value(item, item_type, f"{path}[{index}]")
+            for index, (item, item_type) in enumerate(zip(values, arguments))
+        )
+    if origin is types.UnionType:
+        if value is None and type(None) in arguments:
+            return None
+        candidates = tuple(item for item in arguments if item is not type(None))
+        failures: list[str] = []
+        for candidate in candidates:
+            try:
+                return _decode_event_value(value, candidate, path)
+            except DecodeError as error:
+                failures.append(str(error))
+        raise DecodeError(f"{path}: no union member matched ({'; '.join(failures)})")
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        return _enum_value(value, path, annotation)
+    if isinstance(annotation, type) and is_dataclass(annotation):
+        annotations = get_type_hints(annotation)
+        names = frozenset(field.name for field in fields(annotation))
+        obj = _fields(value, path, names)
+        return annotation(
+            **{
+                field.name: _decode_event_value(
+                    obj[field.name],
+                    annotations[field.name],
+                    _child(path, field.name),
+                )
+                for field in fields(annotation)
+            }
+        )
+    raise DecodeError(f"{path}: unsupported event payload type {annotation!r}")
+
+
+def _event_pack_digest(event: Event) -> str:
+    match event:
+        case event_module.AcceptanceFrozen(pack_digest=digest):
+            return digest
+        case event_module.AcceptancePackBound(pack_digest=digest):
+            return digest
+        case event_module.AcceptancePackRebound(new_pack_digest=digest):
+            return digest
+        case event_module.EvidenceRecorded(event=evidence):
+            return evidence.pack_digest
+        case _:
+            return ""
+
+
+def decode_event_record(data: bytes) -> EventRecord:
+    """Strictly decode one canonical event-log record."""
+    obj = _fields(_decode_json(data, "event record"), "", _EVENT_RECORD_FIELDS)
+    event_name = _string(obj["event"], "event")
+    event_type = _EVENT_TYPES.get(event_name)
+    if event_type is None:
+        raise DecodeError(f"event: unknown event type {event_name!r}")
+    if event_type is PreLogHistoryRecorded:
+        payload = _fields(
+            obj["payload"],
+            "payload",
+            frozenset({"baseline", "description"}),
+        )
+        baseline = decode_snapshot(_canonical_json(payload["baseline"]))
+        event: Event = PreLogHistoryRecorded(
+            description=_string(payload["description"], "payload.description"),
+            baseline=baseline,
+        )
+    else:
+        decoded = _decode_event_value(obj["payload"], event_type, "payload")
+        event = cast(Event, decoded)
+    revision = _integer(obj["revision"], "revision")
+    if revision < 0:
+        raise DecodeError("revision: must be non-negative")
+    actor = _string(obj["actor"], "actor")
+    recorded_at = _string(obj["recorded_at"], "recorded_at")
+    if not recorded_at:
+        raise DecodeError("recorded_at: must be non-empty")
+    record = EventRecord(
+        folded_event=event,
+        recorded_at=recorded_at,
+        prev=_parent(obj["prev"], "prev"),
+        revision=revision,
+        actor=actor,
+        run_id=_string(obj["run_id"], "run_id"),
+        pack_digest=_digest(obj["pack_digest"], "pack_digest", allow_empty=True),
+    )
+    expected_pack_digest = _event_pack_digest(event)
+    if record.pack_digest != expected_pack_digest:
+        raise DecodeError(
+            "pack_digest: does not match the folded event's pack digest"
+        )
+    if encode_event_record(record) != data:
+        raise DecodeError("$: non-canonical event record encoding")
+    return record
+
+
 def _parent(value: object, path: str) -> str:
     parent = _string(value, path)
     if parent == "GENESIS":
@@ -854,10 +1082,14 @@ def _decode_unit(value: object, path: str) -> Unit:
             obj["pack_history"], _child(path, "pack_history")
         ),
         pack_binding=binding,
-        rebound_history=tuple(
-            _decode_pack_rebound(raw, f"{path}.rebound_history[{index}]")
-            for index, raw in enumerate(
-                _array(obj["rebound_history"], f"{path}.rebound_history")
+        rebound_history=(
+            ()
+            if "rebound_history" not in obj
+            else tuple(
+                _decode_pack_rebound(raw, f"{path}.rebound_history[{index}]")
+                for index, raw in enumerate(
+                    _array(obj["rebound_history"], f"{path}.rebound_history")
+                )
             )
         ),
     )
@@ -1449,6 +1681,7 @@ def decode_snapshot(data: bytes) -> Snapshot:
 
     snapshot = Snapshot(
         revision=revision,
+        event_head=_digest(obj["event_head"], "event_head", allow_empty=True),
         units=units,
         deviations=deviations,
         releases=releases,
@@ -1799,6 +2032,9 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
     )
     map = SystemMap(
         revision=revision,
+        event_head=_digest(
+            obj["event_head"], "map.event_head", allow_empty=True
+        ),
         units=units,
         producer_edges=_decode_producer_edges(
             obj["producer_edges"], "map.producer_edges"

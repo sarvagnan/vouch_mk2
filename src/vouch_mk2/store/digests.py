@@ -21,6 +21,7 @@ class ArtifactKind(Enum):
     FILE = "file"
     LOCK = "lock"
     ACCEPTANCE_PACK = "acceptance-pack"
+    EVENT = "event"
 
 
 def digest_of(kind: ArtifactKind, payload: bytes) -> str:

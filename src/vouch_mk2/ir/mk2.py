@@ -148,6 +148,7 @@ CHECK_FORMAL_CERTIFICATE = "check.formal-certificate"
 CHECK_MAP_FRESHNESS = "check.map-freshness"
 CHECK_CONTEXT_FRESHNESS = "check.context-freshness"
 CHECK_PACK_FILES_MATCH = "check.pack-files-match"
+CHECK_EVENT_LOG = "check.event-log"
 
 # Permanently NOT_CHECKED organizational claims (docs/claim-boundary.md).
 ORG_ACCEPTANCE_OWNERSHIP = "org.acceptance-ownership"
@@ -674,6 +675,14 @@ _OBLIGATIONS = (
                 kind=ConditionKind.SUBJECTS_PRESENT,
                 value="post-specified-units",
             ),
+        ),
+    ),
+    Obligation(
+        obligation_id=CHECK_EVENT_LOG,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description=(
+            "The content-addressed event chain replays through apply() to the "
+            "committed derived snapshot."
         ),
     ),
     Obligation(

@@ -10,8 +10,9 @@ from enum import Enum
 
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.lock import lock_digest
-from vouch_mk2.core import CiPolicy, Snapshot, Tier
+from vouch_mk2.core import Snapshot, Tier, TierSet
 from vouch_mk2.store import Store, StoreError
+from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
 
 
 class InitError(StoreError):
@@ -189,6 +190,7 @@ def init_project(
     lock_bytes: bytes,
     *,
     tier: Tier = Tier.LIGHTWEIGHT,
+    actor: str | None = None,
 ) -> tuple[InitResult, ...]:
     """Initialize exactly the D-7 store, lock, config, and CI workflow set.
 
@@ -233,8 +235,18 @@ def init_project(
         try:
             store = Store.init(
                 store_path,
-                initial_snapshot=Snapshot(tier=tier, ci_policy=CiPolicy.STRICT),
+                initial_snapshot=Snapshot(),
             )
+            if tier is not Tier.LIGHTWEIGHT:
+                with store.write_locked():
+                    initial = store.read_snapshot()
+                    commit_events(
+                        store,
+                        initial,
+                        (TierSet(tier),),
+                        actor=default_actor() if actor is None else actor,
+                        run_id=ci_run_id(),
+                    )
         except StoreError as error:
             raise InitError(str(error)) from error
         store.close()

@@ -14,6 +14,7 @@ from vouch_mk2.core import (
     EvidenceKind,
     EvidenceOutcome,
     EvidencePackSummary,
+    PreLogHistoryRecorded,
     RecordEvidence,
     Refused,
     SetAnchorMode,
@@ -38,6 +39,7 @@ from vouch_mk2.store import (
     encode_snapshot,
 )
 from vouch_mk2.verify import record_evidence, run_artifact_checks
+from vouch_mk2.store.event_log import build_event_records, commit_events
 
 
 def _unit(name: str, version: str = "v1") -> Unit:
@@ -76,7 +78,14 @@ def _event(
 
 def _init(root: Path, units: tuple[Unit, ...] = (_unit("u"),)) -> None:
     with Store.init(str(root)) as store:
-        store.commit(Snapshot(revision=1, units=units))
+        baseline = Snapshot(revision=1, units=units)
+        checkpoint, objects, _records = build_event_records(
+            Snapshot(),
+            (PreLogHistoryRecorded("pre-log revisions 1..1: test fixture only", baseline),),
+            actor="test",
+            run_id="",
+        )
+        store.commit(checkpoint, objects=objects, expected_revision=0)
 
 
 def _result(store: Store, snapshot: Snapshot, check_id: str):
@@ -91,7 +100,13 @@ def _commit_decision(store: Store, command: AdvanceAnchor | SetAnchorMode) -> No
     snapshot = store.read_snapshot()
     decision = decide(snapshot, command)
     assert isinstance(decision, Accepted)
-    store.commit(apply(snapshot, decision.events))
+    commit_events(
+        store,
+        snapshot,
+        decision.events,
+        actor="test",
+        run_id="",
+    )
 
 
 def test_record_evidence_happy_chain_and_independent_second_unit(tmp_path: Path) -> None:
@@ -247,6 +262,7 @@ def test_artifact_checks_pass_for_complete_anchored_chain(tmp_path: Path) -> Non
             mk2.CHECK_CONTEXT_FRESHNESS: Verdict.NOT_APPLICABLE,
             mk2.CHECK_EVIDENCE_ANCHORS: Verdict.PASS,
             mk2.CHECK_EVIDENCE_CHAINS: Verdict.PASS,
+            mk2.CHECK_EVENT_LOG: Verdict.PASS,
             mk2.CHECK_FORMAL_CERTIFICATE: Verdict.NOT_APPLICABLE,
             mk2.CHECK_MAP_FRESHNESS: Verdict.NOT_APPLICABLE,
             mk2.CHECK_PACK_BOUND: Verdict.NOT_APPLICABLE,

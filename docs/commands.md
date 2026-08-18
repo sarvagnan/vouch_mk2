@@ -19,12 +19,13 @@ options:
 ## formal
 
 ```text
-usage: vouch-mk2 formal [-h] [--root ROOT] [--record]
+usage: vouch-mk2 formal [-h] [--root ROOT] [--actor ACTOR] [--record]
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory (required with --record)
-  --record     record the passing formal certificate in the store
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory (required with --record)
+  --actor ACTOR  recorded actor claim (default: OS user)
+  --record       record the passing formal certificate in the store
 ```
 
 ## generate
@@ -75,12 +76,13 @@ options:
 ## upgrade
 
 ```text
-usage: vouch-mk2 upgrade [-h] [--root ROOT] [--dry-run] [--was-published NAME@V]
+usage: vouch-mk2 upgrade [-h] [--root ROOT] [--actor ACTOR] [--dry-run] [--was-published NAME@V]
                          [--never-published NAME@V]
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory (default: current directory)
+  --actor ACTOR         recorded actor claim for the pre-log checkpoint (default: OS user)
   --dry-run             show required format steps without changing the store
   --was-published NAME@V
                         assert that an ambiguous legacy unit was previously published
@@ -124,7 +126,7 @@ options:
 
 ```text
 usage: vouch-mk2 init [-h] --project PROJECT [--tier {lightweight,standard,high}]
-                      [--lock LOCK_PATH]
+                      [--lock LOCK_PATH] [--actor ACTOR]
 
 options:
   -h, --help            show this help message and exit
@@ -132,6 +134,7 @@ options:
   --tier {lightweight,standard,high}
                         initial assurance tier (default: lightweight)
   --lock LOCK_PATH      existing lock to vendor instead of building/copying the running code
+  --actor ACTOR         recorded actor claim (default: OS user)
 ```
 
 ## mcp
@@ -159,14 +162,15 @@ options:
 ## migrate
 
 ```text
-usage: vouch-mk2 migrate [-h] --ledger LEDGER [--anchor-mode {none,ci}] [--config CONFIG]
-                         [--drop-qualified] [--approve] [--target TARGET]
+usage: vouch-mk2 migrate [-h] --ledger LEDGER [--anchor-mode {none,ci}] [--actor ACTOR]
+                         [--config CONFIG] [--drop-qualified] [--approve] [--target TARGET]
 
 options:
   -h, --help            show this help message and exit
   --ledger LEDGER       0.6 ledger JSON path
   --anchor-mode {none,ci}
                         mk2 anchor mode (overrides --config)
+  --actor ACTOR         recorded actor claim (default: OS user)
   --config CONFIG       optional 0.6 config.json carrying anchor.mode and its legacy tier
   --drop-qualified      report and omit unrepresentable qualified releases
   --approve             write the validated candidate to a fresh target/.vouch
@@ -176,13 +180,15 @@ options:
 ## adjudicate-amend
 
 ```text
-usage: vouch-mk2 adjudicate-amend [-h] --root ROOT [--json] --deviation-id DEVIATION_ID
+usage: vouch-mk2 adjudicate-amend [-h] --root ROOT [--json] [--actor ACTOR]
+                                  --deviation-id DEVIATION_ID
                                   --amendment-version AMENDMENT_VERSION
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --deviation-id DEVIATION_ID
   --amendment-version AMENDMENT_VERSION
 ```
@@ -190,49 +196,54 @@ options:
 ## adjudicate-reject
 
 ```text
-usage: vouch-mk2 adjudicate-reject [-h] --root ROOT [--json] --deviation-id DEVIATION_ID
+usage: vouch-mk2 adjudicate-reject [-h] --root ROOT [--json] [--actor ACTOR]
+                                   --deviation-id DEVIATION_ID
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --deviation-id DEVIATION_ID
 ```
 
 ## advance-anchor
 
 ```text
-usage: vouch-mk2 advance-anchor [-h] --root ROOT [--json] --unit-name UNIT_NAME
+usage: vouch-mk2 advance-anchor [-h] --root ROOT [--json] [--actor ACTOR] --unit-name UNIT_NAME
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --unit-name UNIT_NAME
 ```
 
 ## begin-reverify
 
 ```text
-usage: vouch-mk2 begin-reverify [-h] --root ROOT [--json] --name NAME
+usage: vouch-mk2 begin-reverify [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
   --name NAME
 ```
 
 ## bind-bundle
 
 ```text
-usage: vouch-mk2 bind-bundle [-h] --root ROOT [--json] --release-id RELEASE_ID
+usage: vouch-mk2 bind-bundle [-h] --root ROOT [--json] [--actor ACTOR] --release-id RELEASE_ID
                              --inventory-digest INVENTORY_DIGEST
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
   --inventory-digest INVENTORY_DIGEST
 ```
@@ -240,13 +251,15 @@ options:
 ## bind-pack
 
 ```text
-usage: vouch-mk2 bind-pack [-h] --root ROOT [--json] --name NAME [--project PROJECT]
-                           [--pack-file PACK_FILE] [--pack-test-file PACK_TEST_FILE]
+usage: vouch-mk2 bind-pack [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
+                           [--project PROJECT] [--pack-file PACK_FILE]
+                           [--pack-test-file PACK_TEST_FILE]
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --name NAME
   --project PROJECT     project root for --pack-file paths (default: current directory)
   --pack-file PACK_FILE
@@ -258,50 +271,55 @@ options:
 ## clear-open-in-ci
 
 ```text
-usage: vouch-mk2 clear-open-in-ci [-h] --root ROOT [--json] --name NAME
+usage: vouch-mk2 clear-open-in-ci [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
   --name NAME
 ```
 
 ## close-deviation
 
 ```text
-usage: vouch-mk2 close-deviation [-h] --root ROOT [--json] --deviation-id DEVIATION_ID
+usage: vouch-mk2 close-deviation [-h] --root ROOT [--json] [--actor ACTOR]
+                                 --deviation-id DEVIATION_ID
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --deviation-id DEVIATION_ID
 ```
 
 ## complete
 
 ```text
-usage: vouch-mk2 complete [-h] --root ROOT [--json] --release-id RELEASE_ID
+usage: vouch-mk2 complete [-h] --root ROOT [--json] [--actor ACTOR] --release-id RELEASE_ID
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
 ```
 
 ## freeze
 
 ```text
-usage: vouch-mk2 freeze [-h] --root ROOT [--json] --name NAME --pack-version PACK_VERSION
-                        [--project PROJECT] [--pack-file PACK_FILE]
+usage: vouch-mk2 freeze [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
+                        --pack-version PACK_VERSION [--project PROJECT] [--pack-file PACK_FILE]
                         [--pack-test-file PACK_TEST_FILE]
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --name NAME
   --pack-version PACK_VERSION
   --project PROJECT     project root for --pack-file paths (default: current directory)
@@ -314,25 +332,28 @@ options:
 ## mark-done
 
 ```text
-usage: vouch-mk2 mark-done [-h] --root ROOT [--json] --name NAME
+usage: vouch-mk2 mark-done [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
   --name NAME
 ```
 
 ## mark-failed-unrecovered
 
 ```text
-usage: vouch-mk2 mark-failed-unrecovered [-h] --root ROOT [--json] --release-id RELEASE_ID
-                                         --trigger TRIGGER [--observations OBSERVATIONS]
+usage: vouch-mk2 mark-failed-unrecovered [-h] --root ROOT [--json] [--actor ACTOR]
+                                         --release-id RELEASE_ID --trigger TRIGGER
+                                         [--observations OBSERVATIONS]
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
   --trigger TRIGGER
   --observations OBSERVATIONS
@@ -341,12 +362,14 @@ options:
 ## mark-open-in-ci
 
 ```text
-usage: vouch-mk2 mark-open-in-ci [-h] --root ROOT [--json] --name NAME --reason REASON
+usage: vouch-mk2 mark-open-in-ci [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
+                                 --reason REASON
 
 options:
   -h, --help       show this help message and exit
   --root ROOT      store root directory
   --json           emit one JSON result instead of text
+  --actor ACTOR    recorded actor claim (default: OS user)
   --name NAME
   --reason REASON
 ```
@@ -354,19 +377,21 @@ options:
 ## mark-ready
 
 ```text
-usage: vouch-mk2 mark-ready [-h] --root ROOT [--json] --name NAME
+usage: vouch-mk2 mark-ready [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
   --name NAME
 ```
 
 ## open-deviation
 
 ```text
-usage: vouch-mk2 open-deviation [-h] --root ROOT [--json] --deviation-id DEVIATION_ID
+usage: vouch-mk2 open-deviation [-h] --root ROOT [--json] [--actor ACTOR]
+                                --deviation-id DEVIATION_ID
                                 --deviation-type {pack-defect,contract-conflict,plan-gap,capability-request}
                                 --unit NAME@VERSION
 
@@ -374,6 +399,7 @@ options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --deviation-id DEVIATION_ID
   --deviation-type {pack-defect,contract-conflict,plan-gap,capability-request}
   --unit NAME@VERSION
@@ -382,13 +408,14 @@ options:
 ## prepare-release
 
 ```text
-usage: vouch-mk2 prepare-release [-h] --root ROOT [--json] --release-id RELEASE_ID
+usage: vouch-mk2 prepare-release [-h] --root ROOT [--json] [--actor ACTOR] --release-id RELEASE_ID
                                  --includes INCLUDES
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
   --includes INCLUDES
 ```
@@ -396,19 +423,20 @@ options:
 ## publish
 
 ```text
-usage: vouch-mk2 publish [-h] --root ROOT [--json] --name NAME
+usage: vouch-mk2 publish [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
   --name NAME
 ```
 
 ## rebind-pack
 
 ```text
-usage: vouch-mk2 rebind-pack [-h] --root ROOT [--json] --name NAME --reason REASON
+usage: vouch-mk2 rebind-pack [-h] --root ROOT [--json] [--actor ACTOR] --name NAME --reason REASON
                              [--project PROJECT] [--pack-file PACK_FILE]
                              [--pack-test-file PACK_TEST_FILE]
 
@@ -416,6 +444,7 @@ options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --name NAME
   --reason REASON
   --project PROJECT     project root for --pack-file paths (default: current directory)
@@ -428,12 +457,13 @@ options:
 ## record-evidence
 
 ```text
-usage: vouch-mk2 record-evidence [-h] --root ROOT [--json] --unit NAME@VERSION --kind {red,green,refactor} -- <argv...>
+usage: vouch-mk2 record-evidence [-h] --root ROOT [--json] [--actor ACTOR] --unit NAME@VERSION --kind {red,green,refactor} -- <argv...>
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --unit NAME@VERSION
   --kind {red,green,refactor}
 
@@ -443,36 +473,39 @@ the recorded outcome is the exit status of a process this verb spawned.
 ## record-formal-certificate
 
 ```text
-usage: vouch-mk2 record-formal-certificate [-h] --root ROOT [--json]
+usage: vouch-mk2 record-formal-certificate [-h] --root ROOT [--json] [--actor ACTOR]
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
 ```
 
 ## respecify
 
 ```text
-usage: vouch-mk2 respecify [-h] --root ROOT [--json] --name NAME
+usage: vouch-mk2 respecify [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
   --name NAME
 ```
 
 ## retire
 
 ```text
-usage: vouch-mk2 retire [-h] --root ROOT [--json] --release-id RELEASE_ID --trigger TRIGGER
-                        [--observations OBSERVATIONS]
+usage: vouch-mk2 retire [-h] --root ROOT [--json] [--actor ACTOR] --release-id RELEASE_ID
+                        --trigger TRIGGER [--observations OBSERVATIONS]
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
   --trigger TRIGGER
   --observations OBSERVATIONS
@@ -481,13 +514,14 @@ options:
 ## roll-back
 
 ```text
-usage: vouch-mk2 roll-back [-h] --root ROOT [--json] --release-id RELEASE_ID --trigger TRIGGER
-                           [--observations OBSERVATIONS]
+usage: vouch-mk2 roll-back [-h] --root ROOT [--json] [--actor ACTOR] --release-id RELEASE_ID
+                           --trigger TRIGGER [--observations OBSERVATIONS]
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
   --trigger TRIGGER
   --observations OBSERVATIONS
@@ -496,31 +530,33 @@ options:
 ## set-anchor-mode
 
 ```text
-usage: vouch-mk2 set-anchor-mode [-h] --root ROOT [--json] --mode {none,ci}
+usage: vouch-mk2 set-anchor-mode [-h] --root ROOT [--json] [--actor ACTOR] --mode {none,ci}
 
 options:
   -h, --help        show this help message and exit
   --root ROOT       store root directory
   --json            emit one JSON result instead of text
+  --actor ACTOR     recorded actor claim (default: OS user)
   --mode {none,ci}
 ```
 
 ## set-ci-policy
 
 ```text
-usage: vouch-mk2 set-ci-policy [-h] --root ROOT [--json] --policy {ledger,strict}
+usage: vouch-mk2 set-ci-policy [-h] --root ROOT [--json] [--actor ACTOR] --policy {ledger,strict}
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --policy {ledger,strict}
 ```
 
 ## set-criteria
 
 ```text
-usage: vouch-mk2 set-criteria [-h] --root ROOT [--json] --release-id RELEASE_ID
+usage: vouch-mk2 set-criteria [-h] --root ROOT [--json] [--actor ACTOR] --release-id RELEASE_ID
                               --launch-criteria LAUNCH_CRITERIA
                               --verification-window VERIFICATION_WINDOW
                               --rollback-trigger ROLLBACK_TRIGGER
@@ -530,6 +566,7 @@ options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
   --launch-criteria LAUNCH_CRITERIA
   --verification-window VERIFICATION_WINDOW
@@ -540,25 +577,28 @@ options:
 ## set-tier
 
 ```text
-usage: vouch-mk2 set-tier [-h] --root ROOT [--json] --tier {lightweight,standard,high}
+usage: vouch-mk2 set-tier [-h] --root ROOT [--json] [--actor ACTOR]
+                          --tier {lightweight,standard,high}
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --tier {lightweight,standard,high}
 ```
 
 ## specify
 
 ```text
-usage: vouch-mk2 specify [-h] --root ROOT [--json] --name NAME --version VERSION
+usage: vouch-mk2 specify [-h] --root ROOT [--json] [--actor ACTOR] --name NAME --version VERSION
                          [--depends-on DEPENDS_ON]
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --name NAME
   --version VERSION
   --depends-on DEPENDS_ON
@@ -567,47 +607,52 @@ options:
 ## start
 
 ```text
-usage: vouch-mk2 start [-h] --root ROOT [--json] --name NAME
+usage: vouch-mk2 start [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
   --name NAME
 ```
 
 ## start-deploy
 
 ```text
-usage: vouch-mk2 start-deploy [-h] --root ROOT [--json] --release-id RELEASE_ID
+usage: vouch-mk2 start-deploy [-h] --root ROOT [--json] [--actor ACTOR] --release-id RELEASE_ID
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
 ```
 
 ## start-verification
 
 ```text
-usage: vouch-mk2 start-verification [-h] --root ROOT [--json] --release-id RELEASE_ID
+usage: vouch-mk2 start-verification [-h] --root ROOT [--json] [--actor ACTOR]
+                                    --release-id RELEASE_ID
 
 options:
   -h, --help            show this help message and exit
   --root ROOT           store root directory
   --json                emit one JSON result instead of text
+  --actor ACTOR         recorded actor claim (default: OS user)
   --release-id RELEASE_ID
 ```
 
 ## supersede
 
 ```text
-usage: vouch-mk2 supersede [-h] --root ROOT [--json] --name NAME
+usage: vouch-mk2 supersede [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
 
 options:
-  -h, --help   show this help message and exit
-  --root ROOT  store root directory
-  --json       emit one JSON result instead of text
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
   --name NAME
 ```

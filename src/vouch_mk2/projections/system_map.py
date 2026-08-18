@@ -58,6 +58,7 @@ class SystemMapRelease:
 @dataclass(frozen=True, slots=True)
 class SystemMap:
     revision: int
+    event_head: str
     units: tuple[SystemMapUnit, ...]
     producer_edges: tuple[tuple[str, str], ...]
     deviations: tuple[SystemMapDeviation, ...]
@@ -103,6 +104,7 @@ def system_map(snapshot: Snapshot) -> SystemMap:
     )
     return SystemMap(
         revision=snapshot.revision,
+        event_head=snapshot.event_head,
         units=units,
         producer_edges=tuple(
             sorted(

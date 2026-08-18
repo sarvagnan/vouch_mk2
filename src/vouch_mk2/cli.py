@@ -37,7 +37,6 @@ from vouch_mk2.core import (
     Snapshot,
     Tier,
     UnitRef,
-    apply,
     decide,
 )
 from vouch_mk2.core import commands as command_module
@@ -71,6 +70,7 @@ from vouch_mk2.store import (
     decode_system_map,
 )
 from vouch_mk2.store.upgrade import UpgradeRefused
+from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
 from vouch_mk2.verify import (
     ProjectionRegenerationError,
     RefusedError,
@@ -110,6 +110,7 @@ class _Arguments(argparse.Namespace):
     tree: str
     exclude: list[str]
     tier: str
+    actor: str
 
 
 def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
@@ -149,6 +150,11 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         "--root",
         default="",
         help="store root directory (required with --record)",
+    )
+    formal.add_argument(
+        "--actor",
+        default=default_actor(),
+        help="recorded actor claim (default: OS user)",
     )
     formal.add_argument(
         "--record",
@@ -201,6 +207,11 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         "--root",
         default=".",
         help="store root directory (default: current directory)",
+    )
+    upgrade.add_argument(
+        "--actor",
+        default=default_actor(),
+        help="recorded actor claim for the pre-log checkpoint (default: OS user)",
     )
     upgrade.add_argument(
         "--dry-run",
@@ -266,6 +277,11 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         default=None,
         help="existing lock to vendor instead of building/copying the running code",
     )
+    init.add_argument(
+        "--actor",
+        default=default_actor(),
+        help="recorded actor claim (default: OS user)",
+    )
     mcp = commands.add_parser(
         "mcp", help="serve read-only MCP over line-delimited stdio for ONE store"
     )
@@ -289,6 +305,11 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         choices=("none", "ci"),
         default=None,
         help="mk2 anchor mode (overrides --config)",
+    )
+    migrate.add_argument(
+        "--actor",
+        default=default_actor(),
+        help="recorded actor claim (default: OS user)",
     )
     migrate.add_argument(
         "--config",
@@ -416,6 +437,11 @@ def _add_lifecycle_common(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="emit one JSON result instead of text",
     )
+    parser.add_argument(
+        "--actor",
+        default=default_actor(),
+        help="recorded actor claim (default: OS user)",
+    )
 
 
 def _is_string_tuple(annotation: object) -> bool:
@@ -500,7 +526,7 @@ def _add_lifecycle_parsers(commands: Any) -> None:
             continue
         if command_type is command_module.RecordEvidence:
             parser.usage = (
-                "%(prog)s [-h] --root ROOT [--json] --unit NAME@VERSION "
+                "%(prog)s [-h] --root ROOT [--json] [--actor ACTOR] --unit NAME@VERSION "
                 "--kind {red,green,refactor} -- <argv...>"
             )
             parser.epilog = (
@@ -650,8 +676,13 @@ def _generic_lifecycle_handler(
                 decision = decide(snapshot, command)
                 if isinstance(decision, Refused):
                     return _present_refusal(namespace.json_output, decision)
-                next_snapshot = apply(snapshot, decision.events)
-                store.commit(next_snapshot)
+                next_snapshot = commit_events(
+                    store,
+                    snapshot,
+                    decision.events,
+                    actor=namespace.actor,
+                    run_id=ci_run_id(),
+                )
     except StoreError as error:
         print(f"vouch-mk2: {error}", file=sys.stderr)
         return 2
@@ -746,13 +777,19 @@ def _pack_binding_handler(
                 decision = decide(snapshot, command)
                 if isinstance(decision, Refused):
                     return _present_refusal(namespace.json_output, decision)
-                next_snapshot = apply(snapshot, decision.events)
                 objects = (
                     ()
                     if data is None
                     else ((ArtifactKind.ACCEPTANCE_PACK, data),)
                 )
-                store.commit(next_snapshot, objects=objects)
+                next_snapshot = commit_events(
+                    store,
+                    snapshot,
+                    decision.events,
+                    actor=namespace.actor,
+                    run_id=ci_run_id(),
+                    objects=objects,
+                )
     except StoreError as error:
         print(f"vouch-mk2: {error}", file=sys.stderr)
         return 2
@@ -869,7 +906,12 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                         else resolved.acceptance_test_set_digest
                     ),
                 )
-                digest = record_evidence(store, event)
+                digest = record_evidence(
+                    store,
+                    event,
+                    actor=namespace.actor,
+                    run_id=ci_run_id(),
+                )
                 revision = store.read_snapshot().revision
     except RefusedError as error:
         return _present_refusal(namespace.json_output, error)
@@ -888,7 +930,11 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
 
 
 def _run_formal_command(
-    root: str, *, record: bool, json_output: bool = False
+    root: str,
+    *,
+    record: bool,
+    json_output: bool = False,
+    actor: str | None = None,
 ) -> int:
     run = run_formal()
     if not json_output:
@@ -900,7 +946,12 @@ def _run_formal_command(
     try:
         with Store.open(root) as store:
             with store.write_locked():
-                digest = record_formal_certificate(store, run)
+                digest = record_formal_certificate(
+                    store,
+                    run,
+                    actor=default_actor() if actor is None else actor,
+                    run_id=ci_run_id(),
+                )
                 revision = store.read_snapshot().revision
     except RefusedError as error:
         return _present_refusal(json_output, error)
@@ -917,7 +968,10 @@ def _run_formal_command(
 
 def _record_formal_certificate_handler(namespace: argparse.Namespace) -> int:
     return _run_formal_command(
-        namespace.root, record=True, json_output=namespace.json_output
+        namespace.root,
+        record=True,
+        json_output=namespace.json_output,
+        actor=namespace.actor,
     )
 
 
@@ -1209,6 +1263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         tree="",
         exclude=[],
         tier=Tier.LIGHTWEIGHT.value,
+        actor=default_actor(),
     )
     parsed = parser.parse_args(arguments, namespace=namespace)
     if not isinstance(parsed, _Arguments):
@@ -1273,6 +1328,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 parsed.project,
                 payload,
                 tier=Tier(parsed.tier),
+                actor=parsed.actor,
             )
         except (InitError, StoreError) as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)
@@ -1343,7 +1399,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("vouch-mk2: migrate --approve requires --target", file=sys.stderr)
             return 2
         try:
-            report_path = apply_migration(plan, parsed.target, None)
+            report_path = apply_migration(
+                plan,
+                parsed.target,
+                None,
+                actor=parsed.actor,
+            )
         except MigrationRefused as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)
             return 1
@@ -1357,7 +1418,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if parsed.record and not parsed.root:
             print("vouch-mk2: formal --record requires --root", file=sys.stderr)
             return 2
-        return _run_formal_command(parsed.root, record=parsed.record)
+        return _run_formal_command(
+            parsed.root,
+            record=parsed.record,
+            actor=parsed.actor,
+        )
 
     if parsed.command == "upgrade":
         was_published = set(parsed.was_published)
@@ -1378,6 +1443,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     store,
                     dry_run=parsed.dry_run,
                     published_once=assertions,
+                    actor=parsed.actor,
+                    run_id=ci_run_id(),
                 )
         except UpgradeRefused as error:
             print(

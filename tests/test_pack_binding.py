@@ -27,6 +27,7 @@ def _project(tmp_path: Path) -> tuple[Path, str]:
     (project / "tests" / "test_b.py").write_text("def test_b():\n    assert False\n")
     root = str(project / ".vouch")
     Store.init(root).close()
+    assert main(["set-ci-policy", "--root", root, "--policy", "ledger"]) == 0
     assert main(["specify", "--root", root, "--name", "core", "--version", "v1"]) == 0
     return project, root
 
@@ -42,7 +43,7 @@ def test_state_format_is_two_and_the_unit_carries_a_pack_digest() -> None:
     from vouch_mk2.core.model import Unit
     from vouch_mk2.store import CURRENT_STATE_FORMAT
 
-    assert CURRENT_STATE_FORMAT == 3
+    assert CURRENT_STATE_FORMAT == 4
     unit = Unit("u", "1", UnitStatus.ACCEPTANCE_FROZEN, (), "u-pack/1", False, acceptance_pack_digest="a" * 64, pack_history=("u-pack/0",))
     snapshot = Snapshot(revision=1, units=(unit,))
     assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
@@ -55,7 +56,7 @@ def test_format1_upgrades_to_format2_with_unbound_packs() -> None:
 
     document = json.loads((ROOT / "tests" / "fixtures" / "state-format" / "format1.golden.json").read_bytes())
     upgraded, steps = upgrade_document(document)
-    assert steps == [(1, 2), (2, 3)]
+    assert steps == [(1, 2), (2, 3), (3, 4)]
     units = upgraded["units"]
     assert isinstance(units, list)
     for unit in units:
@@ -72,13 +73,18 @@ def test_format2_golden_is_pinned() -> None:
     from vouch_mk2.store.upgrade import upgrade_document
 
     document, steps = upgrade_document(json.loads(golden))
-    assert steps == [(2, 3)]
+    assert steps == [(2, 3), (3, 4)]
     snapshot = decode_snapshot(encode_document(document))
     assert snapshot.revision == 7
     assert {u.acceptance_pack_digest for u in snapshot.units} == {"", "c" * 64, "d" * 64}
-    assert encode_snapshot(snapshot) == (
-        ROOT / "tests" / "fixtures" / "state-format" / "format3.golden.json"
+    format4 = (
+        ROOT / "tests" / "fixtures" / "state-format" / "format4.golden.json"
     ).read_bytes()
+    # Format 2 predates the strict-new-store default; omission is its truthful
+    # ledger-policy value, while the current-format construction golden uses strict.
+    assert encode_snapshot(snapshot) == format4.replace(
+        b'"ci_policy":"strict",', b""
+    )
 
 
 def test_pack_inventory_is_a_canonical_object_kind() -> None:

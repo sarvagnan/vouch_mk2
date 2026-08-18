@@ -41,9 +41,11 @@ meant to be frozen **before** implementation. Vouch records a pack-version *labe
 and, when you pass `--pack-file`, stores an inventory of the pack's files (path, size, sha256)
 as a content-addressed object bound to the unit. From then on `check --project .` re-hashes
 those files and FAILs if any moved — the goalposts are mechanically pinned. What Vouch still
-cannot prove is *chronology*: that the freeze preceded the implementation is your method's
-control, which the recorded order of Vouch's own events makes auditable. Here the pack is one
-failing test.
+cannot prove is *chronology relative to unrecorded implementation work*: that the freeze
+preceded the implementation is your method's control. The event log is authoritative for the
+recorded order of Vouch's own events, and `check.event-log` verifies that order by replaying it
+through `apply()` and byte-comparing the derived snapshot cache. Here the pack is one failing
+test.
 
 ```sh
 python3 vouch.lock specify --root .vouch --name greeter --version v1
@@ -243,6 +245,8 @@ python3 vouch.lock complete --root .vouch --release-id r1
 `check --ci` runs every mechanical check and exits 0 only if the composed verdict is PASS.
 `generate` writes the system map and the agent context, both of which `check` verifies for
 freshness against the state they were generated from.
+`check.event-log` also walks the authoritative event log and replays it from the empty snapshot;
+the committed snapshot is the O(1)-read derived cache and must reproduce byte-for-byte.
 
 `check` does not re-explore the bounded formal model. At `high` it cheaply verifies the
 recorded certificate, current policy tables, and checker identity, then reports

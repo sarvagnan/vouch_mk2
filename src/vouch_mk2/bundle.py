@@ -14,7 +14,6 @@ from vouch_mk2.core import (
     InventoryEntry,
     PackEntry,
     PackInventory,
-    apply,
     decide,
 )
 from vouch_mk2.store import (
@@ -27,6 +26,7 @@ from vouch_mk2.store import (
     encode_bundle_inventory,
     encode_pack_inventory,
 )
+from vouch_mk2.store.event_log import commit_events, default_actor
 
 
 class BundleError(StoreError):
@@ -384,8 +384,12 @@ def bind_bundle(store: Store, release_id: str, inventory: BundleInventory) -> st
     if not isinstance(decision, Accepted):
         codes = tuple(violation.code for violation in decision.violations)
         raise StoreError(f"bind-bundle refused: {codes!r}")
-    store.commit(
-        apply(snapshot, decision.events),
+    commit_events(
+        store,
+        snapshot,
+        decision.events,
+        actor=default_actor(),
+        run_id="",
         objects=((ArtifactKind.BUNDLE_INVENTORY, data),),
     )
     return digest
@@ -405,8 +409,12 @@ def bind_pack(store: Store, name: str, inventory: PackInventory) -> str:
     if not isinstance(decision, Accepted):
         codes = tuple(violation.code for violation in decision.violations)
         raise StoreError(f"bind-pack refused: {codes!r}")
-    store.commit(
-        apply(snapshot, decision.events),
+    commit_events(
+        store,
+        snapshot,
+        decision.events,
+        actor=default_actor(),
+        run_id="",
         objects=((ArtifactKind.ACCEPTANCE_PACK, data),),
     )
     return digest

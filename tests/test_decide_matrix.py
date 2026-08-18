@@ -111,6 +111,7 @@ PURE_ARTIFACT_RESULTS = tuple(
         mk2.CHECK_CONTEXT_FRESHNESS,
         mk2.CHECK_PACK_BOUND,
         mk2.CHECK_PACK_FILES_MATCH,
+        mk2.CHECK_EVENT_LOG,
     )
 )
 
@@ -161,7 +162,7 @@ def test_unit_matrix_cell(status: UnitStatus, command: Command) -> None:
     unit = after.unit("u")
     assert unit is not None
     assert unit.status.value == target
-    assert after.revision == snapshot.revision + 1
+    assert after.revision == snapshot.revision + len(decision.events)
 
 
 DEVIATION_COMMANDS: tuple[Command, ...] = (

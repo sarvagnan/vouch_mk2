@@ -97,8 +97,8 @@ def test_generated_workflow_runs_exhaustive_formal_after_ci_check(
     assert workflow.index(check) < workflow.index(formal)
 
 
-def test_format_three_legacy_policy_defaults_to_ledger_and_new_facts_round_trip() -> None:
-    legacy = encode_snapshot(Snapshot())
+def test_format_four_legacy_policy_defaults_to_ledger_and_new_facts_round_trip() -> None:
+    legacy = encode_snapshot(Snapshot(ci_policy=CiPolicy.LEDGER))
     assert b"ci_policy" not in legacy and b"ci_exceptions" not in legacy
     assert decode_snapshot(legacy).ci_policy is CiPolicy.LEDGER
     strict = Snapshot(
@@ -107,7 +107,7 @@ def test_format_three_legacy_policy_defaults_to_ledger_and_new_facts_round_trip(
         ci_exceptions=(CiException("u@v1", "planned work"),),
     )
     encoded = encode_snapshot(strict)
-    assert json.loads(encoded)["state_format"] == 3
+    assert json.loads(encoded)["state_format"] == 4
     assert decode_snapshot(encoded) == strict
 
 

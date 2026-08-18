@@ -530,7 +530,14 @@ def test_cli_never_presents_store_errors_as_policy_refusals(
     root = tmp_path / "store"
     _init_store(root, unit_name="u")
 
-    def fail_infrastructure(_store: Store, _event: EvidenceEvent) -> str:
+    def fail_infrastructure(
+        _store: Store,
+        _event: EvidenceEvent,
+        *,
+        actor: str | None = None,
+        run_id: str = "",
+    ) -> str:
+        del actor, run_id
         raise StoreError("disk unavailable: refused: not a policy code")
 
     monkeypatch.setattr(cli_module, "record_evidence", fail_infrastructure)
@@ -569,7 +576,14 @@ def test_record_formal_certificate_json_reports_its_own_commit_revision(
     monkeypatch.setattr(cli_module, "run_formal", lambda: fake_run)
     monkeypatch.setattr(cli_module, "passed", lambda _run: True)
 
-    def fake_record(store: Store, _run: FormalRun) -> str:
+    def fake_record(
+        store: Store,
+        _run: FormalRun,
+        *,
+        actor: str | None = None,
+        run_id: str = "",
+    ) -> str:
+        del actor, run_id
         with store.write_locked():
             snapshot = store.read_snapshot()
             own_revision.append(snapshot.revision + 1)

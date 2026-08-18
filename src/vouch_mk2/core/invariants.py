@@ -140,6 +140,15 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
     def add(code: str, detail: str) -> None:
         found.append(Violation(code=code, detail=detail))
 
+    if snapshot.event_head and (
+        len(snapshot.event_head) != 64
+        or any(character not in "0123456789abcdef" for character in snapshot.event_head)
+    ):
+        add(
+            "event.head-invalid",
+            "event_head must be empty or 64 lowercase hexadecimal characters",
+        )
+
     seen_unit_refs: set[tuple[str, str]] = set()
     active_names: set[str] = set()
     for index, unit in enumerate(snapshot.units):

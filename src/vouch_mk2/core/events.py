@@ -16,6 +16,7 @@ from vouch_mk2.core.model import (
     LaunchCriteria,
     ReleaseArchetype,
     Tier,
+    Snapshot,
     UnitRef,
 )
 from vouch_mk2.ir.schema import Verdict
@@ -34,6 +35,32 @@ class GateRecord:
 
     transition: str
     checks: tuple[GateCheck, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PreLogHistoryRecorded:
+    """Truthful checkpoint for history written before event logging existed.
+
+    ``baseline`` is the format-upgraded snapshot already present in the store,
+    with an empty event head.  It preserves known state without fabricating the
+    lifecycle events that led to it; ``description`` names that absent range.
+    """
+
+    description: str
+    baseline: Snapshot
+
+
+@dataclass(frozen=True, slots=True)
+class EventRecord:
+    """One content-addressed envelope around one folded domain event."""
+
+    folded_event: Event
+    recorded_at: str
+    prev: str
+    revision: int
+    actor: str
+    run_id: str
+    pack_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,7 +295,8 @@ class ReleaseInvalidated:
 
 
 type Event = (
-    UnitSpecified
+    PreLogHistoryRecorded
+    | UnitSpecified
     | AcceptanceFrozen
     | AcceptancePackBound
     | AcceptancePackRebound

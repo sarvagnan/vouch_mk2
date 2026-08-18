@@ -15,6 +15,7 @@ from typing import Iterator
 from vouch_mk2.core.invariants import validate_snapshot
 from vouch_mk2.core.model import Snapshot
 from vouch_mk2.store.codec import (
+    CURRENT_STATE_FORMAT,
     decode_raw_document,
     decode_snapshot,
     encode_snapshot,
@@ -711,6 +712,9 @@ class Store:
         self,
         snapshot: Snapshot,
         objects: Sequence[tuple[ArtifactKind, bytes]] = (),
+        *,
+        expected_revision: int | None = None,
+        allow_format_upgrade: bool = False,
     ) -> None:
         """CAS-commit objects first, then atomically replace authoritative state."""
         self._require_writable("commit")
@@ -728,15 +732,41 @@ class Store:
         for kind, payload in objects:
             self._require_within_artifact_bound(payload, f"{kind.value} object")
         with self.write_locked():
-            current = self.read_snapshot()
-            expected = snapshot.revision - 1
-            if current.revision != expected:
+            if allow_format_upgrade:
+                raw = decode_raw_document(self.read_state_bytes())
+                raw_format = raw.get("state_format", 0)
+                if type(raw_format) is not int or not (
+                    0 <= raw_format < CURRENT_STATE_FORMAT
+                ):
+                    raise StoreError(
+                        "format upgrade commit requires an older state format"
+                    )
+                current_revision = raw.get("revision")
+                if type(current_revision) is not int:
+                    raise StoreError("revision: current raw document must declare an integer")
+            else:
+                current_revision = self.read_snapshot().revision
+            expected = (
+                snapshot.revision - 1
+                if expected_revision is None
+                else expected_revision
+            )
+            if current_revision != expected:
                 raise CasConflict(
-                    f"revision: expected on-disk {expected}, found {current.revision}"
+                    f"revision: expected on-disk {expected}, found {current_revision}"
                 )
             self._step("cas-checked")
 
             for kind, payload in objects:
                 self.put_object(kind, payload)
+
+            if snapshot.event_head:
+                try:
+                    self.get_object(ArtifactKind.EVENT, snapshot.event_head)
+                except IntegrityError as error:
+                    raise StoreError(
+                        "event_head must resolve before state replacement: "
+                        f"{error}"
+                    ) from error
 
             self._replace_state_bytes(data)

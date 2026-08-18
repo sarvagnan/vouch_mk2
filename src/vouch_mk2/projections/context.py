@@ -55,6 +55,10 @@ def agent_context(snapshot: Snapshot) -> str:
             f"{len(snapshot.deviations)} deviations; {len(snapshot.releases)} releases; "
             f"assurance tier {snapshot.tier.value}."
         ),
+        (
+            "Event log head "
+            + (f"`{snapshot.event_head}`." if snapshot.event_head else "GENESIS.")
+        ),
         *(
             ()
             if snapshot.ci_policy.value == "ledger" and not snapshot.ci_exceptions

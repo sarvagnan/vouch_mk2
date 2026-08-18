@@ -73,6 +73,7 @@ from vouch_mk2.core.events import (
     GateRecord,
     OpenInCiCleared,
     OpenInCiMarked,
+    PreLogHistoryRecorded,
     ReleaseCriteriaSet,
     ReleaseFailedUnrecovered,
     ReleaseInvalidated,
@@ -1535,6 +1536,12 @@ def _with_evidence_head(
 
 
 def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
+    if isinstance(event, PreLogHistoryRecorded):
+        if snapshot != Snapshot():
+            raise ValueError("pre-log history can only be replayed from the empty snapshot")
+        if event.baseline.event_head:
+            raise ValueError("pre-log baseline must have an empty event head")
+        return event.baseline
     units = snapshot.units
     deviations = snapshot.deviations
     releases = snapshot.releases
@@ -1844,6 +1851,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
     )
     return Snapshot(
         revision=snapshot.revision,
+        event_head=snapshot.event_head,
         units=units,
         deviations=deviations,
         releases=releases,
@@ -1891,20 +1899,35 @@ def _with_release_status(
     )
 
 
-def apply(snapshot: Snapshot, events: tuple[Event, ...]) -> Snapshot:
-    """Fold accepted events into the next snapshot (revision + 1)."""
+def apply(
+    snapshot: Snapshot,
+    events: tuple[Event, ...],
+    *,
+    event_digests: tuple[str, ...] = (),
+) -> Snapshot:
+    """Fold accepted events, advancing one revision per event.
+
+    Runtime recording and replay pass the content digest corresponding to each
+    event.  Pure policy callers omit them; the existing event head is then
+    retained because hashing remains outside the core.
+    """
+    if event_digests and len(event_digests) != len(events):
+        raise ValueError("event_digests must contain one digest per event")
     current = snapshot
-    for event in events:
+    for index, event in enumerate(events):
         current = _apply_one(current, event)
-    return Snapshot(
-        revision=snapshot.revision + 1,
-        units=current.units,
-        deviations=current.deviations,
-        releases=current.releases,
-        evidence_heads=current.evidence_heads,
-        anchor_mode=current.anchor_mode,
-        tier=current.tier,
-        formal_certificate_digest=current.formal_certificate_digest,
-        ci_policy=current.ci_policy,
-        ci_exceptions=current.ci_exceptions,
-    )
+        revision = (
+            current.revision
+            if isinstance(event, PreLogHistoryRecorded)
+            else current.revision + 1
+        )
+        current = replace(
+            current,
+            revision=revision,
+            event_head=(
+                event_digests[index]
+                if event_digests
+                else current.event_head
+            ),
+        )
+    return current
