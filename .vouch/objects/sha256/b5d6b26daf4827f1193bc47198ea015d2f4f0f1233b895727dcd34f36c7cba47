@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"generated-ci@1","reason":"unit in progress: batch B blocker (generated workflow cannot reach green for adopters)"},"prev":"57e9ec23090db80ea31270f462647657aa04856f083a9809347cfdbfaf8d0ea1","recorded_at":"2026-08-18T15:32:15+00:00","revision":368,"run_id":""}

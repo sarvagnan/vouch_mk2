@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_generated_ci.py -q","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"a7eb2ad18492a8a2a515bd0770dd42d8e12b53a47491788f3b95b258b7d1fdb8","parent":"GENESIS","recorded_at":"2026-08-18T15:32:15+00:00","sequence":1,"unit":{"name":"generated-ci","version":"1"}}

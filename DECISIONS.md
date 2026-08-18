@@ -773,3 +773,27 @@ self-hosting problem); a standing exception (permanent and growing).
 **Method rule (batch-A note O-2):** a pack amendment edits the requirement text in place *and*
 records the amendment note; it never appends a contradiction to a requirement that still reads
 the old way.
+
+## D-19 — Batch B: the adoption seam (external review, 2026-08-18)
+
+**Status:** decided 2026-08-18 (user). A third independent review found the core close to release
+quality and the distribution/CI seam not. Findings reproduced by the owner before acceptance:
+the generated workflow runs `check --ci` before it advances anchors (so any adopter at standard/
+high with anchor mode `ci` is permanently red and never reaches the step that would resolve it —
+unit #14 fixed this for mk2's OWN workflow and asserted only that, missing the class);
+job-wide `contents: write` granted before the checked-out lock executes, with `persist-credentials`
+left default; `record-evidence` reads the pack digest AFTER the child exits, so a concurrent
+freeze/rebind attributes an exit status to a pack that was not current while the tests ran;
+`init` can leave `.vouch/` and `vouch.lock` behind on failure and then refuse to retry; and there
+is no licence, tag, release artifact, or version command.
+
+- **Licence: MIT** (user's choice), with metadata in `pyproject.toml` and a `LICENSE` file.
+- **Order:** B1 `generated-ci@1` (blockers #1/#2), B2 `evidence-atomicity@1` (#3 and the unbounded
+  `--json` buffering), B3 `init-recovery@1` (#4) now; B4 `release@1` (licence, tagged `vouch.lock`
+  with digest and provenance, `--version`, lock upgrade/rollback) and B5 `adoption-docs@1`
+  (`docs/adoption.md`, the `vouch-mk2` vs `python3 vouch.lock` strings, teaching
+  `--pack-test-file`) immediately after — they are load-bearing only once the artifact leaves
+  this machine.
+- **Standing rule from #1:** when a defect is found in an instance mk2 maintains for itself, the
+  acceptance pack must assert the property on the *generated* artifact adopters receive, not on
+  mk2's own copy. Fixing the instance is not fixing the class.

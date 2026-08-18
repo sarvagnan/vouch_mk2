@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/generated-ci-1.spec.md","role":"spec","sha256":"fa286237268d119414029d868ba78178a5117125029a4fa4a5740df017e95ec0","size":3844},{"path":"tests/test_generated_ci.py","role":"test","sha256":"bb20e1263590d813d6c670f5447c22c150b39809f018d921f7761a0c351f024c","size":6935}],"pack_format":2}
