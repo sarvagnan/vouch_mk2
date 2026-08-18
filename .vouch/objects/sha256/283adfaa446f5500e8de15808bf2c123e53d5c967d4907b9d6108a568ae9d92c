@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-ea-02","deviation_type":"pack-defect","unit":{"name":"evidence-atomicity","version":"1"}},"prev":"0cef296e4cb0816fbff47e78ad605ba1e70ea79135fc16e256663c3750810994","recorded_at":"2026-08-18T17:40:27+00:00","revision":399,"run_id":""}
