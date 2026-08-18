@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_evidence_atomicity.py -q","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"1af72d5bb367af4ddada87fe2c70d80ad3cb77acc0500333b434f126dac0441e","parent":"GENESIS","recorded_at":"2026-08-18T16:42:29+00:00","sequence":1,"unit":{"name":"evidence-atomicity","version":"1"}}
