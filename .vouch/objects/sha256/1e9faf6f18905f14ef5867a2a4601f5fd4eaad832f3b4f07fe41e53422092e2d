@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"ci-anchor@1","reason":"batch A unit #13 in flight: D-18 B5 CI anchoring; pack/1 frozen and RED recorded"},"prev":"ea73dbd54deb7b2f22b8c5d6c4a0b6c60798906358a5d332d1449defbb88cdbe","recorded_at":"2026-08-18T10:38:59+00:00","revision":328,"run_id":""}
