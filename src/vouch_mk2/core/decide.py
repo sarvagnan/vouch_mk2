@@ -129,6 +129,9 @@ _RELEASE_MACHINE = mk2.MK2.machine(mk2.RELEASE_O_MACHINE)
 _SATISFIED_DEPENDENCY_STATUSES = frozenset(
     mk2.MK2.state_set("unit.satisfied-dependency").states
 )
+_CI_TERMINAL_UNIT_STATUSES = frozenset(
+    {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND, UnitStatus.SUPERSEDED}
+)
 
 
 def _index(machine_name: str) -> Mapping[tuple[str, str], Transition]:
@@ -1106,16 +1109,30 @@ def _decide_mark_open_in_ci(snapshot: Snapshot, command: MarkOpenInCi) -> Decisi
             "ci-policy.reason-required",
             "mark-open-in-ci requires a non-empty reason",
         )
-    return Accepted(events=(OpenInCiMarked(command.name, command.reason),))
+    if (
+        unit.status is UnitStatus.SPECIFIED
+        or unit.status in _CI_TERMINAL_UNIT_STATUSES
+    ):
+        return _refuse(
+            "ci-policy.exception-not-open",
+            f"unit {unit.ref().label()!r} is not post-specified and nonterminal",
+        )
+    return Accepted(
+        events=(OpenInCiMarked(unit.ref().label(), command.reason),)
+    )
 
 
 def _decide_clear_open_in_ci(snapshot: Snapshot, command: ClearOpenInCi) -> Decision:
-    if not any(item.unit_name == command.name for item in snapshot.ci_exceptions):
+    unit = snapshot.unit(command.name)
+    if unit is None:
+        return _refuse("unit.unknown", f"unit {command.name!r} does not exist")
+    exact_ref = unit.ref().label()
+    if not any(item.unit_name == exact_ref for item in snapshot.ci_exceptions):
         return _refuse(
             "ci-policy.exception-missing",
-            f"unit {command.name!r} has no open-in-CI exception",
+            f"unit {exact_ref!r} has no open-in-CI exception",
         )
-    return Accepted(events=(OpenInCiCleared(command.name),))
+    return Accepted(events=(OpenInCiCleared(exact_ref),))
 
 
 def _decide_record_formal_certificate(
@@ -1814,6 +1831,17 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             )
         case _:
             assert_never(event)
+    active_exception_refs = {
+        unit.ref().label()
+        for unit in units
+        if unit.status is not UnitStatus.SPECIFIED
+        and unit.status not in _CI_TERMINAL_UNIT_STATUSES
+    }
+    ci_exceptions = tuple(
+        item
+        for item in ci_exceptions
+        if item.unit_name in active_exception_refs
+    )
     return Snapshot(
         revision=snapshot.revision,
         units=units,

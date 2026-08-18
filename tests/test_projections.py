@@ -723,9 +723,12 @@ def _regression_tier_control_coverage_reports_partial_none_full_and_waived() -> 
                     assert cell.residual
 
     light = check_tier_controls(Snapshot(tier=Tier.LIGHTWEIGHT)).detail
+    assert "Typed contracts, declared classes, purity checks" in light
     assert "PARTIAL; mech=pyrefly strict, import-linter" in light
     assert "residual=declared classes are human reviewed" in light
-    assert "[mutation-testing]: waived — WAIVED / no obligation" in light
+    assert "Harness-recorded red→green→refactor" in light
+    assert "Mutation testing [mutation-testing]" in light
+    assert "waived — WAIVED / no obligation" in light
     standard = check_tier_controls(Snapshot(tier=Tier.STANDARD)).detail
     assert "trigger evaluation NOT CHECKED" in standard
     assert f"[{mk2.TIER_EVIDENCE_CONTROL}]" in standard

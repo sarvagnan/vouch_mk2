@@ -45,7 +45,11 @@ from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
 from vouch_mk2.init import InitError, init_project
 from vouch_mk2.ir.schema import Verdict
-from vouch_mk2.io import read_regular_nofollow, write_atomic
+from vouch_mk2.io import (
+    read_regular_nofollow,
+    write_atomic,
+    write_atomic_with_parents,
+)
 from vouch_mk2.lock import build_lock, lock_digest, running_lock_bytes
 from vouch_mk2.migrate import (
     MigrationRefused,
@@ -108,8 +112,8 @@ class _Arguments(argparse.Namespace):
     tier: str
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=os.path.basename(sys.argv[0]) or "vouch-mk2")
+def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=program_name)
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="run structured snapshot checks")
     check.add_argument(
@@ -766,18 +770,25 @@ def _make_pack_binding_handler(command_type: _CommandClass) -> _LifecycleHandler
     return handler
 
 
-_SECRET_FLAG_FRAGMENTS = ("token", "password", "secret", "api-key", "api_key")
+_SECRET_OPTIONS = frozenset(
+    {"--token", "--password", "--secret", "--api-key", "--api_key"}
+)
 _OPAQUE_SECRET = re.compile(r"(?=.{24,}$)(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9_-]+")
 
 
 def _secret_looking_command(command_argv: Sequence[str]) -> bool:
     for index, argument in enumerate(command_argv):
         lowered = argument.lower()
-        if any(fragment in lowered for fragment in _SECRET_FLAG_FRAGMENTS):
+        option = lowered.partition("=")[0]
+        if option in _SECRET_OPTIONS:
             return True
-        if lowered.startswith("aws_") and "secret" in lowered:
+        if lowered.startswith("aws_secret"):
             return True
-        if index > 0 and _OPAQUE_SECRET.fullmatch(argument) is not None:
+        if (
+            index > 0
+            and _OPAQUE_SECRET.fullmatch(argument) is not None
+            and re.fullmatch(r"[0-9a-fA-F]+", argument) is None
+        ):
             return True
     return False
 
@@ -1146,8 +1157,14 @@ def _expected_lock_digest(spec: str) -> str | None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    parser = _parser()
+    process_invocation = argv is None
+    arguments = list(sys.argv[1:] if process_invocation else argv)
+    program_name = (
+        os.path.basename(sys.argv[0]) or "vouch-mk2"
+        if process_invocation
+        else "vouch-mk2"
+    )
+    parser = _parser(program_name)
     evidence_argv: list[str] | None = None
     if (
         arguments
@@ -1210,11 +1227,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             source_root = os.path.dirname(os.path.dirname(__file__))
             payload = build_lock(source_root)
-            os.makedirs(
-                os.path.dirname(os.path.abspath(parsed.output)),
-                exist_ok=True,
+            write_atomic_with_parents(
+                parsed.output, payload, 0o755, "vouch.lock"
             )
-            write_atomic(parsed.output, payload, 0o755, "vouch.lock")
         except (OSError, StoreError) as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)
             return 2
@@ -1422,14 +1437,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         actions = next_actions(snapshot)
         if parsed.command == "next":
-            # Format-3 stores created before adoption-seam have ledger semantics and
-            # frozen projections/tests that spell the historical console-script name.
-            # New init stores are strict and use the actual transport name.
-            program_name = (
-                parser.prog
-                if snapshot.ci_policy.value == "strict"
-                else "vouch-mk2"
-            )
             if parsed.json_output:
                 print(
                     json.dumps(
@@ -1488,7 +1495,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if project is None and os.path.basename(normalized_root) == ".vouch":
                 project = os.path.abspath(os.path.dirname(normalized_root))
             artifact_results = run_artifact_checks(
-                store, snapshot, project=project
+                store,
+                snapshot,
+                project=project,
             )
     except StoreError as error:
         print(f"vouch-mk2: {error}", file=sys.stderr)

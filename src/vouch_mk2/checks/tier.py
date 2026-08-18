@@ -203,9 +203,8 @@ def check_tier_high_attestation(snapshot: Snapshot) -> CheckResult:
     )
 
 
-def check_tier_controls(
-    snapshot: Snapshot, *, legacy_projection: bool = False
-) -> CheckResult:
+def _legacy_tier_control_detail(snapshot: Snapshot) -> str:
+    """Stable context-projection layout; never selected from a store fact."""
     rows: list[str] = []
     waived: list[str] = []
     for requirement in mk2.MK2.tier_requirements:
@@ -213,16 +212,11 @@ def check_tier_controls(
         qualifiers = tuple(part for part in (cell.scope, cell.detail) if part)
         suffix = f" ({'; '.join(qualifiers)})" if qualifiers else ""
         label = (
-            f"{snapshot.tier.value} [{requirement.control_id}]: "
-            f"{cell.level.value}{suffix}"
+            f"{snapshot.tier.value}: {requirement.description} "
+            f"[{requirement.control_id}] is {cell.level.value}{suffix}"
         )
         if cell.level is RequirementLevel.WAIVED:
-            if legacy_projection:
-                waived.append(
-                    f"{requirement.description} [{requirement.control_id}]"
-                )
-                continue
-            rows.append(f"{label} — WAIVED / no obligation")
+            waived.append(f"{requirement.description} [{requirement.control_id}]")
             continue
         if cell.coverage is Coverage.FULL:
             continue
@@ -230,44 +224,71 @@ def check_tier_controls(
             mechanical = ", ".join(
                 cell.mechanical_evidence + cell.mechanical_checks
             )
-            if legacy_projection:
-                legacy_label = (
-                    f"{snapshot.tier.value}: {requirement.description} "
-                    f"[{requirement.control_id}] is {cell.level.value}{suffix}"
-                )
-                rows.append(
-                    f"{legacy_label} — PARTIALLY CHECKED "
-                    f"(mechanical: {mechanical}) residual: {cell.residual}"
-                )
-            else:
-                rows.append(
-                    f"{label} — PARTIAL; mech={mechanical}; "
-                    f"residual={cell.residual}"
-                )
+            rows.append(
+                f"{label} — PARTIALLY CHECKED (mechanical: {mechanical}) "
+                f"residual: {cell.residual}"
+            )
             continue
         prefix = (
             "trigger evaluation NOT CHECKED; residual requirement: "
             if cell.level is RequirementLevel.RISK_TRIGGERED
             else ""
         )
-        if legacy_projection:
-            legacy_label = (
-                f"{snapshot.tier.value}: {requirement.description} "
-                f"[{requirement.control_id}] is {cell.level.value}{suffix}"
-            )
-            rows.append(
-                f"{legacy_label} — NOT CHECKED: {prefix}{cell.residual}"
-            )
-        else:
-            rows.append(f"{label} — NOT CHECKED: {prefix}{cell.residual}")
+        rows.append(f"{label} — NOT CHECKED: {prefix}{cell.residual}")
     if waived:
+        rows.append(f"waived at {snapshot.tier.value}: " + ", ".join(waived))
+    return "; ".join(rows)
+
+
+def check_tier_controls(
+    snapshot: Snapshot, *, legacy_projection: bool = False
+) -> CheckResult:
+    if legacy_projection:
+        return CheckResult(
+            check_id=mk2.ORG_TIER_CONTROLS,
+            verdict=Verdict.NOT_CHECKED,
+            detail=_legacy_tier_control_detail(snapshot),
+        )
+    rows: list[str] = []
+    for requirement in mk2.MK2.tier_requirements:
+        cell = requirement.cell(snapshot.tier)
+        qualifiers = tuple(part for part in (cell.scope, cell.detail) if part)
+        suffix = f" ({'; '.join(qualifiers)})" if qualifiers else ""
+        label = (
+            f"{snapshot.tier.value} {requirement.description} "
+            f"[{requirement.control_id}] {cell.level.value}{suffix}"
+        )
+        if cell.level is RequirementLevel.WAIVED:
+            rows.append(f"{label} — WAIVED / no obligation")
+            continue
+        if cell.coverage is Coverage.FULL:
+            mechanical = ", ".join(
+                cell.mechanical_evidence + cell.mechanical_checks
+            )
+            rows.append(f"{label} — FULL; mech={mechanical}")
+            continue
+        if cell.coverage is Coverage.PARTIAL:
+            mechanical = ", ".join(
+                cell.mechanical_evidence + cell.mechanical_checks
+            )
+            rows.append(f"{label} — PARTIAL; mech={mechanical}")
+            rows.append(
+                f"{requirement.description} — residual={cell.residual}"
+            )
+            continue
+        prefix = (
+            "trigger evaluation NOT CHECKED; residual requirement: "
+            if cell.level is RequirementLevel.RISK_TRIGGERED
+            else ""
+        )
+        rows.append(f"{label} — NOT CHECKED")
         rows.append(
-            f"waived at {snapshot.tier.value}: " + ", ".join(waived)
+            f"{requirement.description} — residual={prefix}{cell.residual}"
         )
     return CheckResult(
         check_id=mk2.ORG_TIER_CONTROLS,
         verdict=Verdict.NOT_CHECKED,
-        detail=("; ".join(rows) if legacy_projection else "\n".join(rows)),
+        detail="\n".join(rows),
     )
 
 

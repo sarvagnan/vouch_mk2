@@ -50,8 +50,21 @@ def _not_applicable(check_id: str, subjects: str) -> CheckResult:
 
 
 def check_ci_policy(snapshot: Snapshot, *, enforce: bool = False) -> CheckResult:
+    eligible_refs = {
+        unit.ref().label()
+        for unit in snapshot.units
+        if unit.status is not UnitStatus.SPECIFIED
+        and unit.status not in _CI_TERMINAL_UNIT_STATUSES
+    }
     exceptions = tuple(
-        sorted(snapshot.ci_exceptions, key=lambda item: item.unit_name)
+        sorted(
+            (
+                item
+                for item in snapshot.ci_exceptions
+                if item.unit_name in eligible_refs
+            ),
+            key=lambda item: item.unit_name,
+        )
     )
     exception_detail = (
         "exceptions: "
@@ -98,7 +111,7 @@ def check_ci_policy(snapshot: Snapshot, *, enforce: bool = False) -> CheckResult
             unit.ref().label()
             for unit in subjects
             if unit.status not in _CI_TERMINAL_UNIT_STATUSES
-            and unit.name not in exception_names
+            and unit.ref().label() not in exception_names
         )
     )
     return CheckResult(

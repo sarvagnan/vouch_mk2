@@ -240,18 +240,18 @@ def test_artifact_checks_pass_for_complete_anchored_chain(tmp_path: Path) -> Non
         _commit_decision(store, AdvanceAnchor("u"))
         results = run_artifact_checks(store, store.read_snapshot())
         by_id = {result.check_id: result for result in results}
-        assert by_id[mk2.CHECK_MAP_FRESHNESS].verdict is Verdict.NOT_APPLICABLE
-        assert all(
-            result.verdict in {Verdict.PASS, Verdict.NOT_APPLICABLE}
-            for result in results
-            if result.check_id
-            not in {
-                mk2.CHECK_MAP_FRESHNESS,
-                mk2.CHECK_PACK_BOUND,
-                mk2.CHECK_PACK_FILES_MATCH,
-            }
-        )
-        assert all(result.verdict is not Verdict.NOT_CHECKED for result in results)
+        assert {
+            check_id: result.verdict for check_id, result in by_id.items()
+        } == {
+            mk2.CHECK_BUNDLE_INVENTORIES: Verdict.NOT_APPLICABLE,
+            mk2.CHECK_CONTEXT_FRESHNESS: Verdict.NOT_APPLICABLE,
+            mk2.CHECK_EVIDENCE_ANCHORS: Verdict.PASS,
+            mk2.CHECK_EVIDENCE_CHAINS: Verdict.PASS,
+            mk2.CHECK_FORMAL_CERTIFICATE: Verdict.NOT_APPLICABLE,
+            mk2.CHECK_MAP_FRESHNESS: Verdict.NOT_APPLICABLE,
+            mk2.CHECK_PACK_BOUND: Verdict.NOT_APPLICABLE,
+            mk2.CHECK_PACK_FILES_MATCH: Verdict.NOT_APPLICABLE,
+        }
 
 
 def test_corrupt_evidence_and_absent_head_fail(tmp_path: Path) -> None:

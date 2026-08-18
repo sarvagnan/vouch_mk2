@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_adoption_seam.py -q","evidence_format":2,"kind":"green","outcome":"tests-passed","pack_digest":"91b06b37f06a9bcf1bbab792d920718c72ca1f5b697a089a388bb1f30c4ce4c6","parent":"a948a3dae4aa2681d994487fc75e7d15a63d4f132cb6f51b194dc8f6f986e595","recorded_at":"2026-08-18T06:07:22+00:00","sequence":3,"unit":{"name":"adoption-seam","version":"1"}}

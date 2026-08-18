@@ -154,8 +154,11 @@ class PackRebound:
 
 @dataclass(frozen=True, slots=True)
 class CiException:
-    """A named unit allowed to remain nonterminal under strict CI policy."""
+    """An exact ``NAME@VERSION`` allowed to remain open under strict CI."""
 
+    # The format-3 field is retained as ``name`` on disk, but its value is an
+    # exact UnitRef label. Bare names from the short-lived pre-fix encoder are
+    # readable for compatibility and are never treated as active exemptions.
     unit_name: str
     reason: str
 

@@ -59,6 +59,9 @@ jobs:
       - name: Vouch check
         shell: bash
         run: python vouch.lock check --ci --root .vouch --project .
+      - name: Exhaustive Vouch formal check
+        shell: bash
+        run: python vouch.lock formal
 """
 
 

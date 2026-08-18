@@ -181,8 +181,8 @@ def _regression_tier_v1_covers_legal_lowering_and_committed_refusals(
 
     tier = formal_run.universe(TIER_V1.name)
     assert tier.universe_name == TIER_V1.name == "tier-v1"
-    assert tier.state_count == 294
-    assert tier.transition_count == 2_024
+    assert tier.state_count == 246
+    assert tier.transition_count == 1_640
     representatives = dict(tier.relation.representatives)
     lowering = [
         (representatives[source], representatives[target])
@@ -386,10 +386,11 @@ def test_recorded_certificate_is_checked_cheaply_and_names_unexplored_properties
             for result in run_artifact_checks(store, snapshot)
             if result.check_id == mk2.CHECK_FORMAL_CERTIFICATE
         )
-        assert passed_result.verdict is Verdict.NOT_CHECKED
+        assert passed_result.verdict is Verdict.PASS
         assert calls == []
-        assert "relation digests and counts" in passed_result.detail
-        assert "invariant truth" in passed_result.detail
+        assert "regenerating the reachable relations" in passed_result.detail
+        assert "executing M1-M11" in passed_result.detail
+        assert "witness mutations over them" in passed_result.detail
         assert store.get_object(
             ArtifactKind.FORMAL_TABLES, certificate.tables_digest
         ) == encode_formal_tables(formal_run.tables)
@@ -421,8 +422,8 @@ def test_recorded_certificate_is_checked_cheaply_and_names_unexplored_properties
             for result in run_artifact_checks(store, tampered_snapshot)
             if result.check_id == mk2.CHECK_FORMAL_CERTIFICATE
         )
-        assert tampered_result.verdict is Verdict.NOT_CHECKED
-        assert "relation digests and counts" in tampered_result.detail
+        assert tampered_result.verdict is Verdict.PASS
+        assert "regenerating the reachable relations" in tampered_result.detail
 
         stale_data = encode_formal_certificate(
             replace(certificate, checker_version="stale-checker")

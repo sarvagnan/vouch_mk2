@@ -276,8 +276,14 @@ def test_approve_commits_revision_one_reports_predicted_fail_and_refuses_rerun(
         mk2.CHECK_TIER_EVIDENCE_REQUIRED,
         mk2.CHECK_TIER_HIGH_ATTESTATION,
         mk2.CHECK_PACK_BOUND,
-        mk2.CHECK_FORMAL_CERTIFICATE,
     }
+    formal_row = next(
+        line
+        for line in check_output.splitlines()
+        if mk2.CHECK_FORMAL_CERTIFICATE in line
+    )
+    assert formal_row.startswith("NOT-APPLICABLE")
+    assert "subjects-present: formal-certificate" in formal_row
     assert check_output.rstrip().endswith("composed: FAIL")
 
     before = report.read_bytes()

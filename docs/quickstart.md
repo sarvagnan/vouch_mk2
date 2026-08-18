@@ -210,8 +210,10 @@ CI policy is a separate recorded store fact. New projects start `strict`: every 
 has left `specified` must be published, release-bound, or superseded when `check --ci` runs.
 Use `set-ci-policy --policy ledger` for the older coherence-only behavior. A genuinely
 in-flight unit can carry a visible, reasoned exception through
-`mark-open-in-ci --name UNIT --reason REASON`; remove it with `clear-open-in-ci --name UNIT`.
-The `check.ci-policy` row names the enforced policy and lists each exception and reason.
+`mark-open-in-ci --name UNIT --reason REASON`; the exception is bound to the current exact
+`UNIT@VERSION` and is cleared when that record becomes terminal or ceases to be active. Remove an
+active exception with `clear-open-in-ci --name UNIT`. The `check.ci-policy` row names the enforced
+policy and lists each exact exception ref and reason.
 
 ## 7. A release
 

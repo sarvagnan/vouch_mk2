@@ -502,12 +502,19 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                     "must be empty or 64 lowercase hexadecimal characters",
                 )
     seen_ci_exceptions: set[str] = set()
+    known_ci_refs = {unit.ref().label() for unit in snapshot.units}
     for index, exception in enumerate(snapshot.ci_exceptions):
-        if not valid_unit_identifier(exception.unit_name):
+        binding_parts = exception.unit_name.rsplit("@", 1)
+        valid_binding = (
+            len(binding_parts) == 2
+            and valid_unit_identifier(binding_parts[0])
+            and valid_unit_identifier(binding_parts[1])
+        ) or valid_unit_identifier(exception.unit_name)
+        if not valid_binding:
             add(
                 "identifier.invalid",
                 f"ci_exceptions[{index}].unit_name {exception.unit_name!r} "
-                "is not a valid identifier",
+                "is not a valid unit ref",
             )
         if exception.unit_name in seen_ci_exceptions:
             add(
@@ -515,10 +522,14 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                 f"ci_exceptions[{index}] duplicates unit {exception.unit_name!r}",
             )
         seen_ci_exceptions.add(exception.unit_name)
-        if snapshot.unit(exception.unit_name) is None:
+        if (
+            exception.unit_name not in known_ci_refs
+            and snapshot.unit(exception.unit_name) is None
+        ):
             add(
                 "ci-policy.exception-unit-unknown",
-                f"ci_exceptions[{index}] names missing unit {exception.unit_name!r}",
+                f"ci_exceptions[{index}] names missing unit ref "
+                f"{exception.unit_name!r}",
             )
         if not exception.reason.strip():
             add(

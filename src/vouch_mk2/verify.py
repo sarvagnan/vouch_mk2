@@ -37,6 +37,7 @@ from vouch_mk2.formal.explore import emit_tables
 from vouch_mk2.formal.invariants import INVARIANTS
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.formal.universe import UNIVERSES
+from vouch_mk2.formal.witnesses import WITNESSES
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict, Violation
@@ -620,15 +621,13 @@ def _formal_failure(detail: str) -> CheckResult:
 
 
 def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
-    if snapshot.tier is not Tier.HIGH:
+    digest = snapshot.formal_certificate_digest
+    if not digest:
         return CheckResult(
             mk2.CHECK_FORMAL_CERTIFICATE,
             Verdict.NOT_APPLICABLE,
-            f"IR applicability rule not met: tier-at-least: high (current: {snapshot.tier.value})",
+            "IR applicability rule not met: subjects-present: formal-certificate",
         )
-    digest = snapshot.formal_certificate_digest
-    if not digest:
-        return _formal_failure("high tier requires a recorded formal certificate")
     try:
         certificate = decode_formal_certificate(
             store.get_object(ArtifactKind.FORMAL_CERTIFICATE, digest)
@@ -695,11 +694,17 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
         or len(certificate.invariants) != len(recorded_invariant_rows)
     ):
         return _formal_failure("invariant registry mismatch")
-    expected_invariant_ids = all_invariant_ids
-    recorded_witness_ids = {
-        invariant_id for _witness_id, invariant_id, _discriminated in certificate.witnesses
+    expected_witness_rows = {
+        (witness.witness_id, witness.invariant_id) for witness in WITNESSES
     }
-    if recorded_witness_ids != expected_invariant_ids:
+    recorded_witness_rows = {
+        (witness_id, invariant_id)
+        for witness_id, invariant_id, _discriminated in certificate.witnesses
+    }
+    if (
+        recorded_witness_rows != expected_witness_rows
+        or len(certificate.witnesses) != len(recorded_witness_rows)
+    ):
         return _formal_failure("witness registry mismatch")
     failed_witness = next(
         (
@@ -713,14 +718,15 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
         return _formal_failure(f"witness {failed_witness!r} did not discriminate")
     return CheckResult(
         mk2.CHECK_FORMAL_CERTIFICATE,
-        Verdict.NOT_CHECKED,
+        Verdict.PASS,
         detail=(
-            "cheap certificate verification passed: certificate object digest, "
-            "checker version, current recorded policy tables, and the certificate's "
-            "formal universe/invariant/witness tables were verified structurally; "
-            "NOT CHECKED without bounded exploration: relation digests and counts, "
-            "invariant truth, and mutation-witness discrimination — run "
-            "`vouch-mk2 formal --record --root ROOT` to re-explore and record them"
+            "cheap certificate verification passed for the narrowed obligation: "
+            "the certificate object resolves at its recorded digest and decodes "
+            "strictly; checker identity is current; recorded tables resolve and "
+            "equal freshly emitted tables; invariant/witness rows cover the current "
+            "registries and are all true; residual not performed by `check`: "
+            "regenerating the reachable relations and executing M1-M11 and the "
+            "witness mutations over them — that is `vouch-mk2 formal`'s job"
         ),
     )
 
@@ -787,7 +793,10 @@ def _check_context_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
 
 
 def run_artifact_checks(
-    store: Store, snapshot: Snapshot, *, project: str | None = None
+    store: Store,
+    snapshot: Snapshot,
+    *,
+    project: str | None = None,
 ) -> tuple[CheckResult, ...]:
     """Run all IR-declared artifact checks, reusing one parent walk per head."""
     walks = tuple(_walk_chain(store, head) for head in snapshot.evidence_heads)

@@ -707,12 +707,15 @@ _OBLIGATIONS = (
         obligation_id=CHECK_FORMAL_CERTIFICATE,
         scope=ObligationScope.ARTIFACT_CHECK,
         description=(
-            "At high tier, a recorded formal certificate has current tables and "
+            "A recorded formal certificate has current tables and "
             "checker identity; exhaustive invariant and witness execution remains "
             "the formal command's responsibility."
         ),
         applicability=(
-            Applicability(kind=ConditionKind.TIER_AT_LEAST, value="high"),
+            Applicability(
+                kind=ConditionKind.SUBJECTS_PRESENT,
+                value="formal-certificate",
+            ),
         ),
     ),
     Obligation(

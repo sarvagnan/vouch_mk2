@@ -283,8 +283,8 @@ def test_cli_formal_reports_closed_relation_and_discriminators(
     assert "states: 264462" in output
     assert "transitions: 1381350" in output
     assert "universe: tier-v1" in output
-    assert "states: 294" in output
-    assert "transitions: 2024" in output
+    assert "states: 246" in output
+    assert "transitions: 1640" in output
     assert "PASS  M1.no-direct-republication" in output
     assert "universe-bounded: label set exhausted for unit b: 2 labels" in output
     assert "PASS  M9.anchor-monotonic" in output
