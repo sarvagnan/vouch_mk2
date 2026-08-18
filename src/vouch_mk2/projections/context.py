@@ -75,6 +75,30 @@ def agent_context(snapshot: Snapshot) -> str:
             f"{sum(unit.pack_binding == 'rebound' for unit in snapshot.units)} rebound after publication."
         ),
         "",
+        "## Evidence anchors",
+        "",
+        *(
+            (
+                f"- {escape_markdown(head.ref().label())}: "
+                + (
+                    "current"
+                    if head.anchored == head.head
+                    else f"at `{head.anchored}`"
+                )
+                + (
+                    "; advanced by workflow run "
+                    f"{escape_markdown(head.anchor_run_id)}"
+                    if head.anchor_run_id
+                    else ""
+                )
+            )
+            for head in sorted(
+                snapshot.evidence_heads,
+                key=lambda item: item.ref().label(),
+            )
+        ),
+        *(("- none",) if not snapshot.evidence_heads else ()),
+        "",
         "## Pack rebound history",
         "",
         *(

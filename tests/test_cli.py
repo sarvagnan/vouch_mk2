@@ -127,14 +127,14 @@ def commit_evidence_snapshot(root: Path, mode: AnchorMode, *, anchor: bool) -> N
         )
         if anchor:
             snapshot = store.read_snapshot()
-            anchor_decision = decide(snapshot, AdvanceAnchor("u"))
+            anchor_decision = decide(snapshot, AdvanceAnchor("u", "fixture-run"))
             assert isinstance(anchor_decision, Accepted)
             commit_events(
                 store,
                 snapshot,
                 anchor_decision.events,
                 actor="test",
-                run_id="",
+                run_id="fixture-run",
             )
 
 

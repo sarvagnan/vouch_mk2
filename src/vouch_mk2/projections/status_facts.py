@@ -16,6 +16,7 @@ class StatusFacts:
     release_counts: tuple[tuple[str, int], ...]
     evidence_chains: int
     anchored_current: int
+    anchor_run_claims: tuple[tuple[str, str], ...]
     anchor_mode: str
     tier: str
     ci_policy: str
@@ -47,6 +48,14 @@ def status_facts(
         evidence_chains=len(snapshot.evidence_heads),
         anchored_current=sum(
             head.anchored == head.head for head in snapshot.evidence_heads
+        ),
+        anchor_run_claims=tuple(
+            (head.ref().label(), head.anchor_run_id)
+            for head in sorted(
+                snapshot.evidence_heads,
+                key=lambda item: item.ref().label(),
+            )
+            if head.anchor_run_id
         ),
         anchor_mode=snapshot.anchor_mode.value,
         tier=snapshot.tier.value,

@@ -596,7 +596,9 @@ def test_lightweight_rebound_still_requires_fresh_green_and_is_named(
     )
 
 
-def test_repeated_rebounds_keep_each_adaptation_green_legal(tmp_path: Path) -> None:
+def test_repeated_rebounds_keep_each_adaptation_green_legal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     helpers = _pack3_helpers()
     project, root = helpers["_published_with_roles"](tmp_path)  # type: ignore[operator]
     for marker in ("B", "C"):
@@ -605,6 +607,7 @@ def test_repeated_rebounds_keep_each_adaptation_green_legal(tmp_path: Path) -> N
         )
         assert helpers["_rebind"](project, root, f"adapt {marker}")[0] == 0  # type: ignore[operator]
         assert helpers["_evidence"](root, "u@v1", "green", helpers["OK"])[0] == 0  # type: ignore[operator]
+    monkeypatch.setenv("GITHUB_RUN_ID", "fixture-run")
     assert helpers["_run"]("advance-anchor", "--root", root, "--unit-name", "u")[0] == 0  # type: ignore[operator]
     assert helpers["_run"]("generate", "--root", root)[0] == 0  # type: ignore[operator]
     code, out = helpers["_run"]("check", "--root", root, "--project", str(project))  # type: ignore[operator]

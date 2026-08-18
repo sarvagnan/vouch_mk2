@@ -561,6 +561,11 @@ def _add_lifecycle_parsers(commands: Any) -> None:
             continue
         annotations = get_type_hints(command_type)
         for field in dataclasses.fields(command_type):
+            if (
+                command_type is command_module.AdvanceAnchor
+                and field.name == "run_id"
+            ):
+                continue
             _add_reflected_field(parser, field, annotations[field.name])
 
 
@@ -574,6 +579,11 @@ def _command_kwargs(
     annotations = get_type_hints(command_type)
     values: dict[str, object] = {}
     for field in dataclasses.fields(command_type):
+        if (
+            command_type is command_module.AdvanceAnchor
+            and field.name == "run_id"
+        ):
+            continue
         annotation = annotations[field.name]
         if annotation is LaunchCriteria:
             values[field.name] = LaunchCriteria(
@@ -686,7 +696,11 @@ def _generic_lifecycle_handler(
     command_type: _CommandClass, namespace: argparse.Namespace
 ) -> int:
     constructor = cast(Callable[..., Command], command_type)
-    command = constructor(**_command_kwargs(command_type, namespace))
+    run_id = ci_run_id()
+    command_kwargs = _command_kwargs(command_type, namespace)
+    if command_type is command_module.AdvanceAnchor:
+        command_kwargs["run_id"] = run_id
+    command = constructor(**command_kwargs)
     try:
         with Store.open(namespace.root) as store:
             with store.write_locked():
@@ -699,7 +713,7 @@ def _generic_lifecycle_handler(
                     snapshot,
                     decision.events,
                     actor=namespace.actor,
-                    run_id=ci_run_id(),
+                    run_id=run_id,
                 )
     except StoreError as error:
         print(f"vouch-mk2: {error}", file=sys.stderr)
@@ -1207,6 +1221,7 @@ def _status_object(facts: object) -> dict[str, object]:
         "release_counts": dict(facts.release_counts),
         "evidence_chains": facts.evidence_chains,
         "anchored_current": facts.anchored_current,
+        "anchor_run_claims": [list(row) for row in facts.anchor_run_claims],
         "anchor_mode": facts.anchor_mode,
         "tier": facts.tier,
         "ci_policy": facts.ci_policy,
@@ -1588,6 +1603,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"release_counts: {_format_counts(facts.release_counts)}")
         print(f"evidence_chains: {facts.evidence_chains}")
         print(f"anchored_current: {facts.anchored_current}")
+        for unit, run_id in facts.anchor_run_claims:
+            safe_run_id = run_id.replace("\r", "\\r").replace("\n", "\\n")
+            print(f"anchor: {unit} advanced by workflow run {safe_run_id}")
         print(f"anchor_mode: {facts.anchor_mode}")
         print(f"tier: {facts.tier}")
         print(f"ci_policy: {facts.ci_policy}")

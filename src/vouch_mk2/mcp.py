@@ -147,6 +147,7 @@ def _status_object(facts: StatusFacts) -> dict[str, object]:
         "release_counts": _counts_object(facts.release_counts),
         "evidence_chains": facts.evidence_chains,
         "anchored_current": facts.anchored_current,
+        "anchor_run_claims": [list(row) for row in facts.anchor_run_claims],
         "anchor_mode": facts.anchor_mode,
         "tier": facts.tier,
         "ci_policy": facts.ci_policy,

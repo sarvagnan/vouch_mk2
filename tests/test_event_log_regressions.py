@@ -16,10 +16,14 @@ from vouch_mk2.bundle import bind_bundle, bind_pack, build_inventory, build_pack
 from vouch_mk2.core import (
     Accepted,
     DeviationType,
+    EventRecord,
     OpenDeviation,
+    PreLogHistoryRecorded,
     Snapshot,
     SpecifyUnit,
+    Unit,
     UnitRef,
+    UnitStatus,
     decide,
 )
 from vouch_mk2.ir import mk2
@@ -33,6 +37,8 @@ from vouch_mk2.store import (
     StoreError,
     decode_event_record,
     digest_of,
+    encode_event_record,
+    encode_snapshot,
 )
 from vouch_mk2.store.event_log import build_event_records, ci_run_id, commit_events
 from vouch_mk2.verify import run_artifact_checks
@@ -69,6 +75,88 @@ def _mark_value(root: Path) -> int:
     return value
 
 
+def _format_four_checkpoint_record(baseline: Snapshot) -> bytes:
+    """Encode the historical bytes written before state format 5 existed."""
+    current = encode_event_record(
+        EventRecord(
+            folded_event=PreLogHistoryRecorded(
+                description="pre-format-5 checkpoint",
+                baseline=baseline,
+            ),
+            recorded_at="2026-08-18T00:00:00+00:00",
+            prev="GENESIS",
+            revision=baseline.revision,
+            actor="format-4-writer",
+            run_id="",
+            pack_digest="",
+        )
+    )
+    document = json.loads(current)
+    embedded = document["payload"]["baseline"]
+    assert embedded["state_format"] == 5
+    embedded["state_format"] = 4
+    for head in embedded["evidence_heads"]:
+        head.pop("anchor_run_id")
+    historical = json.dumps(
+        document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    assert json.loads(historical)["payload"]["baseline"]["state_format"] == 4
+    return historical
+
+
+def test_format_four_checkpoint_replays_after_store_upgrade(tmp_path: Path) -> None:
+    root = tmp_path / "store"
+    baseline = Snapshot(
+        revision=1,
+        units=(Unit("legacy", "v1", UnitStatus.SPECIFIED),),
+    )
+    event_data = _format_four_checkpoint_record(baseline)
+    with Store.init(str(root)) as store:
+        with store.write_locked():
+            event_digest = store.put_object(ArtifactKind.EVENT, event_data)
+
+    format_four_state = json.loads(
+        encode_snapshot(replace(baseline, event_head=event_digest))
+    )
+    format_four_state["state_format"] = 4
+    (root / "state.json").write_text(
+        json.dumps(
+            format_four_state,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    (root / STATE_FORMAT_HIGH_WATER_FILE).write_text("4\n")
+
+    code, output = _run("upgrade", "--root", str(root))
+    assert code == 0, output
+    assert json.loads((root / "state.json").read_bytes())["state_format"] == 5
+    with Store.open(str(root), read_only=True) as store:
+        snapshot = store.read_snapshot()
+        result = next(
+            row
+            for row in run_artifact_checks(store, snapshot)
+            if row.check_id == mk2.CHECK_EVENT_LOG
+        )
+    assert result.verdict is Verdict.PASS, result.detail
+
+
+def test_event_record_refuses_unknown_newer_embedded_snapshot_format() -> None:
+    document = json.loads(_format_four_checkpoint_record(Snapshot()))
+    document["payload"]["baseline"]["state_format"] = CURRENT_STATE_FORMAT + 1
+    data = json.dumps(
+        document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+
+    with pytest.raises(
+        DecodeError,
+        match=r"payload\.baseline\.state_format: format 6 .*newer vouch",
+    ):
+        decode_event_record(data)
+
+
 def test_state_format_high_water_mark_is_set_by_init(tmp_path: Path) -> None:
     root = tmp_path / "store"
     Store.init(str(root)).close()
@@ -100,7 +188,7 @@ def test_upgrade_refuses_state_format_below_high_water_mark_and_names_both_forma
 
     assert code == 2
     assert "state_format 3" in output
-    assert "high-water mark 4" in output
+    assert "high-water mark 5" in output
     assert "git history" in output
 
 
@@ -136,7 +224,7 @@ def test_state_format_high_water_mark_survives_event_log_removal(
     code, output = _run("upgrade", "--root", str(root))
     assert code == 2, output
     assert mark.read_bytes() == mark_before
-    assert "state_format 3" in output and "high-water mark 4" in output
+    assert "state_format 3" in output and "high-water mark 5" in output
 
 
 def test_event_digest_domain_never_aliases_other_artifact_kinds() -> None:

@@ -140,7 +140,7 @@ def test_mcp_remaining_read_tools_return_structured_objects(tmp_path: Path) -> N
         }
     ]
     assert "status" in structured[2]
-    assert structured[3]["map_format"] == 4
+    assert structured[3]["map_format"] == 5
 
 
 

@@ -135,6 +135,7 @@ class EvidenceHead:
     anchored: str
     unit_version: str = ""
     pack_summaries: tuple[EvidencePackSummary, ...] = ()
+    anchor_run_id: str = ""
 
     def ref(self) -> UnitRef:
         return UnitRef(name=self.unit_name, version=self.unit_version)

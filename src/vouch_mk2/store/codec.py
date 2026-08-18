@@ -2,7 +2,13 @@
 
 Format 1 and later declare ``state_format``; absence denotes legacy format 0.
 Strict reads accept only :data:`CURRENT_STATE_FORMAT`; older formats require
-``vouch-mk2 upgrade`` and newer formats require a newer Vouch executable."""
+``vouch-mk2 upgrade`` and newer formats require a newer Vouch executable.
+
+Event records are the immutable exception to that live-state rule. Every
+format-versioned payload embedded in a content-addressed event is decoded at
+the format its bytes declare and upgraded only in memory before replay. An
+event record is never rewritten merely because the live state format changes.
+"""
 
 from __future__ import annotations
 
@@ -48,7 +54,7 @@ from vouch_mk2.core.model import (
     UnitStatus,
 )
 from vouch_mk2.core import events as event_module
-from vouch_mk2.core.events import Event, EventRecord, PreLogHistoryRecorded
+from vouch_mk2.core.events import Event, EventRecord
 from vouch_mk2.formal.certificate import FormalCertificate
 from vouch_mk2.formal.explore import EmittedTables, Relation
 from vouch_mk2.projections.next_actions import NextAction
@@ -63,7 +69,7 @@ from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
 
-CURRENT_STATE_FORMAT = 4
+CURRENT_STATE_FORMAT = 5
 CURRENT_EVIDENCE_FORMAT = 2
 
 
@@ -83,6 +89,8 @@ def encode_document(document: object) -> bytes:
 
 
 def _event_wire_value(value: object) -> object:
+    if isinstance(value, Snapshot):
+        return json.loads(encode_snapshot(value))
     if isinstance(value, Enum):
         return value.value
     if is_dataclass(value) and not isinstance(value, type):
@@ -96,14 +104,6 @@ def _event_wire_value(value: object) -> object:
 
 
 def _event_payload(event: Event) -> dict[str, object]:
-    if isinstance(event, PreLogHistoryRecorded):
-        return {
-            "baseline": cast(
-                dict[str, object],
-                json.loads(encode_snapshot(event.baseline)),
-            ),
-            "description": event.description,
-        }
     value = _event_wire_value(event)
     if type(value) is not dict:
         raise StoreError(f"event {type(event).__name__}: payload must encode as an object")
@@ -111,7 +111,7 @@ def _event_payload(event: Event) -> dict[str, object]:
 
 
 def encode_event_record(record: EventRecord) -> bytes:
-    """Encode one canonical event-log record."""
+    """Encode a new canonical event record using current payload formats."""
     return _canonical_json(
         {
             "actor": record.actor,
@@ -164,6 +164,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
         "evidence_heads": [
             {
                 "anchored": head.anchored,
+                "anchor_run_id": head.anchor_run_id,
                 "head": head.head,
                 "head_sequence": head.head_sequence,
                 "unit_name": head.unit_name,
@@ -450,7 +451,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "source_state_digest: expected 64 lowercase hexadecimal characters"
         )
     document = {
-        "map_format": 4,
+        "map_format": 5,
         "source_state_digest": source_state_digest,
         "map": {
             "event_head": map.event_head,
@@ -486,6 +487,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "evidence_heads": [
                 {
                     "anchored": head.anchored,
+                    "anchor_run_id": head.anchor_run_id,
                     "head": head.head,
                     "head_sequence": head.head_sequence,
                     "unit_name": head.unit_name,
@@ -546,6 +548,9 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
                     else {}
                 ),
                 "anchored_current": map.status_facts.anchored_current,
+                "anchor_run_claims": [
+                    list(row) for row in map.status_facts.anchor_run_claims
+                ],
                 "deviation_counts": _count_objects(
                     map.status_facts.deviation_counts
                 ),
@@ -727,6 +732,7 @@ _EVIDENCE_HEAD_FIELDS = frozenset(
         "head",
         "head_sequence",
         "anchored",
+        "anchor_run_id",
         "pack_summaries",
     }
 )
@@ -836,6 +842,7 @@ _STATUS_FACTS_FIELDS = frozenset(
         "release_counts",
         "evidence_chains",
         "anchored_current",
+        "anchor_run_claims",
         "anchor_mode",
         "tier",
         "formal_certificate_recorded",
@@ -916,6 +923,33 @@ _EVENT_TYPES: dict[str, type[object]] = {
 }
 
 
+def _embedded_event_error(path: str, error: StoreError) -> DecodeError:
+    detail = str(error)
+    if detail.startswith("$: "):
+        return DecodeError(f"{path}: {detail[3:]}")
+    location, separator, message = detail.partition(":")
+    if separator and " " not in location:
+        return DecodeError(f"{path}.{location}:{message}")
+    return DecodeError(f"{path}: {detail}")
+
+
+def _decode_embedded_snapshot(value: object, path: str) -> Snapshot:
+    """Decode immutable snapshot bytes at their format, then upgrade in memory."""
+    # Local import avoids codec <-> upgrader initialization recursion. This is
+    # the single route for Snapshot-valued fields anywhere in the event union.
+    from vouch_mk2.store.upgrade import upgrade_document
+
+    raw = _object(value, path)
+    try:
+        upgraded, _steps = upgrade_document(
+            raw,
+            store_name=f"event record {path}",
+        )
+        return decode_snapshot(_canonical_json(upgraded))
+    except StoreError as error:
+        raise _embedded_event_error(path, error) from error
+
+
 def _decode_event_value(value: object, annotation: object, path: str) -> object:
     if annotation is str:
         return _string(value, path)
@@ -923,6 +957,8 @@ def _decode_event_value(value: object, annotation: object, path: str) -> object:
         return _integer(value, path)
     if annotation is bool:
         return _boolean(value, path)
+    if annotation is Snapshot:
+        return _decode_embedded_snapshot(value, path)
     origin = get_origin(annotation)
     arguments = get_args(annotation)
     if origin is tuple:
@@ -983,26 +1019,19 @@ def _event_pack_digest(event: Event) -> str:
 
 
 def decode_event_record(data: bytes) -> EventRecord:
-    """Strictly decode one canonical event-log record."""
+    """Strictly decode one immutable canonical event-log record.
+
+    Canonicality is checked against the original JSON value, because decoded
+    embedded payloads may have been upgraded in memory and must not make their
+    historical content-addressed bytes appear non-canonical.
+    """
     obj = _fields(_decode_json(data, "event record"), "", _EVENT_RECORD_FIELDS)
     event_name = _string(obj["event"], "event")
     event_type = _EVENT_TYPES.get(event_name)
     if event_type is None:
         raise DecodeError(f"event: unknown event type {event_name!r}")
-    if event_type is PreLogHistoryRecorded:
-        payload = _fields(
-            obj["payload"],
-            "payload",
-            frozenset({"baseline", "description"}),
-        )
-        baseline = decode_snapshot(_canonical_json(payload["baseline"]))
-        event: Event = PreLogHistoryRecorded(
-            description=_string(payload["description"], "payload.description"),
-            baseline=baseline,
-        )
-    else:
-        decoded = _decode_event_value(obj["payload"], event_type, "payload")
-        event = cast(Event, decoded)
+    decoded = _decode_event_value(obj["payload"], event_type, "payload")
+    event = cast(Event, decoded)
     if isinstance(event, event_module.MergeRecorded):
         _digest(event.ours_head, "payload.ours_head")
         _digest(event.theirs_head, "payload.theirs_head")
@@ -1027,7 +1056,7 @@ def decode_event_record(data: bytes) -> EventRecord:
         raise DecodeError(
             "pack_digest: does not match the folded event's pack digest"
         )
-    if encode_event_record(record) != data:
+    if _canonical_json(obj) != data:
         raise DecodeError("$: non-canonical event record encoding")
     return record
 
@@ -1304,6 +1333,9 @@ def _decode_evidence_head(value: object, path: str) -> EvidenceHead:
         anchored=_parent(obj["anchored"], _child(path, "anchored")),
         unit_version=_string(obj["unit_version"], _child(path, "unit_version")),
         pack_summaries=summaries,
+        anchor_run_id=_string(
+            obj["anchor_run_id"], _child(path, "anchor_run_id")
+        ),
     )
 
 
@@ -1880,6 +1912,9 @@ def _decode_status_facts(value: object, path: str) -> StatusFacts:
         anchored_current=_non_negative(
             obj["anchored_current"], f"{path}.anchored_current"
         ),
+        anchor_run_claims=_decode_ci_exception_rows(
+            obj["anchor_run_claims"], f"{path}.anchor_run_claims"
+        ),
         anchor_mode=_enum_value(
             obj["anchor_mode"], f"{path}.anchor_mode", AnchorMode
         ).value,
@@ -1966,9 +2001,9 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         _decode_json(data, "system map"), "", _SYSTEM_MAP_DOCUMENT_FIELDS
     )
     map_format = _integer(document["map_format"], "map_format")
-    if map_format != 4:
+    if map_format != 5:
         raise DecodeError(
-            f"map_format: expected 4; format {map_format} is no longer supported"
+            f"map_format: expected 5; format {map_format} is no longer supported"
         )
     source_state_digest = _digest(
         document["source_state_digest"], "source_state_digest"
@@ -2080,6 +2115,15 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
     if map.status_facts.ci_exceptions != map.ci_exceptions:
         raise DecodeError(
             "map.status_facts.ci_exceptions: must equal map.ci_exceptions"
+        )
+    expected_anchor_claims = tuple(
+        (head.ref().label(), head.anchor_run_id)
+        for head in map.evidence_heads
+        if head.anchor_run_id
+    )
+    if map.status_facts.anchor_run_claims != expected_anchor_claims:
+        raise DecodeError(
+            "map.status_facts.anchor_run_claims: must equal the evidence-head claims"
         )
     if encode_system_map(map, source_state_digest) != data:
         raise DecodeError("$: non-canonical system map encoding")

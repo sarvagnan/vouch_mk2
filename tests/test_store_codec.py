@@ -436,6 +436,7 @@ def test_evidence_head_field_refusals(
             "head": "a" * 64,
             "head_sequence": 1,
             "anchored": "GENESIS",
+            "anchor_run_id": "",
             "pack_summaries": [],
         }
     ]
@@ -523,6 +524,7 @@ def test_evidence_pack_summaries_refuse_non_deterministic_layout(
             "head": "f" * 64,
             "head_sequence": 2,
             "anchored": "GENESIS",
+            "anchor_run_id": "",
             "pack_summaries": [first, second],
         }
     ]
@@ -637,7 +639,7 @@ def test_system_map_refuses_two_contradictory_tiers_and_format_one() -> None:
 
     encoded = encode_system_map(system_map(Snapshot(revision=1, tier=Tier.STANDARD)), "a" * 64)
     document = json.loads(encoded)
-    assert document["map_format"] == 4
+    assert document["map_format"] == 5
     document["map"]["status_facts"]["tier"] = "high"
     with pytest.raises(DecodeError, match="status_facts.tier"):
         decode_system_map(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")

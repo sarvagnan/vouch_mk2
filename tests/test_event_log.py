@@ -68,7 +68,7 @@ def test_state_format_4_upgrader_records_the_pre_log_gap(tmp_path: Path) -> None
     from vouch_mk2.store import ArtifactKind, Store
     from vouch_mk2.store.codec import CURRENT_STATE_FORMAT
 
-    assert CURRENT_STATE_FORMAT == 4
+    assert CURRENT_STATE_FORMAT == 5
     # A GENUINE legacy store: the owner-pinned canonical format-3 document, with no event
     # objects at all. (Downgrading a format-4 store instead would be the very re-baselining
     # path R8 refuses -- see the pack/2 amendment.)
@@ -113,7 +113,7 @@ def test_a_format_downgrade_cannot_re_baseline_the_log(tmp_path: Path) -> None:
         path.unlink()
     code, out = _run("upgrade", "--root", str(root))
     assert code != 0, (
-        "a store that has already been at format 4 must refuse to be re-baselined at 3, "
+        "a store that has already been at format 5 must refuse to be re-baselined at 3, "
         f"even with event_head and the event objects removed; got: {out}"
     )
     assert "format" in out.lower()

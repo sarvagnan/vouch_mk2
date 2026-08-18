@@ -221,7 +221,7 @@ def _regression_system_map_v2_refuses_v1_and_contradictory_tiers() -> None:
     with pytest.raises(DecodeError, match="format 2 is no longer supported"):
         decode_system_map(legacy)
 
-    document["map_format"] = 4
+    document["map_format"] = 5
     document["map"]["status_facts"]["tier"] = "high"
     contradictory = json.dumps(
         document, ensure_ascii=False, sort_keys=True, separators=(",", ":")

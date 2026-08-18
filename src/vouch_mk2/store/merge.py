@@ -75,6 +75,7 @@ def _read_verified_chain(
                 replay,
                 (item.record.folded_event,),
                 event_digests=(item.digest,),
+                event_run_ids=(item.record.run_id,),
             )
         except (LookupError, ValueError) as error:
             raise StoreError(
@@ -124,7 +125,7 @@ def _pack_inventory(store: Store, digest: str) -> PackInventory:
 
 
 def _command_for_event(
-    store: Store, event: events.Event
+    store: Store, event: events.Event, *, run_id: str = ""
 ) -> commands.Command | commands.RecordMerge:
     """Recover the command claim represented by a command's first event."""
     match event:
@@ -195,7 +196,7 @@ def _command_for_event(
         case events.EvidenceRecorded(event=evidence, event_digest=digest):
             return commands.RecordEvidence(evidence, digest)
         case events.AnchorAdvanced(unit_name=name):
-            return commands.AdvanceAnchor(name)
+            return commands.AdvanceAnchor(name, run_id)
         case events.AnchorModeSet(mode=mode):
             return commands.SetAnchorMode(mode)
         case events.TierSet(tier=tier):
@@ -552,7 +553,11 @@ def merge_store_roots(
             while index < len(source_suffix):
                 item = source_suffix[index]
                 try:
-                    command = _command_for_event(theirs_store, item.record.folded_event)
+                    command = _command_for_event(
+                        theirs_store,
+                        item.record.folded_event,
+                        run_id=item.record.run_id,
+                    )
                     batch_length = _source_batch_length(source_suffix, index)
                 except StoreError as error:
                     return Refused(
@@ -598,6 +603,7 @@ def merge_store_roots(
                     replay_check,
                     (staged.record.folded_event,),
                     event_digests=(staged.digest,),
+                    event_run_ids=(staged.record.run_id,),
                 )
             if replay_check != candidate:
                 raise StoreError(

@@ -46,11 +46,16 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref }}
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
@@ -63,6 +68,30 @@ jobs:
       - name: Exhaustive Vouch formal check
         shell: bash
         run: python vouch.lock formal
+      - name: Advance evidence anchors and commit projections
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
+        shell: bash
+        run: |
+          python - <<'PY' > "$RUNNER_TEMP/vouch-evidence-heads"
+          import json
+          from pathlib import Path
+
+          state = json.loads(Path(".vouch/state.json").read_text())
+          for head in state["evidence_heads"]:
+              print(head["unit_name"])
+          PY
+          while IFS= read -r unit_name; do
+            python vouch.lock advance-anchor --root .vouch --unit-name "$unit_name"
+          done < "$RUNNER_TEMP/vouch-evidence-heads"
+          python vouch.lock generate --root .vouch
+          git add -- .vouch/
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "vouch-anchor-bot"
+          git config user.email "vouch-anchor-bot@users.noreply.github.com"
+          git commit -m "vouch: advance evidence anchors [skip ci]"
+          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
 """
 
 

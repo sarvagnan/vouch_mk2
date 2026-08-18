@@ -167,6 +167,7 @@ class RecordEvidence:
 class AdvanceAnchor:
     ir_command: ClassVar[str] = mk2.CMD_ADVANCE_ANCHOR
     unit_name: str
+    run_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

@@ -60,6 +60,8 @@ the run ID is exactly the recognized CI-provider environment value when one is
 present. Vouch records both and verifies event structure and replay only. It
 never verifies the actor's identity or that a run ID belongs to the asserted
 person, workflow, repository, or event. No check reports an actor as verified.
+The caller's environment asserted the run-ID claim. A human can verify it
+against the workflow run URL; Vouch never opens that URL or verifies the claim.
 
 The event log is authoritative; `state.json` is a derived cache. A mechanical
 `check.event-log` walk resolves every content-addressed record back to genesis,
@@ -71,6 +73,8 @@ This proves self-consistency of the chain currently presented and derivability o
 its snapshot, not true wall-clock chronology. Vouch has no independent monotonic
 trust root that could prove when two commuting events really occurred; run-ID and
 anchor claims remain the only external ties and retain their stated claim boundary.
+An anchor reported as “advanced by workflow run N” therefore repeats the recorded
+claim; it does not assert that Vouch verified run N.
 
 Concurrent copies are reconciled by `merge --root OURS --other THEIRS`, not by comparing
 their snapshots. The command requires a shared event-record ancestor. It fast-forwards an

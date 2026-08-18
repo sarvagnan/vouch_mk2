@@ -49,9 +49,9 @@ def _legacy_store(tmp_path: Path, fixture: Path) -> str:
 def test_current_format_is_one_and_the_field_round_trips() -> None:
     from vouch_mk2.store import CURRENT_STATE_FORMAT
 
-    assert CURRENT_STATE_FORMAT == 4
+    assert CURRENT_STATE_FORMAT == 5
     document = json.loads(encode_snapshot(Snapshot()))
-    assert document["state_format"] == 4
+    assert document["state_format"] == 5
     assert decode_snapshot(encode_snapshot(Snapshot(revision=3))) == Snapshot(revision=3)
 
 
@@ -122,7 +122,7 @@ def _golden_snapshot() -> Snapshot:
 def test_canonical_layout_of_format_1_matches_the_golden() -> None:
     # If this fails you changed the canonical layout: bump CURRENT_STATE_FORMAT, add an
     # upgrader in vouch_mk2.store.upgrade, add a fixture, and ask the owner to re-pin this golden.
-    golden = (FIXTURES / "format4.golden.json").read_bytes()
+    golden = (FIXTURES / "format5.golden.json").read_bytes()
     assert encode_snapshot(_golden_snapshot()) == golden
     assert decode_snapshot(golden) == _golden_snapshot()
 
@@ -151,7 +151,7 @@ def test_format0_shapes_upgrade_to_the_current_format_without_invented_state(fix
 
     original = json.loads(fixture.read_bytes())
     upgraded, steps = upgrade_document(original)
-    assert steps == [(0, 1), (1, 2), (2, 3), (3, 4)]
+    assert steps == [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)]
     snapshot = decode_snapshot(json.dumps(upgraded, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode() + b"\n")
     assert snapshot.revision == original["revision"]
     if "tier" not in original:
@@ -218,7 +218,7 @@ def test_upgrade_verb_rewrites_a_legacy_store_in_place_and_it_checks_clean(tmp_p
     out = capsys.readouterr().out
     assert "0 -> 1" in out or "0 → 1" in out
     document = json.loads(Path(root, "state.json").read_bytes())
-    assert document["state_format"] == 4 and document["revision"] == revision_before
+    assert document["state_format"] == 5 and document["revision"] == revision_before
     # The upgraded store OPENS and CHECKS (a certificate recorded under an older checker may
     # legitimately FAIL its row — that is not a format matter — so exit 0 or 1, never 2).
     assert main(["check", "--ci", "--root", root]) in (0, 1)

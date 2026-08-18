@@ -1074,7 +1074,7 @@ def _decide_advance_anchor(snapshot: Snapshot, command: AdvanceAnchor) -> Decisi
             "evidence.no-chain",
             f"unit {command.unit_name!r} has no evidence chain",
         )
-    if head.anchored == head.head:
+    if head.anchored == head.head and not command.run_id:
         return _refuse(
             "evidence.anchor-current",
             f"unit {command.unit_name!r} anchor is already current",
@@ -1548,7 +1548,7 @@ def _with_evidence_head(
     )
 
 
-def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
+def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapshot:
     if isinstance(event, PreLogHistoryRecorded):
         if snapshot != Snapshot():
             raise ValueError("pre-log history can only be replayed from the empty snapshot")
@@ -1762,6 +1762,7 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
                     (recorded,),
                     initial=() if prior is None else prior.pack_summaries,
                 ),
+                anchor_run_id="" if prior is None else prior.anchor_run_id,
             )
             evidence_heads = _with_evidence_head(evidence_heads, changed)
         case AnchorAdvanced(unit_name=unit_name):
@@ -1771,7 +1772,8 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             # Promotion-only by construction: the fold derives the target from
             # the head itself (D-4).
             evidence_heads = _with_evidence_head(
-                evidence_heads, replace(head, anchored=head.head)
+                evidence_heads,
+                replace(head, anchored=head.head, anchor_run_id=run_id),
             )
         case AnchorModeSet(mode=mode):
             anchor_mode = mode
@@ -1919,6 +1921,7 @@ def apply(
     events: tuple[Event, ...],
     *,
     event_digests: tuple[str, ...] = (),
+    event_run_ids: tuple[str, ...] = (),
 ) -> Snapshot:
     """Fold accepted events, advancing one revision per event.
 
@@ -1928,9 +1931,15 @@ def apply(
     """
     if event_digests and len(event_digests) != len(events):
         raise ValueError("event_digests must contain one digest per event")
+    if event_run_ids and len(event_run_ids) != len(events):
+        raise ValueError("event_run_ids must contain one run id per event")
     current = snapshot
     for index, event in enumerate(events):
-        current = _apply_one(current, event)
+        current = _apply_one(
+            current,
+            event,
+            run_id=event_run_ids[index] if event_run_ids else "",
+        )
         revision = (
             current.revision
             if isinstance(event, PreLogHistoryRecorded)

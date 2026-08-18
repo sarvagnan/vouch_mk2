@@ -132,6 +132,7 @@ def _check_event_log(store: Store, snapshot: Snapshot) -> CheckResult:
                 replay,
                 (record.folded_event,),
                 event_digests=(record_digest,),
+                event_run_ids=(record.run_id,),
             )
         except (LookupError, ValueError) as error:
             return CheckResult(
@@ -483,6 +484,13 @@ def _check_evidence_anchors(
                 (
                     Verdict.FAIL,
                     f"unit {walk.head.unit_name!r} has dangling anchor {walk.head.anchored!r}",
+                )
+            )
+        elif not walk.head.anchor_run_id:
+            rows.append(
+                (
+                    Verdict.NOT_CHECKED,
+                    f"unit {walk.head.unit_name!r} anchor has no workflow run claim",
                 )
             )
         else:

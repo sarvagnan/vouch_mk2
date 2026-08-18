@@ -165,11 +165,30 @@ def _upgrade_3_to_4(document: StateDocument) -> StateDocument:
     return upgraded
 
 
+def _upgrade_4_to_5(document: StateDocument) -> StateDocument:
+    """Older anchors carry no CI run claim; do not invent one during upgrade."""
+    upgraded = dict(document)
+    raw_heads = document.get("evidence_heads")
+    if type(raw_heads) is list:
+        heads: list[object] = []
+        for raw_head in cast(list[object], raw_heads):
+            if type(raw_head) is not dict:
+                heads.append(raw_head)
+                continue
+            copied = dict(cast(dict[str, object], raw_head))
+            copied["anchor_run_id"] = ""
+            heads.append(copied)
+        upgraded["evidence_heads"] = heads
+    upgraded["state_format"] = 5
+    return upgraded
+
+
 UPGRADERS: dict[int, Upgrader] = {
     0: _upgrade_0_to_1,
     1: _upgrade_1_to_2,
     2: _upgrade_2_to_3,
     3: _upgrade_3_to_4,
+    4: _upgrade_4_to_5,
 }
 
 

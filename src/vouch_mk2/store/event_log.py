@@ -102,7 +102,12 @@ def build_event_records(
         )
         data = encode_event_record(record)
         digest = digest_of(ArtifactKind.EVENT, data)
-        current = apply(current, (event,), event_digests=(digest,))
+        current = apply(
+            current,
+            (event,),
+            event_digests=(digest,),
+            event_run_ids=(run_id,),
+        )
         objects.append((ArtifactKind.EVENT, data))
         records.append(record)
     return current, tuple(objects), tuple(records)

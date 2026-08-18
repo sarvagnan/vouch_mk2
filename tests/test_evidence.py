@@ -106,7 +106,7 @@ def _commit_decision(store: Store, command: AdvanceAnchor | SetAnchorMode) -> No
         snapshot,
         decision.events,
         actor="test",
-        run_id="",
+        run_id=command.run_id if isinstance(command, AdvanceAnchor) else "",
     )
 
 
@@ -253,7 +253,7 @@ def test_artifact_checks_pass_for_complete_anchored_chain(tmp_path: Path) -> Non
         red = record_evidence(store, _event("u", 1, "GENESIS", EvidenceKind.RED))
         record_evidence(store, _event("u", 2, red, EvidenceKind.GREEN))
         _commit_decision(store, SetAnchorMode(AnchorMode.CI))
-        _commit_decision(store, AdvanceAnchor("u"))
+        _commit_decision(store, AdvanceAnchor("u", "fixture-run"))
         results = run_artifact_checks(store, store.read_snapshot())
         by_id = {result.check_id: result for result in results}
         assert {
@@ -323,7 +323,7 @@ def test_anchor_applicability_stagnation_ancestor_and_dangling(tmp_path: Path) -
         _commit_decision(store, SetAnchorMode(AnchorMode.CI))
         stagnant = _result(store, store.read_snapshot(), mk2.CHECK_EVIDENCE_ANCHORS)
         assert stagnant.verdict is Verdict.NOT_CHECKED and "u" in stagnant.detail
-        _commit_decision(store, AdvanceAnchor("u"))
+        _commit_decision(store, AdvanceAnchor("u", "fixture-run"))
         record_evidence(store, _event("u", 3, green, EvidenceKind.REFACTOR))
         ancestor = _result(store, store.read_snapshot(), mk2.CHECK_EVIDENCE_ANCHORS)
         assert ancestor.verdict is Verdict.PASS
