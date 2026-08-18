@@ -44,6 +44,7 @@ from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict, Violation
 from vouch_mk2.projections import agent_context, system_map
 from vouch_mk2.store import (
+    CURRENT_STATE_FORMAT,
     ArtifactKind,
     Store,
     StoreError,
@@ -981,23 +982,33 @@ def _rebuild_evidence_head_summaries(
 def _refuse_event_log_downgrade_signals(
     store: Store, document: Mapping[str, object]
 ) -> None:
-    """Refuse to turn evidence of prior format 4 use into a fresh baseline."""
-    if document.get("state_format") != 3:
-        return
+    """Refuse to turn evidence of a prior higher format into a fresh baseline."""
+    raw_format = document.get("state_format", 0)
     found: list[str] = []
-    if "event_head" in document:
-        found.append("raw state.json contains an 'event_head' key")
-    event_objects = store.canonical_object_digests(ArtifactKind.EVENT)
-    if event_objects:
+    high_water = store.read_state_format_high_water()
+    if (
+        high_water is not None
+        and type(raw_format) is int
+        and raw_format < high_water
+    ):
         found.append(
-            f"canonical event object in ArtifactKind.EVENT {event_objects[0]!r}"
+            f"declared state_format {raw_format} is lower than the store's "
+            f"high-water mark {high_water}"
         )
+    if raw_format == 3:
+        if "event_head" in document:
+            found.append("raw state.json contains an 'event_head' key")
+        event_objects = store.canonical_object_digests(ArtifactKind.EVENT)
+        if event_objects:
+            found.append(
+                f"canonical event object in ArtifactKind.EVENT {event_objects[0]!r}"
+            )
     if found:
         raise UpgradeRefused(
-            "format 3 -> 4 refused because " + " and ".join(found),
+            "format upgrade refused because " + " and ".join(found),
             operator_hint=(
-                "restore the format-4 state and its event head from the store's "
-                "git history, then retry; do not create a new pre-log baseline"
+                "restore the correct state and event head from the store's git "
+                "history, then retry; do not create a new pre-log baseline"
             ),
         )
 
@@ -1068,6 +1079,9 @@ def upgrade_store(
                 )
             else:
                 store.replace_state_for_upgrade(encoded)
+        # A successful no-op upgrade of an older current-format checkout also
+        # establishes the mark; state-writing paths raise it before replacement.
+        store.raise_state_format_high_water(CURRENT_STATE_FORMAT)
         try:
             emit_system_map(store)
             emit_context(store, None)

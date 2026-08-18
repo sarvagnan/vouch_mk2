@@ -71,10 +71,15 @@ For a format-3 upgrade, the first record is a **pre-log checkpoint** that preser
 the whole caller/store-asserted snapshot. Everything before that checkpoint is
 attested rather than verified, and replay proves nothing about pre-log history.
 The upgrader refuses format 3 when the raw document still has an `event_head` key
-or when a canonical event object remains. These two signals make a casual downgrade
-detectable, but a store is a directory of files: someone who removes both signals
-is outside any repository-local trust root. The backstop is the store's own git
-history, not Vouch; Vouch does not prevent deletion of both signals.
+or when a canonical event object remains. Independently, the monotonic
+`state-format.json` high-water mark records the highest state format the store has
+held, and `upgrade` refuses a lower declared format even when both event-log signals
+were removed. The mark is a strictly decoded sibling of `state.json`, raised under
+the writer lock with descriptor-relative atomic replacement and durability fsyncs.
+Vouch **detects** a downgrade while that mark survives; it does not **prevent** file
+deletion. A caller who also removes or lowers the mark is outside every
+repository-local trust root. The backstop is the store's own git history, from which
+the operator must restore the correct state and mark.
 
 Format 1 and later declare `state_format`; absence denotes legacy format 0.
 Strict reads accept exactly the current format. Older stores require the explicit,

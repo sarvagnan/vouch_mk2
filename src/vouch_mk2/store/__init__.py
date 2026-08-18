@@ -34,6 +34,7 @@ from vouch_mk2.store.store import (
     COMMIT_STEPS,
     DEFAULT_MAX_ARTIFACT_BYTES,
     GENERATED_FILES,
+    STATE_FORMAT_HIGH_WATER_FILE,
     Store,
 )
 
@@ -41,6 +42,7 @@ __all__ = [
     "COMMIT_STEPS",
     "DEFAULT_MAX_ARTIFACT_BYTES",
     "GENERATED_FILES",
+    "STATE_FORMAT_HIGH_WATER_FILE",
     "CURRENT_STATE_FORMAT",
     "ArtifactKind",
     "CasConflict",

@@ -53,6 +53,7 @@ def test_init_fresh_project_writes_only_closed_set_and_valid_config(tmp_path: Pa
         ".vouch/objects",
         ".vouch/objects/sha256",
         ".vouch/state.json",
+        ".vouch/state-format.json",
         "vouch.lock",
     }
     config = json.loads((project / ".vouch/config.json").read_bytes())

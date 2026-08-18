@@ -25,6 +25,8 @@ from vouch_mk2.core import (
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.store import (
+    CURRENT_STATE_FORMAT,
+    STATE_FORMAT_HIGH_WATER_FILE,
     ArtifactKind,
     DecodeError,
     Store,
@@ -37,11 +39,104 @@ from vouch_mk2.verify import run_artifact_checks
 from vouch_mk2.projections import agent_context, system_map
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def _run(*argv: str) -> tuple[int, str]:
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
         code = main(list(argv))
     return code, out.getvalue() + err.getvalue()
+
+
+def _genuine_format_three_store(tmp_path: Path, name: str) -> Path:
+    root = tmp_path / name / ".vouch"
+    (root / "objects" / "sha256").mkdir(parents=True)
+    document = json.loads(
+        (ROOT / "tests" / "fixtures" / "state-format" / "format3.golden.json").read_text()
+    )
+    assert document["state_format"] == 3 and "event_head" not in document
+    document["evidence_heads"] = []
+    (root / "state.json").write_text(
+        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+    )
+    return root
+
+
+def _mark_value(root: Path) -> int:
+    value = json.loads((root / STATE_FORMAT_HIGH_WATER_FILE).read_text())
+    assert type(value) is int
+    return value
+
+
+def test_state_format_high_water_mark_is_set_by_init(tmp_path: Path) -> None:
+    root = tmp_path / "store"
+    Store.init(str(root)).close()
+    assert _mark_value(root) == CURRENT_STATE_FORMAT
+
+
+def test_state_format_high_water_mark_is_raised_by_upgrade(tmp_path: Path) -> None:
+    root = _genuine_format_three_store(tmp_path, "raised")
+    (root / STATE_FORMAT_HIGH_WATER_FILE).write_text(
+        json.dumps(2) + "\n"
+    )
+    code, output = _run("upgrade", "--root", str(root))
+    assert code == 0, output
+    assert _mark_value(root) == CURRENT_STATE_FORMAT
+
+
+def test_upgrade_refuses_state_format_below_high_water_mark_and_names_both_formats(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "store"
+    Store.init(str(root)).close()
+    state = root / "state.json"
+    document = json.loads(state.read_text())
+    document["state_format"] = 3
+    document.pop("event_head", None)
+    state.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
+
+    code, output = _run("upgrade", "--root", str(root))
+
+    assert code == 2
+    assert "state_format 3" in output
+    assert "high-water mark 4" in output
+    assert "git history" in output
+
+
+def test_genuine_legacy_store_without_high_water_mark_still_upgrades(
+    tmp_path: Path,
+) -> None:
+    root = _genuine_format_three_store(tmp_path, "legacy")
+    assert not (root / STATE_FORMAT_HIGH_WATER_FILE).exists()
+    code, output = _run("upgrade", "--root", str(root))
+    assert code == 0, output
+    assert _mark_value(root) == CURRENT_STATE_FORMAT
+
+
+def test_state_format_high_water_mark_survives_event_log_removal(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    assert _run("init", "--project", str(project))[0] == 0
+    root = project / ".vouch"
+    assert _run("specify", "--root", str(root), "--name", "u", "--version", "v1")[0] == 0
+    mark = root / STATE_FORMAT_HIGH_WATER_FILE
+    mark_before = mark.read_bytes()
+    state = root / "state.json"
+    document = json.loads(state.read_text())
+    document["state_format"] = 3
+    document.pop("event_head", None)
+    state.write_text(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
+    for path in (root / "objects" / "sha256").iterdir():
+        path.unlink()
+
+    assert mark.read_bytes() == mark_before
+    code, output = _run("upgrade", "--root", str(root))
+    assert code == 2, output
+    assert mark.read_bytes() == mark_before
+    assert "state_format 3" in output and "high-water mark 4" in output
 
 
 def test_event_digest_domain_never_aliases_other_artifact_kinds() -> None:

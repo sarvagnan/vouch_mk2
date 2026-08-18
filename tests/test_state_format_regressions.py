@@ -17,16 +17,21 @@ from vouch_mk2.core.model import Snapshot, UnitStatus
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.mcp import serve
-from vouch_mk2.store import Store, StoreError, encode_snapshot
+from vouch_mk2.store import (
+    STATE_FORMAT_HIGH_WATER_FILE,
+    Store,
+    StoreError,
+    encode_snapshot,
+)
 from vouch_mk2.store.upgrade import UPGRADERS, UpgradeRefused, upgrade_document
 from vouch_mk2.verify import run_artifact_checks
 from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 def _make_stale_store(root: Path) -> bytes:
-    Store.init(str(root)).close()
+    (root / "objects" / "sha256").mkdir(parents=True)
     state = root / "state.json"
-    document = json.loads(state.read_bytes())
+    document = json.loads(encode_snapshot(Snapshot()))
     del document["state_format"]
     legacy = (
         json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -58,7 +63,7 @@ def test_mcp_stale_store_error_names_upgrade(tmp_path: Path) -> None:
 def test_upgrade_waits_for_the_writer_lock(tmp_path: Path) -> None:
     root = tmp_path / "store"
     legacy = _make_stale_store(root)
-    holder = open(root / ".lock", "r+b")
+    holder = open(root / ".lock", "w+b")
     fcntl.flock(holder, fcntl.LOCK_EX)
     process = subprocess.Popen(
         [
@@ -102,6 +107,7 @@ def test_format2_upgrade_refuses_ambiguous_superseded_evidence_binding(
 ) -> None:
     root = tmp_path / "ambiguous-format2-store"
     Store.init(str(root)).close()
+    (root / STATE_FORMAT_HIGH_WATER_FILE).unlink()
     document = json.loads(
         Path("tests/fixtures/state-format/format2.golden.json").read_bytes()
     )
@@ -194,6 +200,7 @@ def test_upgraded_format2_legacy_chain_has_an_honest_empty_summary(
             snapshot,
             objects=((ArtifactKind.EVIDENCE, data),),
         )
+    (root / STATE_FORMAT_HIGH_WATER_FILE).unlink()
     document = json.loads((root / "state.json").read_bytes())
     document["state_format"] = 2
     for head in cast(list[dict[str, object]], document["evidence_heads"]):
@@ -263,7 +270,6 @@ def test_upgrade_dry_run_creates_no_runtime_or_generated_files(
 ) -> None:
     root = tmp_path / "store"
     legacy = _make_stale_store(root)
-    (root / ".lock").unlink()
     entries_before = set(root.iterdir())
     assert main(["upgrade", "--root", str(root), "--dry-run"]) == 0
     assert "0 -> 1" in capsys.readouterr().out

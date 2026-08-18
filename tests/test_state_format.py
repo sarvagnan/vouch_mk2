@@ -8,7 +8,6 @@ this file; a finding that this pack is wrong is a DEVIATION adjudicated by the o
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -28,13 +27,19 @@ LEGACY = sorted(FIXTURES.glob("format0-*.json"))
 def _legacy_store(tmp_path: Path, fixture: Path) -> str:
     """A store whose state.json is a real pre-versioned document of mk2's own history.
 
-    Objects come from the committed dogfood store (CAS content is append-only, so every
-    object either era referenced is still present); projections are removed (stale by
-    construction); no .lock, like a checkout.
+    It predates the state-format high-water mark, so construct it directly rather than
+    deriving it from a current store. Projections and the runtime lock are absent, like a
+    checkout.
     """
     root = tmp_path / fixture.stem
-    shutil.copytree(ROOT / ".vouch", root, ignore=shutil.ignore_patterns(".lock", "map.json", "vouch-context.md"))
-    (root / "state.json").write_bytes(fixture.read_bytes())
+    (root / "objects" / "sha256").mkdir(parents=True)
+    document = json.loads(fixture.read_bytes())
+    # The historical golden references dogfood evidence objects. A bare genuine legacy
+    # store has no such CAS, so keep the canonical state shape but no evidence claims.
+    document["evidence_heads"] = []
+    (root / "state.json").write_bytes(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
     return str(root)
 
 
@@ -244,6 +249,32 @@ def test_upgrade_dry_run_changes_nothing(tmp_path: Path, capsys: pytest.CaptureF
     assert main(["upgrade", "--root", root, "--dry-run"]) == 0
     assert "0 -> 1" in capsys.readouterr().out
     assert Path(root, "state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["upgrade", "dry-run"])
+def test_upgrade_and_dry_run_refuse_state_below_current_mark_naming_both_formats(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    dry_run: bool,
+) -> None:
+    from vouch_mk2.store import CURRENT_STATE_FORMAT
+
+    root = tmp_path / ("dry-run" if dry_run else "upgrade")
+    Store.init(str(root)).close()
+    declared_format = CURRENT_STATE_FORMAT - 1
+    state = root / "state.json"
+    document = json.loads(state.read_bytes())
+    document["state_format"] = declared_format
+    state.write_bytes(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
+    argv = ["upgrade", "--root", str(root)]
+    if dry_run:
+        argv.append("--dry-run")
+    assert main(argv) == 2
+    error = capsys.readouterr().err
+    assert f"state_format {declared_format}" in error
+    assert f"high-water mark {CURRENT_STATE_FORMAT}" in error
 
 
 def test_upgrade_fails_closed_on_an_undecodable_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

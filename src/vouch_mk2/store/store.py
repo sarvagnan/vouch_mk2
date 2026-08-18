@@ -54,6 +54,11 @@ DEFAULT_MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 GENERATED_FILES = frozenset(
     {"map.json", "migration-report.md", "vouch-context.md"}
 )
+STATE_FORMAT_HIGH_WATER_FILE = "state-format.json"
+
+
+def _encode_state_format_high_water(state_format: int) -> bytes:
+    return f"{state_format}\n".encode("ascii")
 
 
 class Store:
@@ -206,7 +211,11 @@ class Store:
 
     def _initialize_layout(self, initial_snapshot: Snapshot) -> None:
         state = encode_snapshot(initial_snapshot)
+        state_format_mark = _encode_state_format_high_water(CURRENT_STATE_FORMAT)
         self._require_within_artifact_bound(state, "initial state")
+        self._require_within_artifact_bound(
+            state_format_mark, "state format high-water mark"
+        )
         os.mkdir("objects", 0o700, dir_fd=self._root_fd)
         objects_fd = self._open_directory("objects", self._root_fd)
         try:
@@ -228,6 +237,18 @@ class Store:
         finally:
             os.close(lock_fd)
 
+        mark_fd = os.open(
+            STATE_FORMAT_HIGH_WATER_FILE,
+            _TEMP_WRITE_FLAGS,
+            0o600,
+            dir_fd=self._root_fd,
+        )
+        try:
+            self._write_all(mark_fd, state_format_mark)
+            os.fsync(mark_fd)
+        finally:
+            os.close(mark_fd)
+
         state_fd = os.open(
             "state.json",
             _TEMP_WRITE_FLAGS,
@@ -243,6 +264,7 @@ class Store:
 
     def _check_layout(self) -> None:
         self._assert_not_symlink("state.json", self._root_fd, "state.json")
+        self.read_state_format_high_water()
         if self._read_only:
             self._check_optional_lock_file()
         else:
@@ -271,6 +293,7 @@ class Store:
             for name in os.listdir(self._root_fd):
                 if (
                     name.startswith(".state-")
+                    or name.startswith(".state-format-")
                     or name.startswith(".generated-")
                 ) and name.endswith(".tmp"):
                     self._unlink_if_present(name, self._root_fd)
@@ -528,6 +551,91 @@ class Store:
         """Read raw state bytes without weakening ``read_snapshot`` decoding."""
         return self._read_file(self._root_fd, "state.json", "state.json")
 
+    def read_state_format_high_water(self) -> int | None:
+        """Read the optional monotonic format mark; absence means legacy/unknown."""
+        try:
+            payload = self._read_file(
+                self._root_fd,
+                STATE_FORMAT_HIGH_WATER_FILE,
+                STATE_FORMAT_HIGH_WATER_FILE,
+            )
+        except IntegrityError as error:
+            if self._is_missing(error):
+                return None
+            raise
+        try:
+            text = payload.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise IntegrityError(
+                f"{STATE_FORMAT_HIGH_WATER_FILE}: must be ASCII"
+            ) from error
+        digits = text[:-1] if text.endswith("\n") else ""
+        if not digits.isascii() or not digits.isdecimal():
+            raise IntegrityError(
+                f"{STATE_FORMAT_HIGH_WATER_FILE}: expected a non-negative JSON integer"
+            )
+        value = int(digits)
+        if payload != _encode_state_format_high_water(value):
+            raise IntegrityError(
+                f"{STATE_FORMAT_HIGH_WATER_FILE}: expected canonical JSON integer"
+            )
+        return value
+
+    def raise_state_format_high_water(self, state_format: int) -> int:
+        """Durably raise, and never lower, the store's format high-water mark."""
+        self._require_writable("raise-state-format-high-water")
+        self._require_write_lock("raise-state-format-high-water")
+        if type(state_format) is not int or state_format < 0:
+            raise StoreError("state format high-water mark must be a non-negative integer")
+        current = self.read_state_format_high_water()
+        if current is not None and state_format < current:
+            raise StoreError(
+                f"state format {state_format} is lower than high-water mark {current}"
+            )
+        if current == state_format:
+            return state_format
+
+        payload = _encode_state_format_high_water(state_format)
+        self._require_within_artifact_bound(payload, "state format high-water mark")
+        temp_name = f".state-format-{secrets.token_hex(16)}.tmp"
+        temp_exists = False
+        try:
+            fd = os.open(
+                temp_name,
+                _TEMP_WRITE_FLAGS,
+                0o600,
+                dir_fd=self._root_fd,
+            )
+            temp_exists = True
+            try:
+                self._write_all(fd, payload)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            try:
+                os.replace(
+                    temp_name,
+                    STATE_FORMAT_HIGH_WATER_FILE,
+                    src_dir_fd=self._root_fd,
+                    dst_dir_fd=self._root_fd,
+                )
+            except (TypeError, NotImplementedError) as error:
+                raise StoreError(
+                    "platform: descriptor-relative replace is unavailable; "
+                    "refusing a path-based fallback"
+                ) from error
+            temp_exists = False
+            os.fsync(self._root_fd)
+        except OSError as error:
+            detail = error.strerror or "operating system error"
+            raise StoreError(
+                f"{STATE_FORMAT_HIGH_WATER_FILE}: write failed: {detail}"
+            ) from error
+        finally:
+            if temp_exists:
+                self._unlink_if_present(temp_name, self._root_fd)
+        return state_format
+
     @staticmethod
     def _validate_generated_name(name: str) -> None:
         if name not in GENERATED_FILES:
@@ -754,6 +862,14 @@ class Store:
         self._require_writable("replace-state")
         self._require_write_lock("replace-state")
         self._require_within_artifact_bound(data, "state")
+        document = decode_raw_document(data)
+        state_format = document.get("state_format", 0)
+        if type(state_format) is not int or state_format < 0:
+            raise StoreError("state_format: expected a non-negative integer")
+        # Mark first: a crash can conservatively leave a higher mark beside an
+        # older document, but can never publish a higher-format state without
+        # its downgrade detector already durable.
+        self.raise_state_format_high_water(state_format)
         temp_name = f".state-{secrets.token_hex(16)}.tmp"
         temp_exists = False
         try:

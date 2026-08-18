@@ -37,6 +37,7 @@ from vouch_mk2.core.model import PackEntry, PackInventory, PackRebound
 from vouch_mk2.ir.schema import Tier, Verdict
 from vouch_mk2.ir import mk2
 from vouch_mk2.store import (
+    STATE_FORMAT_HIGH_WATER_FILE,
     ArtifactKind,
     DecodeError,
     Store,
@@ -632,6 +633,7 @@ def test_pack_format_two_decode_refuses_zero_test_entries() -> None:
 def test_upgrade_repairs_pre_extension_format_three_fixture(tmp_path: Path) -> None:
     root = tmp_path / "store"
     Store.init(str(root)).close()
+    (root / STATE_FORMAT_HIGH_WATER_FILE).unlink()
     fixture = ROOT / "tests" / "fixtures" / "state-format" / "format3-pre-test-set-digest.json"
     Path(root, "state.json").write_bytes(fixture.read_bytes())
     code, out = _captured_main("upgrade", "--root", str(root))
