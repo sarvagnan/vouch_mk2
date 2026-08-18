@@ -50,7 +50,10 @@ def test_init_refuses_an_existing_store_and_never_clobbers_a_workflow(tmp_path: 
     marker = "existing: do not clobber\n"
     (other / ".github" / "workflows" / "vouch.yml").write_text(marker)
     code, out = _run("init", "--project", str(other))
-    assert code == 0, out
+    # pack/3 (DEV-as-02): D-19 supersedes the exit code here — a differing workflow is a
+    # collision requiring operator action (exit 3), not silent success. The no-clobber and
+    # suggestion assertions this guard exists for are unchanged.
+    assert code == 3, out
     assert "suggested" in out
     assert (other / ".github" / "workflows" / "vouch.yml").read_text() == marker
 

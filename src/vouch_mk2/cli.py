@@ -43,7 +43,7 @@ from vouch_mk2.core import (
 from vouch_mk2.core import commands as command_module
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
-from vouch_mk2.init import InitError, init_project
+from vouch_mk2.init import InitError, InitStatus, init_project
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.io import (
     read_regular_nofollow,
@@ -274,7 +274,12 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         ),
     )
     init = commands.add_parser(
-        "init", help="initialize the closed D-7 project file set"
+        "init",
+        help="initialize the closed D-7 project file set",
+        epilog=(
+            "Exit codes: 0 initialized; 2 refused with nothing written; "
+            "3 suggestion files written—review/replace them and rerun init."
+        ),
     )
     init.add_argument("--project", required=True, help="target project directory")
     init.add_argument(
@@ -1473,6 +1478,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         for result in report:
             print(f"{result.status.value} {result.path}")
+        if any(result.status is InitStatus.SUGGESTED for result in report):
+            print(
+                "Action required: review each .vouch-suggested file, replace "
+                "the colliding project file if appropriate, then rerun init."
+            )
+            return 3
         print("Vouch requires Python 3.14+")
         return 0
 

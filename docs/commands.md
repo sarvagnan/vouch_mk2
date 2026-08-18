@@ -138,6 +138,9 @@ options:
                         initial assurance tier (default: lightweight)
   --lock LOCK_PATH      existing lock to vendor instead of building/copying the running code
   --actor ACTOR         recorded actor claim (default: OS user)
+
+Exit codes: 0 initialized; 2 refused with nothing written; 3 suggestion files
+written—review/replace them and rerun init.
 ```
 
 ## mcp

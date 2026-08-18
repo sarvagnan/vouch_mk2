@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -38,6 +41,7 @@ class _PlannedFile:
     data: bytes
     mode: int
     status: InitStatus
+    needs_write: bool
 
 
 _WORKFLOW = """name: vouch
@@ -157,6 +161,7 @@ def _plan_file(
             data,
             mode,
             InitStatus.WRITTEN,
+            True,
         )
     if current == data:
         return _PlannedFile(
@@ -165,6 +170,7 @@ def _plan_file(
             data,
             mode,
             InitStatus.UNCHANGED,
+            False,
         )
     suggested = target + ".vouch-suggested"
     existing_suggestion = read_regular_nofollow(
@@ -172,26 +178,28 @@ def _plan_file(
     )
     if existing_suggestion == data:
         return _PlannedFile(
-            report_path,
+            report_path + ".vouch-suggested",
             suggested,
             data,
             mode,
-            InitStatus.UNCHANGED,
+            InitStatus.SUGGESTED,
+            False,
         )
     if existing_suggestion is not None:
         raise InitError(
             f"{suggested}: existing suggestion differs; refusing to overwrite"
         )
     return _PlannedFile(
-        report_path,
+        report_path + ".vouch-suggested",
         suggested,
         data,
         mode,
         InitStatus.SUGGESTED,
+        True,
     )
 
 
-def _ensure_owned_directory(root: str, relative: str) -> None:
+def _ensure_owned_directory(root: str, relative: str) -> tuple[str, ...]:
     """Create ``root/relative`` component by component, refusing to traverse or
     create through anything that is not a real directory INSIDE the root.
 
@@ -200,22 +208,35 @@ def _ensure_owned_directory(root: str, relative: str) -> None:
     while reporting an in-root write (Phase 8 review). Every component is
     lstat'd: a symlink or non-directory is refused before any write."""
     current = root
-    for component in relative.split("/"):
-        current = os.path.join(current, component)
-        try:
-            info = os.lstat(current)
-        except FileNotFoundError:
+    created: list[str] = []
+    try:
+        for component in relative.split("/"):
+            current = os.path.join(current, component)
             try:
-                os.mkdir(current, 0o755)
+                info = os.lstat(current)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(current, 0o755)
+                    created.append(current)
+                except OSError as error:
+                    raise InitError(
+                        f"{current}: cannot create directory: {error}"
+                    ) from error
+                continue
             except OSError as error:
-                raise InitError(f"{current}: cannot create directory: {error}") from error
-            continue
-        except OSError as error:
-            raise InitError(f"{current}: cannot inspect: {error}") from error
-        if stat.S_ISLNK(info.st_mode):
-            raise InitError(f"{current}: symlinked path component refused")
-        if not stat.S_ISDIR(info.st_mode):
-            raise InitError(f"{current}: path component is not a directory")
+                raise InitError(f"{current}: cannot inspect: {error}") from error
+            if stat.S_ISLNK(info.st_mode):
+                raise InitError(f"{current}: symlinked path component refused")
+            if not stat.S_ISDIR(info.st_mode):
+                raise InitError(f"{current}: path component is not a directory")
+    except BaseException:
+        for path in reversed(created):
+            try:
+                os.rmdir(path)
+            except FileNotFoundError:
+                pass
+        raise
+    return tuple(created)
 
 
 def _preflight_owned_directory(root: str, relative: str) -> None:
@@ -236,19 +257,122 @@ def _preflight_owned_directory(root: str, relative: str) -> None:
             raise InitError(f"{current}: path component is not a directory")
 
 
+def _has_write_and_search_permission(info: os.stat_result) -> bool:
+    """Check the caller's applicable Unix permission bits.
+
+    The explicit bit check keeps refusal deterministic when tests or containers
+    run as root, for which ``os.access`` would otherwise bypass a read-only
+    directory's mode. ``os.access`` additionally accounts for ACLs where the
+    platform exposes them.
+    """
+    if os.geteuid() == info.st_uid:
+        permissions = stat.S_IMODE(info.st_mode) >> 6
+    elif info.st_gid == os.getegid() or info.st_gid in os.getgroups():
+        permissions = stat.S_IMODE(info.st_mode) >> 3
+    else:
+        permissions = stat.S_IMODE(info.st_mode)
+    return permissions & 0o3 == 0o3
+
+
+def _preflight_writable_parent(path: str) -> None:
+    """Require the nearest existing parent to permit creation below it."""
+    parent = os.path.dirname(path)
+    while True:
+        try:
+            info = os.lstat(parent)
+        except FileNotFoundError:
+            next_parent = os.path.dirname(parent)
+            if next_parent == parent:
+                raise InitError(f"{path}: no existing parent directory")
+            parent = next_parent
+            continue
+        except OSError as error:
+            raise InitError(f"{parent}: cannot inspect: {error}") from error
+        if stat.S_ISLNK(info.st_mode):
+            raise InitError(f"{parent}: symlinked path component refused")
+        if not stat.S_ISDIR(info.st_mode):
+            raise InitError(f"{parent}: path component is not a directory")
+        if not _has_write_and_search_permission(info) or not os.access(
+            parent, os.W_OK | os.X_OK
+        ):
+            raise InitError(f"{parent}: cannot write init target")
+        return
+
+
+def _fsync_directory(path: str) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _stage_file(stage_root: str, index: int, plan: _PlannedFile) -> str:
+    staged = os.path.join(stage_root, f"file-{index}")
+    write_atomic(staged, plan.data, plan.mode, "staged init target")
+    return staged
+
+
+def _place_staged_file(staged: str, plan: _PlannedFile) -> None:
+    """Publish one absent target without an overwrite-capable operation."""
+    linked = False
+    try:
+        os.link(staged, plan.destination, follow_symlinks=False)
+        linked = True
+        _fsync_directory(os.path.dirname(plan.destination))
+    except OSError as error:
+        if linked:
+            try:
+                os.unlink(plan.destination)
+            except FileNotFoundError:
+                pass
+        raise InitError(
+            f"{plan.destination}: cannot place staged init target: {error}"
+        ) from error
+
+
+def _rollback_placements(
+    files: list[str],
+    store_path: str | None,
+    staged_store: str,
+    directories: list[str],
+) -> None:
+    """Remove only paths successfully created by this invocation."""
+    if store_path is not None:
+        # Rename the complete store back out of the project atomically. If the
+        # process dies on either side of this boundary, the store is either
+        # fully installed with all dependencies or wholly absent and retryable.
+        os.rename(store_path, staged_store)
+    for path in reversed(files):
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+    for path in reversed(directories):
+        try:
+            os.rmdir(path)
+        except FileNotFoundError:
+            pass
+
+
 def init_project(
     project_root: str,
     lock_bytes: bytes,
     *,
     tier: Tier = Tier.LIGHTWEIGHT,
     actor: str | None = None,
+    on_step: Callable[[str], None] | None = None,
 ) -> tuple[InitResult, ...]:
     """Initialize exactly the D-7 store, lock, config, and CI workflow set.
 
-    Every precondition — fresh store, sane project root, no symlinked or
-    non-directory component on any owned path — is proven BEFORE the first
-    write, so a refusal never leaves a half-initialized project (a store with
-    no lock/config that then blocks every retry)."""
+    Target paths are planned and checked before a sibling staging directory is
+    created. The prepared store is published last, after its lock and workflow,
+    so an interruption cannot expose the re-initialization marker before the
+    project is retryable. A caught refusal rolls back paths created by this run.
+
+    ``on_step`` is a test-only fault-injection seam. Production callers leave it
+    unset; tests may raise after the ``staged`` boundary.
+    """
     root = os.path.abspath(project_root)
     try:
         root_info = os.lstat(root)
@@ -279,39 +403,109 @@ def init_project(
         raise InitError(str(error)) from error
 
     store_path = os.path.join(root, ".vouch")
+    plans = (lock_plan, workflow_plan)
+    collisions = tuple(
+        plan for plan in plans if plan.status is InitStatus.SUGGESTED
+    )
+    write_plans = tuple(
+        plan
+        for plan in (collisions if collisions else plans)
+        if plan.needs_write
+    )
+    if not collisions:
+        _preflight_writable_parent(store_path)
+    for plan in write_plans:
+        _preflight_writable_parent(plan.destination)
+
+    stage_parent = os.path.dirname(root)
     try:
-        # Owned directories first (they cannot half-initialize anything), then
-        # the store, then the files that reference it.
-        _ensure_owned_directory(root, ".github/workflows")
-        try:
-            store = Store.init(
-                store_path,
-                initial_snapshot=Snapshot(),
-            )
-            if tier is not Tier.LIGHTWEIGHT:
-                with store.write_locked():
-                    initial = store.read_snapshot()
-                    commit_events(
-                        store,
-                        initial,
-                        (TierSet(tier),),
-                        actor=default_actor() if actor is None else actor,
-                        run_id=ci_run_id(),
-                    )
-        except StoreError as error:
-            raise InitError(str(error)) from error
-        store.close()
-        write_atomic(
-            os.path.join(store_path, "config.json"),
-            config,
-            0o600,
-            "vouch config",
-        )
-        for plan in (lock_plan, workflow_plan):
-            if plan.status is not InitStatus.UNCHANGED:
-                write_atomic(plan.destination, plan.data, plan.mode, "init target")
+        stage_root = tempfile.mkdtemp(prefix=".vouch-init-", dir=stage_parent)
     except OSError as error:
-        raise InitError(f"init failed: {error}") from error
+        raise InitError(f"init staging failed: {error}") from error
+
+    staged_files: dict[str, str] = {}
+    placed_files: list[str] = []
+    created_directories: list[str] = []
+    placed_store: str | None = None
+    staged_store = os.path.join(stage_root, "store")
+    try:
+        for index, plan in enumerate(write_plans):
+            staged_files[plan.destination] = _stage_file(stage_root, index, plan)
+
+        if not collisions:
+            with Store.init(
+                staged_store,
+                initial_snapshot=Snapshot(),
+            ) as store:
+                if tier is not Tier.LIGHTWEIGHT:
+                    with store.write_locked():
+                        initial = store.read_snapshot()
+                        commit_events(
+                            store,
+                            initial,
+                            (TierSet(tier),),
+                            actor=default_actor() if actor is None else actor,
+                            run_id=ci_run_id(),
+                        )
+            write_atomic(
+                os.path.join(staged_store, "config.json"),
+                config,
+                0o600,
+                "vouch config",
+            )
+
+        if on_step is not None:
+            on_step("staged")
+
+        if any(
+            plan.needs_write
+            and os.path.dirname(plan.destination)
+            == os.path.join(root, ".github", "workflows")
+            for plan in write_plans
+        ):
+            created_directories.extend(
+                _ensure_owned_directory(root, ".github/workflows")
+            )
+
+        for plan in write_plans:
+            _place_staged_file(staged_files[plan.destination], plan)
+            placed_files.append(plan.destination)
+
+        if collisions:
+            return tuple(
+                InitResult(plan.report_path, InitStatus.SUGGESTED)
+                for plan in collisions
+            )
+
+        try:
+            os.rename(staged_store, store_path)
+        except OSError as error:
+            raise InitError(
+                f"{store_path}: cannot place staged store: {error}"
+            ) from error
+        placed_store = store_path
+        _fsync_directory(root)
+    except BaseException as error:
+        try:
+            _rollback_placements(
+                placed_files,
+                placed_store,
+                staged_store,
+                created_directories,
+            )
+        except OSError as rollback_error:
+            raise InitError(
+                f"init failed and rollback failed: {rollback_error}"
+            ) from error
+        if isinstance(error, InitError):
+            raise
+        if isinstance(error, StoreError):
+            raise InitError(str(error)) from error
+        if isinstance(error, OSError):
+            raise InitError(f"init failed: {error}") from error
+        raise
+    finally:
+        shutil.rmtree(stage_root, ignore_errors=True)
 
     return (
         InitResult(".vouch", InitStatus.WRITTEN),

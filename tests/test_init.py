@@ -90,11 +90,17 @@ def test_init_differing_workflow_writes_sidecar_without_touching_target(tmp_path
     original = b"human workflow\n"
     workflow.write_bytes(original)
     report = init_project(str(project), LOCK_BYTES)
-    result = next(item for item in report if item.path == ".github/workflows/vouch.yml")
+    result = next(
+        item
+        for item in report
+        if item.path == ".github/workflows/vouch.yml.vouch-suggested"
+    )
     assert result.status is InitStatus.SUGGESTED
     assert workflow.read_bytes() == original
     suggested = Path(str(workflow) + ".vouch-suggested")
     assert b"check --ci" in suggested.read_bytes()
+    assert not (project / ".vouch").exists()
+    assert not (project / "vouch.lock").exists()
 
 
 def test_init_equal_workflow_is_unchanged(tmp_path: Path) -> None:
@@ -206,3 +212,45 @@ def test_init_dangling_github_symlink_is_typed_and_leaves_no_store(tmp_path: Pat
 
 def test_generated_workflow_pins_the_lock_digest() -> None:
     assert "self-check --expect @.vouch/config.json" in generated_workflow()
+
+
+def test_init_refuses_partially_populated_non_store_without_changes(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    partial = project / ".vouch"
+    partial.mkdir()
+    sentinel = partial / "owner-file"
+    sentinel.write_bytes(b"keep me")
+    before = _all_relative_paths(project)
+
+    with pytest.raises(InitError, match="store already exists"):
+        init_project(str(project), LOCK_BYTES)
+
+    assert _all_relative_paths(project) == before
+    assert sentinel.read_bytes() == b"keep me"
+
+
+def test_init_refuses_read_only_project_root_without_changes(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    os.chmod(project, stat.S_IRUSR | stat.S_IXUSR)
+    try:
+        with pytest.raises(InitError, match="cannot write init target"):
+            init_project(str(project), LOCK_BYTES)
+        assert _all_relative_paths(project) == set()
+    finally:
+        os.chmod(project, stat.S_IRWXU)
+
+
+def test_init_crash_between_staging_and_placement_leaves_nothing(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+
+    def crash_after_staging(step: str) -> None:
+        if step == "staged":
+            raise RuntimeError("simulated crash")
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        init_project(str(project), LOCK_BYTES, on_step=crash_after_staging)
+
+    assert _all_relative_paths(project) == set()
+    assert {path.name for path in tmp_path.iterdir()} == {project.name}
