@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_branch_merge.py -q","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"8657416525ca421ab2227136cc9edcfa2f8d789197cd003a4856a0f53c397e68","parent":"GENESIS","recorded_at":"2026-08-18T09:24:29+00:00","sequence":1,"unit":{"name":"branch-merge","version":"1"}}

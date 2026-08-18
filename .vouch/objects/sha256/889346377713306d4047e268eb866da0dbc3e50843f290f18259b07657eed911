@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"branch-merge@1","reason":"batch A unit #12 in flight: D-16's semantic merge; pack/1 frozen and RED recorded"},"prev":"a01e2bcbb40f73c52b80ad7dbf276e022a304688658897f74d8d19fce18cb89b","recorded_at":"2026-08-18T09:24:29+00:00","revision":316,"run_id":""}
