@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_init_recovery.py -q","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"96d2aff8da552206c954dc01e20323a19707af810aef968e9b5a7ad7f8920921","parent":"GENESIS","recorded_at":"2026-08-18T17:42:07+00:00","sequence":1,"unit":{"name":"init-recovery","version":"1"}}
