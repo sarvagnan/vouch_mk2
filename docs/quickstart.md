@@ -221,6 +221,21 @@ in-flight unit can carry a visible, reasoned exception through
 active exception with `clear-open-in-ci --name UNIT`. The `check.ci-policy` row names the enforced
 policy and lists each exact exception ref and reason.
 
+### Concurrent branches
+
+Two copies of a store can be reconciled with
+`vouch-mk2 merge --root OURS --other THEIRS [--actor ACTOR]`. Vouch finds the deepest
+shared event-record digest and replays THEIRS' divergent commands through `decide()` against
+the evolving OURS snapshot. If THEIRS is already an ancestor the operation writes nothing;
+if OURS is an ancestor it fast-forwards to THEIRS without changing any of THEIRS' record
+digests. A divergent merge appends newly decided records to OURS and records both pre-merge
+heads plus the actor claim.
+
+There is no snapshot-comparison fallback. Histories with no shared event record are refused
+as `merge.unrelated-histories`, and one refused replay is a `merge.conflict` that leaves OURS
+unchanged. A successful merge establishes that the resulting single log replays to its
+snapshot. It does not establish broader semantic compatibility between the branches.
+
 ## 7. A release
 
 Releases roster published units, carry launch criteria (all four fields are required — Vouch

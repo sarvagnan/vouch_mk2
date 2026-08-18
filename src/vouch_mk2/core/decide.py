@@ -31,6 +31,7 @@ from vouch_mk2.core.commands import (
     MarkFailedUnrecovered,
     MarkDone,
     MarkOpenInCi,
+    RecordMerge,
     MarkReady,
     OpenDeviation,
     PrepareRelease,
@@ -69,6 +70,7 @@ from vouch_mk2.core.events import (
     Event,
     EvidenceRecorded,
     FormalCertificateRecorded,
+    MergeRecorded,
     GateCheck,
     GateRecord,
     OpenInCiCleared,
@@ -1147,6 +1149,15 @@ def _decide_record_formal_certificate(
     return Accepted(events=(FormalCertificateRecorded(command.certificate_digest),))
 
 
+def _decide_record_merge(command: RecordMerge) -> Decision:
+    if not _valid_digest(command.ours_head) or not _valid_digest(command.theirs_head):
+        return _refuse(
+            "merge.head-invalid",
+            "merge heads must be 64 lowercase hexadecimal record digests",
+        )
+    return Accepted(events=(MergeRecorded(command.ours_head, command.theirs_head),))
+
+
 def _roster_snapshot(
     snapshot: Snapshot, release: Release
 ) -> tuple[tuple[str, str, str], ...]:
@@ -1436,7 +1447,7 @@ def _decide_close(snapshot: Snapshot, command: CloseDeviation) -> Decision:
     return Accepted(events=(DeviationClosed(deviation_id=command.deviation_id),))
 
 
-def decide(snapshot: Snapshot, command: Command) -> Decision:
+def decide(snapshot: Snapshot, command: Command | RecordMerge) -> Decision:
     match command:
         case SpecifyUnit():
             return _decide_specify(snapshot, command)
@@ -1466,6 +1477,8 @@ def decide(snapshot: Snapshot, command: Command) -> Decision:
             return _decide_clear_open_in_ci(snapshot, command)
         case RecordFormalCertificate():
             return _decide_record_formal_certificate(command)
+        case RecordMerge():
+            return _decide_record_merge(command)
         case OpenDeviation():
             return _decide_open_deviation(snapshot, command)
         case AmendDeviation():
@@ -1786,6 +1799,8 @@ def _apply_one(snapshot: Snapshot, event: Event) -> Snapshot:
             )
         case FormalCertificateRecorded(certificate_digest=certificate_digest):
             formal_certificate_digest = certificate_digest
+        case MergeRecorded():
+            pass
         case DeploymentStarted(release_id=release_id):
             releases = _with_release_status(
                 snapshot, release_id, ReleaseState.DEPLOYING

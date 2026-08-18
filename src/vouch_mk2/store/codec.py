@@ -901,6 +901,7 @@ _EVENT_TYPE_NAMES = (
     "OpenInCiMarked",
     "OpenInCiCleared",
     "FormalCertificateRecorded",
+    "MergeRecorded",
     "DeploymentStarted",
     "VerificationStarted",
     "ReleaseSucceeded",
@@ -1002,6 +1003,9 @@ def decode_event_record(data: bytes) -> EventRecord:
     else:
         decoded = _decode_event_value(obj["payload"], event_type, "payload")
         event = cast(Event, decoded)
+    if isinstance(event, event_module.MergeRecorded):
+        _digest(event.ours_head, "payload.ours_head")
+        _digest(event.theirs_head, "payload.theirs_head")
     revision = _integer(obj["revision"], "revision")
     if revision < 0:
         raise DecodeError("revision: must be non-negative")

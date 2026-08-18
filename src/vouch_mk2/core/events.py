@@ -251,6 +251,14 @@ class FormalCertificateRecorded:
 
 
 @dataclass(frozen=True, slots=True)
+class MergeRecorded:
+    """A successful divergent merge, naming both pre-merge branch heads."""
+
+    ours_head: str
+    theirs_head: str
+
+
+@dataclass(frozen=True, slots=True)
 class DeploymentStarted:
     release_id: str
     gate: GateRecord
@@ -325,6 +333,7 @@ type Event = (
     | OpenInCiMarked
     | OpenInCiCleared
     | FormalCertificateRecorded
+    | MergeRecorded
     | DeploymentStarted
     | VerificationStarted
     | ReleaseSucceeded

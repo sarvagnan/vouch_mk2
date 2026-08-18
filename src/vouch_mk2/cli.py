@@ -71,6 +71,7 @@ from vouch_mk2.store import (
 )
 from vouch_mk2.store.upgrade import UpgradeRefused
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
+from vouch_mk2.store.merge import merge_store_roots
 from vouch_mk2.verify import (
     ProjectionRegenerationError,
     RefusedError,
@@ -111,6 +112,7 @@ class _Arguments(argparse.Namespace):
     exclude: list[str]
     tier: str
     actor: str
+    other: str
 
 
 def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
@@ -330,6 +332,22 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         "--target",
         default=None,
         help="existing target project directory (required with --approve)",
+    )
+    merge = commands.add_parser(
+        "merge", help="merge another event-log branch into this store by replay"
+    )
+    merge.add_argument("--root", required=True, help="our store root directory")
+    merge.add_argument("--other", required=True, help="other store root directory")
+    merge.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="emit one JSON result instead of text",
+    )
+    merge.add_argument(
+        "--actor",
+        default=default_actor(),
+        help="recorded actor claim (default: OS user)",
     )
     _add_lifecycle_parsers(commands)
     return parser
@@ -975,6 +993,39 @@ def _record_formal_certificate_handler(namespace: argparse.Namespace) -> int:
     )
 
 
+def _merge_handler(namespace: argparse.Namespace) -> int:
+    try:
+        result = merge_store_roots(
+            namespace.root,
+            namespace.other,
+            actor=namespace.actor,
+            run_id=ci_run_id(),
+        )
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    if isinstance(result, Refused):
+        return _present_refusal(namespace.json_output, result)
+    if namespace.json_output:
+        print(
+            json.dumps(
+                {
+                    "accepted": True,
+                    "mode": result.mode,
+                    "replayed_records": result.replayed_records,
+                    "revision": result.snapshot.revision,
+                },
+                sort_keys=True,
+            )
+        )
+    else:
+        print(
+            f"merge: {result.mode}; revision {result.snapshot.revision}; "
+            f"replayed {result.replayed_records} source record(s)"
+        )
+    return 0
+
+
 LIFECYCLE_VERBS: dict[str, _LifecycleHandler] = {
     verb: (
         _record_evidence_handler
@@ -1264,12 +1315,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         exclude=[],
         tier=Tier.LIGHTWEIGHT.value,
         actor=default_actor(),
+        other="",
     )
     parsed = parser.parse_args(arguments, namespace=namespace)
     if not isinstance(parsed, _Arguments):
         raise TypeError("argparse returned an unexpected namespace type")
     if evidence_argv is not None:
         parsed.command_argv = evidence_argv
+
+    if parsed.command == "merge":
+        return _merge_handler(parsed)
 
     lifecycle_handler = LIFECYCLE_VERBS.get(parsed.command)
     if lifecycle_handler is not None:

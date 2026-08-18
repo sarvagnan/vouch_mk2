@@ -213,6 +213,14 @@ class RecordFormalCertificate:
 
 
 @dataclass(frozen=True, slots=True)
+class RecordMerge:
+    """Record the two branch heads joined by a successful semantic merge."""
+
+    ours_head: str
+    theirs_head: str
+
+
+@dataclass(frozen=True, slots=True)
 class StartDeploy:
     ir_command: ClassVar[str] = mk2.CMD_START_DEPLOY
     release_id: str

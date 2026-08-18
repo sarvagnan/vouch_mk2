@@ -47,6 +47,9 @@ _ROOT_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 # S_ISREG check right after the open then refuses it with a typed error.
 _FILE_READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 _TEMP_WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+_MERGE_TXN_PREFIX = ".merge-"
+_MERGE_TXN_SUFFIX = ".txn"
+_MERGE_BASE_STATE = ".before-state"
 
 # Level-2 bounded decoding (docs/threat-model.md): a planted multi-gigabyte
 # artifact is refused before allocation, not after.
@@ -98,6 +101,8 @@ class Store:
             ("os.stat", os.stat in os.supports_dir_fd),
             ("os.mkdir", os.mkdir in os.supports_dir_fd),
             ("os.rename", os.rename in os.supports_dir_fd),
+            ("os.link", os.link in os.supports_dir_fd),
+            ("os.rmdir", os.rmdir in os.supports_dir_fd),
             ("os.unlink", os.unlink in os.supports_dir_fd),
             (
                 "os.stat(follow_symlinks=False)",
@@ -290,6 +295,7 @@ class Store:
             except BlockingIOError:
                 return
             locked = True
+            self._sweep_merge_transactions()
             for name in os.listdir(self._root_fd):
                 if (
                     name.startswith(".state-")
@@ -309,6 +315,74 @@ class Store:
             if locked:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
+
+    def _sweep_merge_transactions(self) -> None:
+        """Recover merge staging directories left before or after publication."""
+        transactions = tuple(
+            name
+            for name in os.listdir(self._root_fd)
+            if name.startswith(_MERGE_TXN_PREFIX) and name.endswith(_MERGE_TXN_SUFFIX)
+        )
+        if not transactions:
+            return
+        current_state = self.read_state_bytes()
+        for name in transactions:
+            rollback = False
+            try:
+                transaction_fd = self._open_directory(name, self._root_fd)
+            except IntegrityError:
+                continue
+            try:
+                try:
+                    before_state = self._read_file(
+                        transaction_fd,
+                        _MERGE_BASE_STATE,
+                        f"{name}/{_MERGE_BASE_STATE}",
+                    )
+                except IntegrityError:
+                    before_state = b""
+                rollback = before_state == current_state
+            finally:
+                os.close(transaction_fd)
+            self._clean_merge_transaction(name, rollback=rollback)
+
+    def _clean_merge_transaction(self, name: str, *, rollback: bool) -> None:
+        """Remove one transaction, unlinking only canonical hard links it owns."""
+        transaction_fd = self._open_directory(name, self._root_fd)
+        objects_fd = self._open_objects_directory()
+        removed_object = False
+        try:
+            entries = tuple(os.listdir(transaction_fd))
+            if rollback:
+                for digest in entries:
+                    if not self._looks_like_digest(digest):
+                        continue
+                    try:
+                        staged = os.stat(
+                            digest, dir_fd=transaction_fd, follow_symlinks=False
+                        )
+                        canonical = os.stat(
+                            digest, dir_fd=objects_fd, follow_symlinks=False
+                        )
+                    except FileNotFoundError:
+                        continue
+                    if (
+                        stat.S_ISREG(staged.st_mode)
+                        and stat.S_ISREG(canonical.st_mode)
+                        and staged.st_dev == canonical.st_dev
+                        and staged.st_ino == canonical.st_ino
+                    ):
+                        self._unlink_if_present(digest, objects_fd)
+                        removed_object = True
+            for entry in entries:
+                self._unlink_if_present(entry, transaction_fd)
+            if removed_object:
+                os.fsync(objects_fd)
+        finally:
+            os.close(objects_fd)
+            os.close(transaction_fd)
+        os.rmdir(name, dir_fd=self._root_fd)
+        os.fsync(self._root_fd)
 
     @staticmethod
     def _looks_like_digest(name: str) -> bool:
@@ -918,6 +992,171 @@ class Store:
             )
         self._replace_state_bytes(data)
 
+    def _begin_merge_transaction(
+        self,
+        before_state: bytes,
+        supporting_objects: Sequence[tuple[ArtifactKind, bytes]],
+    ) -> str:
+        name = f"{_MERGE_TXN_PREFIX}{secrets.token_hex(16)}{_MERGE_TXN_SUFFIX}"
+        os.mkdir(name, 0o700, dir_fd=self._root_fd)
+        transaction_fd = self._open_directory(name, self._root_fd)
+        try:
+            staged = ((_MERGE_BASE_STATE, before_state),) + tuple(
+                (digest_of(kind, payload), payload)
+                for kind, payload in supporting_objects
+            )
+            written: dict[str, bytes] = {}
+            for filename, payload in staged:
+                prior = written.get(filename)
+                if prior is not None:
+                    if prior != payload:
+                        raise StoreError(
+                            f"merge transaction digest collision at {filename!r}"
+                        )
+                    continue
+                fd = os.open(
+                    filename,
+                    _TEMP_WRITE_FLAGS,
+                    0o600,
+                    dir_fd=transaction_fd,
+                )
+                try:
+                    self._write_all(fd, payload)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                written[filename] = payload
+            os.fsync(transaction_fd)
+            os.fsync(self._root_fd)
+        except BaseException:
+            os.close(transaction_fd)
+            self._clean_merge_transaction(name, rollback=False)
+            raise
+        os.close(transaction_fd)
+        return name
+
+    def _place_merge_support(
+        self,
+        transaction_name: str,
+        supporting_objects: Sequence[tuple[ArtifactKind, bytes]],
+    ) -> None:
+        transaction_fd = self._open_directory(transaction_name, self._root_fd)
+        objects_fd = self._open_objects_directory()
+        try:
+            for kind, payload in supporting_objects:
+                digest = digest_of(kind, payload)
+                try:
+                    existing = self._read_file(
+                        objects_fd, digest, f"objects/sha256/{digest}"
+                    )
+                except IntegrityError as error:
+                    if not self._is_missing(error):
+                        raise
+                else:
+                    if digest_of(kind, existing) != digest:
+                        raise IntegrityError(
+                            f"objects/sha256/{digest}: existing object is corrupt"
+                        )
+                    continue
+                os.link(
+                    digest,
+                    digest,
+                    src_dir_fd=transaction_fd,
+                    dst_dir_fd=objects_fd,
+                    follow_symlinks=False,
+                )
+                self._step("object-placed")
+                os.fsync(objects_fd)
+                self._step("objects-dir-fsynced")
+        finally:
+            os.close(objects_fd)
+            os.close(transaction_fd)
+
+    def _merge_new_event_objects(
+        self,
+        objects: Sequence[tuple[ArtifactKind, bytes]],
+    ) -> dict[str, bytes]:
+        objects_fd = self._open_objects_directory()
+        found: dict[str, bytes] = {}
+        try:
+            for kind, payload in objects:
+                if kind is not ArtifactKind.EVENT:
+                    continue
+                digest = digest_of(kind, payload)
+                try:
+                    existing = self._read_file(
+                        objects_fd, digest, f"objects/sha256/{digest}"
+                    )
+                except IntegrityError as error:
+                    if self._is_missing(error):
+                        found[digest] = payload
+                        continue
+                    raise
+                if digest_of(kind, existing) != digest:
+                    raise IntegrityError(
+                        f"objects/sha256/{digest}: existing object is corrupt"
+                    )
+        finally:
+            os.close(objects_fd)
+        return found
+
+    def _remove_merge_event_objects(self, objects: dict[str, bytes]) -> None:
+        objects_fd = self._open_objects_directory()
+        removed = False
+        try:
+            for digest, expected in objects.items():
+                try:
+                    payload = self._read_file(
+                        objects_fd, digest, f"objects/sha256/{digest}"
+                    )
+                except IntegrityError as error:
+                    if self._is_missing(error):
+                        continue
+                    raise
+                if payload == expected and digest_of(ArtifactKind.EVENT, payload) == digest:
+                    self._unlink_if_present(digest, objects_fd)
+                    removed = True
+            if removed:
+                os.fsync(objects_fd)
+        finally:
+            os.close(objects_fd)
+
+    def commit_merge(
+        self,
+        snapshot: Snapshot,
+        objects: Sequence[tuple[ArtifactKind, bytes]],
+        *,
+        expected_revision: int,
+    ) -> None:
+        """Commit a merge with recoverable support staging and caught-error rollback."""
+        self._require_writable("commit-merge")
+        self._require_write_lock("commit-merge")
+        before_state = self.read_state_bytes()
+        supporting = tuple(
+            (kind, payload) for kind, payload in objects if kind is not ArtifactKind.EVENT
+        )
+        new_events = self._merge_new_event_objects(objects)
+        transaction_name = self._begin_merge_transaction(before_state, supporting)
+        try:
+            self._place_merge_support(transaction_name, supporting)
+            self.commit(
+                snapshot,
+                objects=objects,
+                expected_revision=expected_revision,
+            )
+        except BaseException:
+            try:
+                state_unchanged = self.read_state_bytes() == before_state
+            except StoreError:
+                state_unchanged = False
+            if state_unchanged:
+                self._remove_merge_event_objects(new_events)
+            self._clean_merge_transaction(
+                transaction_name, rollback=state_unchanged
+            )
+            raise
+        self._clean_merge_transaction(transaction_name, rollback=False)
+
     def commit(
         self,
         snapshot: Snapshot,
@@ -931,8 +1170,9 @@ class Store:
         The ordering is deliberately asymmetric: a committed snapshot can never
         name a missing object, while a killed pre-swap writer may leave inert,
         unreachable content-addressed objects for the next writable open to
-        sweep. Advancing a current-format revision requires the matching event
-        chain extension in ``objects``; unchanged-revision upgrade/repair
+        sweep. No partial semantic state is published, but post-kill byte identity
+        is not promised. Advancing a current-format revision requires the matching
+        event chain extension in ``objects``; unchanged-revision upgrade/repair
         re-encodes remain legal without a new record.
         """
         self._require_writable("commit")

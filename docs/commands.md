@@ -177,6 +177,19 @@ options:
   --target TARGET       existing target project directory (required with --approve)
 ```
 
+## merge
+
+```text
+usage: vouch-mk2 merge [-h] --root ROOT --other OTHER [--json] [--actor ACTOR]
+
+options:
+  -h, --help     show this help message and exit
+  --root ROOT    our store root directory
+  --other OTHER  other store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
+```
+
 ## adjudicate-amend
 
 ```text

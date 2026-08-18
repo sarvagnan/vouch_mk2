@@ -42,11 +42,16 @@ including `record-formal-certificate` through the revision it reports. Writers
 wait on a blocking exclusive lock. Read-only handles never acquire that lock.
 Standalone projection generation reads unlocked and holds the writer lock only
 while replacing generated files; upgrade holds its outer writer lock through
-regeneration. Commits deliberately place objects before replacing `state.json`:
-this asymmetry guarantees that a committed snapshot never names a missing object.
-An interrupted pre-swap commit can leave an inert content-addressed event object
-that no snapshot reaches; the opportunistic orphan/temp cleanup removes it on a
-later writable open and is skipped while another writer holds the lock. The MCP
+regeneration. Commits deliberately place objects before replacing `state.json`.
+This guarantees no partial semantic state: `state.json` never advances without
+every event record it names already present. An interrupted pre-swap write can
+leave inert, unreferenced content-addressed objects and temporary transaction
+files. They are unreachable from authoritative state and harmless; the
+opportunistic orphan/transaction cleanup reclaims them on the next writable open
+and is skipped while another writer holds the lock. The store does **not**
+guarantee post-kill byte identity: after `SIGKILL`, its bytes may differ until that
+cleanup runs. Caught merge failures whose state is still unchanged remove exactly
+the canonical objects they created before releasing the writer lock. The MCP
 transport remains read-only; these verbs do not add a remote mutation path.
 
 Every lifecycle event records an actor and a run ID. Both are **claims**: the
@@ -66,6 +71,19 @@ This proves self-consistency of the chain currently presented and derivability o
 its snapshot, not true wall-clock chronology. Vouch has no independent monotonic
 trust root that could prove when two commuting events really occurred; run-ID and
 anchor claims remain the only external ties and retain their stated claim boundary.
+
+Concurrent copies are reconciled by `merge --root OURS --other THEIRS`, not by comparing
+their snapshots. The command requires a shared event-record ancestor. It fast-forwards an
+ancestor unchanged, treats an already-merged ancestor as a no-op, or replays each divergent
+THEIRS command through `decide()` against the evolving OURS state and records both branch
+heads and the caller's actor claim. An unrelated history is refused; if any replay is refused,
+the whole merge is refused and OURS is not written.
+
+A successful merge proves only that the resulting append-only log replays to the committed
+merged snapshot. It does **not** prove that the branches were semantically compatible in any
+wider sense, that their intentions agreed, that either branch's claims were true, or that the
+recorded actor identity was verified. The merge actor remains a claim under the same boundary
+as every other event actor.
 
 For a format-3 upgrade, the first record is a **pre-log checkpoint** that preserves
 the whole caller/store-asserted snapshot. Everything before that checkpoint is
