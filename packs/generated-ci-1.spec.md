@@ -48,3 +48,12 @@ R10 (guard) mk2's own `.github/workflows/ci.yml` keeps unit #14's property.
   the new fragment — that is expected and allowed).
 - New test functions for anything the pack does not cover (e.g. `init` writing exactly
   `generated_workflow()`).
+
+## Amendment pack/2 (DEV-gc-01, superseded detail, adjudicated amend)
+
+R9 required the fragment to tell the adopter, *in a comment*, to wire their own test job into
+`needs:`. D-19's second review showed a comment cannot gate anything: project tests did not
+actually gate anchoring. `ci-adoption-closure@1` replaces the comment with `init --test-job` and
+a placeholder job that fails until wired, and owns the assertions about that mechanism. R9's
+promise here — the adopter is told, in the generated artifact, how to wire their tests — is
+unchanged; only the "in a comment" detail is superseded.

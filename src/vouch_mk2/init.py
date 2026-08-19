@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import stat
 import tempfile
-from collections.abc import Callable
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 
@@ -44,7 +45,7 @@ class _PlannedFile:
     needs_write: bool
 
 
-_WORKFLOW = """name: vouch
+_WORKFLOW_TEMPLATE = """name: vouch
 
 on:
   push:
@@ -56,8 +57,6 @@ concurrency:
 
 jobs:
   validation:
-    # Add your own test job to this validation job's `needs:` before adopting it.
-    # needs: [your-test-job]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -77,15 +76,17 @@ jobs:
       - name: Exhaustive Vouch formal check
         shell: bash
         run: python vouch.lock formal
-
+__PROJECT_TEST_PLACEHOLDER__
   anchor:
-    needs: validation
+    needs: [__ANCHOR_NEEDS__]
     if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.repository.fork == false
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.14'
@@ -112,13 +113,47 @@ jobs:
           git config user.name "vouch-anchor-bot"
           git config user.email "vouch-anchor-bot@users.noreply.github.com"
           git commit -m "vouch: advance evidence anchors"
-          git push origin "HEAD:${{ github.event.repository.default_branch }}"
+      - name: Push anchored projections
+        shell: bash
+        env:
+          VOUCH_PUSH_TOKEN: ${{ github.token }}
+        run: git push "https://x-access-token:${VOUCH_PUSH_TOKEN}@github.com/${{ github.repository }}.git" "HEAD:${{ github.event.repository.default_branch }}"
 """
 
 
-def generated_workflow() -> str:
+_PROJECT_TEST_PLACEHOLDER = """
+  project-tests-required:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse an anchor not gated by project tests
+        shell: bash
+        run: |
+          echo "No project test job is wired into Vouch anchoring; rerun init with --test-job NAME."
+          exit 1
+"""
+
+
+def _validated_test_jobs(test_jobs: Sequence[str]) -> tuple[str, ...]:
+    jobs = tuple(test_jobs)
+    for job in jobs:
+        if not job or not (job[0].isalpha() or job[0] == "_") or any(
+            not (character.isalnum() or character in "_-") for character in job
+        ):
+            raise InitError(
+                f"invalid --test-job {job!r}: expected a GitHub job id"
+            )
+    return jobs
+
+
+def generated_workflow(test_jobs: Sequence[str] = ()) -> str:
     """Return the exact GitHub Actions workflow fragment written by ``init``."""
-    return _WORKFLOW
+    jobs = _validated_test_jobs(test_jobs)
+    placeholder = "" if jobs else _PROJECT_TEST_PLACEHOLDER
+    anchor_needs = ", ".join(("validation", *(jobs or ("project-tests-required",))))
+    return (
+        _WORKFLOW_TEMPLATE.replace("__PROJECT_TEST_PLACEHOLDER__", placeholder)
+        .replace("__ANCHOR_NEEDS__", anchor_needs)
+    )
 
 
 def _canonical_json(document: object) -> bytes:
@@ -314,14 +349,36 @@ def _stage_file(stage_root: str, index: int, plan: _PlannedFile) -> str:
 
 
 def _place_staged_file(staged: str, plan: _PlannedFile) -> None:
-    """Publish one absent target without an overwrite-capable operation."""
-    linked = False
+    """Publish one complete file by renaming a same-directory temporary."""
+    directory = os.path.dirname(plan.destination)
+    temporary = os.path.join(
+        directory,
+        f".{os.path.basename(plan.destination)}.{secrets.token_hex(8)}.tmp",
+    )
+    temporary_exists = False
+    placed = False
     try:
-        os.link(staged, plan.destination, follow_symlinks=False)
-        linked = True
-        _fsync_directory(os.path.dirname(plan.destination))
+        os.link(staged, temporary, follow_symlinks=False)
+        temporary_exists = True
+        try:
+            os.lstat(plan.destination)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise InitError(
+                f"{plan.destination}: cannot inspect placement target: {error}"
+            ) from error
+        else:
+            raise InitError(
+                f"{plan.destination}: init target appeared during placement; "
+                "refusing to overwrite"
+            )
+        os.rename(temporary, plan.destination)
+        temporary_exists = False
+        placed = True
+        _fsync_directory(directory)
     except OSError as error:
-        if linked:
+        if placed:
             try:
                 os.unlink(plan.destination)
             except FileNotFoundError:
@@ -329,6 +386,16 @@ def _place_staged_file(staged: str, plan: _PlannedFile) -> None:
         raise InitError(
             f"{plan.destination}: cannot place staged init target: {error}"
         ) from error
+    finally:
+        if temporary_exists:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+
+
+def _init_step(_step: str) -> None:
+    """Module-private fault-injection seam for recovery tests."""
 
 
 def _rollback_placements(
@@ -361,7 +428,7 @@ def init_project(
     *,
     tier: Tier = Tier.LIGHTWEIGHT,
     actor: str | None = None,
-    on_step: Callable[[str], None] | None = None,
+    test_jobs: Sequence[str] = (),
 ) -> tuple[InitResult, ...]:
     """Initialize exactly the D-7 store, lock, config, and CI workflow set.
 
@@ -370,8 +437,8 @@ def init_project(
     so an interruption cannot expose the re-initialization marker before the
     project is retryable. A caught refusal rolls back paths created by this run.
 
-    ``on_step`` is a test-only fault-injection seam. Production callers leave it
-    unset; tests may raise after the ``staged`` boundary.
+    ``test_jobs`` names the project's own GitHub Actions jobs that must pass
+    before the anchor job can run.
     """
     root = os.path.abspath(project_root)
     try:
@@ -396,7 +463,7 @@ def init_project(
         workflow_plan = _plan_file(
             root,
             ".github/workflows/vouch.yml",
-            generated_workflow().encode("utf-8"),
+            generated_workflow(test_jobs).encode("utf-8"),
             0o644,
         )
     except StoreError as error:
@@ -454,8 +521,7 @@ def init_project(
                 "vouch config",
             )
 
-        if on_step is not None:
-            on_step("staged")
+        _init_step("staged")
 
         if any(
             plan.needs_write

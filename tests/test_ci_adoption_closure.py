@@ -60,6 +60,11 @@ def _published_unit_never_anchored(tmp_path: Path) -> tuple[Path, str]:
     for kind, code in (("red", 1), ("green", 0)):
         assert _run("record-evidence", "--root", root, "--unit", "u@v1", "--kind", kind, "--",
                     sys.executable, "-c", f"raise SystemExit({code})")[0] == 0
+    # pack/2 (DEV-cac2-01): the unit must actually be PUBLISHED. Left in-progress it also trips
+    # the strict CI policy, and tolerating that would weaken a real verdict — Codex was right to
+    # refuse. A published unit that has never been anchored is the true first-CI-run state.
+    assert _run("mark-done", "--root", root, "--name", "u")[0] == 0
+    assert _run("publish", "--root", root, "--name", "u")[0] == 0
     assert _run("generate", "--root", root)[0] == 0
     return project, root
 
@@ -81,6 +86,8 @@ def test_pending_anchor_ok_still_refuses_everything_else(tmp_path: Path) -> None
     (project / "tests" / "t.py").write_text("changed after freezing\n")
     assert _run("check", "--ci", "--pending-anchor-ok", "--root", root, "--project", str(project))[0] == 1
     (project / "tests" / "t.py").write_text("def test_x():\n    assert False\n")
+    # a nonterminal unit under the strict CI policy is exactly the kind of thing the flag must
+    # NOT tolerate (this is what DEV-cac2-01 confirmed).
     assert _run("specify", "--root", root, "--name", "open-work", "--version", "v1")[0] == 0
     assert _run("check", "--ci", "--pending-anchor-ok", "--root", root, "--project", str(project))[0] == 1
 

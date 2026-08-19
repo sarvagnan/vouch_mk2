@@ -151,7 +151,9 @@ def test_generated_workflow_uses_a_real_repository_identity_guard(tmp_path: Path
     assert "github.event.repository.default_branch" in workflow
     assert workflow.index("python vouch.lock formal") < workflow.index("advance-anchor")
     assert "git add -- .vouch/" in workflow
-    assert "git push origin" in workflow and "[skip ci]" not in workflow
+    assert "x-access-token:${VOUCH_PUSH_TOKEN}" in workflow
+    assert workflow.index("advance-anchor") < workflow.index("VOUCH_PUSH_TOKEN")
+    assert "[skip ci]" not in workflow
 
 
 def test_system_map_refuses_an_anchor_claim_that_disagrees_with_its_head() -> None:
@@ -223,17 +225,19 @@ def test_generated_workflow_parses_as_yaml_with_the_intended_shape() -> None:
 
     document = yaml.safe_load(generated_workflow())
     jobs = document["jobs"]
-    assert set(jobs) == {"validation", "anchor"}
+    assert set(jobs) == {"validation", "project-tests-required", "anchor"}
     assert jobs["validation"]["permissions"] == {"contents": "read"}
     assert jobs["anchor"]["permissions"] == {"contents": "write"}
-    assert jobs["anchor"]["needs"] == "validation" or "validation" in jobs["anchor"]["needs"]
+    assert set(jobs["anchor"]["needs"]) == {"validation", "project-tests-required"}
+    placeholder_run = jobs["project-tests-required"]["steps"][0]["run"]
+    assert "exit 1" in placeholder_run and "--test-job" in placeholder_run
     assert document["concurrency"]["group"]
     assert document["concurrency"]["cancel-in-progress"] is False
-    checkout = next(s for s in jobs["validation"]["steps"] if "checkout" in str(s.get("uses", "")))
-    assert checkout["with"]["persist-credentials"] is False
     for job in jobs.values():
         assert job["runs-on"]
         for step in job["steps"]:
             uses = step.get("uses")
             if uses:
                 assert len(uses.split("@")[1]) == 40, uses
+                if "checkout" in uses:
+                    assert step["with"]["persist-credentials"] is False

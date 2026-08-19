@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"DeviationAmended","pack_digest":"","payload":{"amendment_version":"ci-adoption-closure-pack/2@fdf65d1dcfda0375","deviation_id":"DEV-cac2-01","impact_set":["ci-adoption-closure"],"release_impact_set":[]},"prev":"41e32b311e194b8127b5722629de77693528bb42c988bdb9617e65e0a923379a","recorded_at":"2026-08-19T03:14:32+00:00","revision":429,"run_id":""}

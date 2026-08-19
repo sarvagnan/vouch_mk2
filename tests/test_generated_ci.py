@@ -135,8 +135,12 @@ def test_anchor_step_advances_only_heads_that_lack_a_run_claim() -> None:
 
 
 def test_fragment_tells_the_adopter_to_wire_their_own_tests() -> None:
+    # pack/2 (DEV-gc-01): a comment was the original mechanism and D-19's second review showed
+    # it cannot gate anything. `ci-adoption-closure@1` replaced it with a placeholder job that
+    # FAILS until wired, and owns the assertions about that job. This unit's promise — the
+    # adopter is TOLD to wire their own tests — is unchanged and asserted here.
     text = _fragment()
-    assert re.search(r"#.*needs:", text) or "your test job" in text.lower()
+    assert "--test-job" in text
 
 
 # ---- mk2's own workflow keeps the property, stated once ----

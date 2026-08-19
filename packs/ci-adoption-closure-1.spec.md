@@ -56,3 +56,11 @@ R6 Standards items the review named: `captured_revision` is either used by the g
   every pre-existing test green — `tests/test_generated_ci.py` and `tests/test_init.py` assert
   the current shapes and will need updating; `tests/test_ci_anchor_closure.py`'s guard on mk2's
   own ordering must keep passing.
+
+## Amendment pack/2 (DEV-cac2-01, pack-defect, adjudicated amend)
+
+Raised by the implementer, correctly. R1's fixture was named "published unit, never anchored"
+but stopped at `record-evidence` — leaving the unit in-progress, which the strict CI policy
+FAILs. Requiring exit 0 there would have weakened a real verdict, exactly what the ground rules
+forbid. The fixture now marks the unit done and publishes it, which is the true first-CI-run
+state: a published unit whose evidence head has never been anchored. R1 is otherwise unchanged.

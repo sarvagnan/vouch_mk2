@@ -1113,7 +1113,6 @@ def record_evidence(
     actor: str | None = None,
     run_id: str = "",
     captured_pack_digest: str | None = None,
-    captured_revision: int | None = None,
 ) -> str:
     with store.write_locked():
         snapshot = store.read_snapshot()
@@ -1125,7 +1124,6 @@ def record_evidence(
                 event,
                 digest,
                 captured_pack_digest=captured_pack_digest,
-                captured_revision=captured_revision,
             ),
         )
         if not isinstance(decision, Accepted):

@@ -4,15 +4,86 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  anchor:
+    needs: gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - name: Sync environment
+        run: uv sync --locked
+      - name: Build lock for anchoring and dogfood checks
+        run: uv run vouch-mk2 build-lock --output "$RUNNER_TEMP/vouch.lock"
+      - name: Advance evidence anchors and commit projections
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.repository.fork == false
+        shell: bash
+        run: |
+          python - <<'PY' > "$RUNNER_TEMP/vouch-evidence-heads"
+          import json
+          from pathlib import Path
+
+          state = json.loads(Path(".vouch/state.json").read_text())
+          for head in state["evidence_heads"]:
+              if not head["anchor_run_id"]:
+                  print(head["unit_name"])
+          PY
+          while IFS= read -r unit_name; do
+            python "$RUNNER_TEMP/vouch.lock" advance-anchor --root .vouch --unit-name "$unit_name"
+          done < "$RUNNER_TEMP/vouch-evidence-heads"
+          python "$RUNNER_TEMP/vouch.lock" generate --root .vouch
+          git add -- .vouch/
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "vouch-anchor-bot"
+          git config user.email "vouch-anchor-bot@users.noreply.github.com"
+          git commit -m "vouch: advance evidence anchors"
+      - name: Push anchored projections
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.repository.fork == false
+        shell: bash
+        env:
+          VOUCH_PUSH_TOKEN: ${{ github.token }}
+        run: git push "https://x-access-token:${VOUCH_PUSH_TOKEN}@github.com/${{ github.repository }}.git" "HEAD:${{ github.event.repository.default_branch }}"
+      - name: Dogfood — check mk2's OWN committed store from the lock (D-10)
+        # Zero mechanical NOT_CHECKED, every organizational claim visibly
+        # NOT_CHECKED, on this repository itself. The certificate is recomputed
+        # and map freshness is audited: a stale dogfood store fails CI.
+        shell: bash
+        run: |
+          python "$RUNNER_TEMP/vouch.lock" check --ci --root .vouch | tee "$RUNNER_TEMP/dogfood.txt"
+          ! grep -E '^NOT-CHECKED +check\.' "$RUNNER_TEMP/dogfood.txt"
+      - name: DoD walkthrough from the vendored lock with NO network
+        # unshare -n gives the step an empty network namespace. The walkthrough
+        # first PROVES the namespace denies a plain HTTP request
+        # (--assert-no-network), then drives the whole lifecycle through the
+        # lock as a subprocess with PYTHONPATH="".
+        shell: bash
+        run: sudo unshare -n -- env PATH="$PATH" python3 scripts/walkthrough.py --assert-no-network --lock "$RUNNER_TEMP/vouch.lock"
+
   gates:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
       - name: Sync environment
         run: uv sync --locked
       - name: Generated command reference is fresh
@@ -51,43 +122,3 @@ jobs:
         run: python "$RUNNER_TEMP/vouch.lock" check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
       - name: Lifecycle evidence verb is vendored in the lock
         run: python "$RUNNER_TEMP/vouch.lock" record-evidence --help
-      - name: Advance evidence anchors and commit projections
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        shell: bash
-        run: |
-          python - <<'PY' > "$RUNNER_TEMP/vouch-evidence-heads"
-          import json
-          from pathlib import Path
-
-          state = json.loads(Path(".vouch/state.json").read_text())
-          for head in state["evidence_heads"]:
-              if head["head"] != head["anchored"] or not head["anchor_run_id"]:
-                  print(head["unit_name"])
-          PY
-          while IFS= read -r unit_name; do
-            python "$RUNNER_TEMP/vouch.lock" advance-anchor --root .vouch --unit-name "$unit_name"
-          done < "$RUNNER_TEMP/vouch-evidence-heads"
-          python "$RUNNER_TEMP/vouch.lock" generate --root .vouch
-          git add -- .vouch/
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git config user.name "vouch-anchor-bot"
-          git config user.email "vouch-anchor-bot@users.noreply.github.com"
-          git commit -m "vouch: advance evidence anchors [skip ci]"
-          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
-      - name: Dogfood — check mk2's OWN committed store from the lock (D-10)
-        # Zero mechanical NOT_CHECKED, every organizational claim visibly
-        # NOT_CHECKED, on this repository itself. The certificate is recomputed
-        # and map freshness is audited: a stale dogfood store fails CI.
-        shell: bash
-        run: |
-          python "$RUNNER_TEMP/vouch.lock" check --ci --root .vouch | tee "$RUNNER_TEMP/dogfood.txt"
-          ! grep -E '^NOT-CHECKED +check\.' "$RUNNER_TEMP/dogfood.txt"
-      - name: DoD walkthrough from the vendored lock with NO network
-        # unshare -n gives the step an empty network namespace. The walkthrough
-        # first PROVES the namespace denies a plain HTTP request
-        # (--assert-no-network), then drives the whole lifecycle through the
-        # lock as a subprocess with PYTHONPATH="".
-        shell: bash
-        run: sudo unshare -n -- env PATH="$PATH" python3 scripts/walkthrough.py --assert-no-network --lock "$RUNNER_TEMP/vouch.lock"

@@ -47,3 +47,12 @@ R6 `docs/quickstart.md` (§6, where anchoring is introduced) and `docs/claim-bou
   real CI runs. The owner does not fake the thing this unit exists to make real.
 - Pyrefly strict; import-linter kept; every pre-existing test green; README count is the owner's.
 - `pytest.ini`/marker for `slow` if the walkthrough test needs one — it must still run by default in CI.
+
+## Amendment pack/3 (DEV-cac-03, pack-defect, adjudicated amend)
+
+pack/2's test asserted mk2's LIVE store had no FAIL row at the moment it ran. That made it a
+trap rather than a check: any transient store condition broke it, and repairing the pack
+required a `rebind-pack` whose own "awaiting a fresh GREEN" row was exactly such a condition —
+an unresolvable cycle. The test now asserts the tolerance PROPERTY (the dogfood tests tolerate
+the pending-anchor row and nothing else); the store's health is asserted by those dogfood tests
+themselves. The unit's promise is unchanged.

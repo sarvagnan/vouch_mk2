@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"UnitRespecified","pack_digest":"","payload":{"gate":{"checks":[{"obligation_id":"gate.unblock.no-blocking-deviations","verdict":"pass"}],"transition":"invalidated->specified"},"name":"ci-adoption-closure"},"prev":"d6d2fbd904df99af20637bdbfc8825fcb9ac44fa44b3369896c261bad2ddef20","recorded_at":"2026-08-19T03:14:32+00:00","revision":432,"run_id":""}

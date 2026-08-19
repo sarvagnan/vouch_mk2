@@ -129,7 +129,7 @@ options:
 
 ```text
 usage: vouch-mk2 init [-h] --project PROJECT [--tier {lightweight,standard,high}]
-                      [--lock LOCK_PATH] [--actor ACTOR]
+                      [--lock LOCK_PATH] [--test-job TEST_JOB] [--actor ACTOR]
 
 options:
   -h, --help            show this help message and exit
@@ -137,6 +137,8 @@ options:
   --tier {lightweight,standard,high}
                         initial assurance tier (default: lightweight)
   --lock LOCK_PATH      existing lock to vendor instead of building/copying the running code
+  --test-job TEST_JOB   GitHub Actions job id that must pass before anchoring; repeat for multiple
+                        project test jobs
   --actor ACTOR         recorded actor claim (default: OS user)
 
 Exit codes: 0 initialized; 2 refused with nothing written; 3 suggestion files

@@ -11,6 +11,7 @@ import pytest
 from pytest import CaptureFixture
 
 from vouch_mk2.cli import main
+from vouch_mk2 import init as init_module
 from vouch_mk2.init import InitError, InitStatus, generated_workflow, init_project
 from vouch_mk2.lock import build_lock
 from vouch_mk2.store import ArtifactKind, digest_of
@@ -72,8 +73,6 @@ def test_init_writes_exactly_generated_workflow(tmp_path: Path) -> None:
     assert (
         project / ".github/workflows/vouch.yml"
     ).read_text() == generated_workflow()
-
-
 def test_second_init_refuses_existing_store(tmp_path: Path) -> None:
     project = _project(tmp_path)
     init_project(str(project), LOCK_BYTES)
@@ -242,6 +241,7 @@ def test_init_refuses_read_only_project_root_without_changes(tmp_path: Path) -> 
 
 def test_init_crash_between_staging_and_placement_leaves_nothing(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = _project(tmp_path)
 
@@ -249,8 +249,9 @@ def test_init_crash_between_staging_and_placement_leaves_nothing(
         if step == "staged":
             raise RuntimeError("simulated crash")
 
+    monkeypatch.setattr(init_module, "_init_step", crash_after_staging)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        init_project(str(project), LOCK_BYTES, on_step=crash_after_staging)
+        init_project(str(project), LOCK_BYTES)
 
     assert _all_relative_paths(project) == set()
     assert {path.name for path in tmp_path.iterdir()} == {project.name}

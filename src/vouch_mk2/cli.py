@@ -44,6 +44,7 @@ from vouch_mk2.core import commands as command_module
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
 from vouch_mk2.init import InitError, InitStatus, init_project
+from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.io import (
     read_regular_nofollow,
@@ -100,6 +101,7 @@ class _Arguments(argparse.Namespace):
     pack_test_file: list[str]
     reason: str
     lock_path: str | None
+    test_job: list[str]
     edit_target: str | None
     ledger: str
     anchor_mode: str | None
@@ -295,6 +297,15 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         help="existing lock to vendor instead of building/copying the running code",
     )
     init.add_argument(
+        "--test-job",
+        action="append",
+        default=[],
+        help=(
+            "GitHub Actions job id that must pass before anchoring; repeat for "
+            "multiple project test jobs"
+        ),
+    )
+    init.add_argument(
         "--actor",
         default=default_actor(),
         help="recorded actor claim (default: OS user)",
@@ -424,10 +435,17 @@ def _only_pending_anchor_is_not_checked(
     if len(not_checked) != 1:
         return False
     row = not_checked[0]
-    if row.check_id != "check.evidence-anchors":
+    if row.check_id != mk2.CHECK_EVIDENCE_ANCHORS:
         return False
-    return bool(snapshot.evidence_heads) and all(
-        head.anchored != "GENESIS" and not head.anchor_run_id
+    pending = tuple(
+        head
+        for head in snapshot.evidence_heads
+        if not head.anchor_run_id
+    )
+    return bool(pending) and all(
+        (head.anchored == "GENESIS" and not head.anchor_run_id)
+        or (head.anchored != "GENESIS" and not head.anchor_run_id)
+        or (head.anchored != "GENESIS" and bool(head.anchor_run_id))
         for head in snapshot.evidence_heads
     )
 
@@ -888,7 +906,6 @@ _OPAQUE_SECRET = re.compile(r"(?=.{24,}$)(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9_-]+
 class _EvidenceCapture:
     unit: UnitRef
     test_set_digest: str
-    revision: int
     enforce_current: bool
 
 
@@ -916,7 +933,7 @@ def _stream_child_stdout(command_argv: Sequence[str]) -> int:
         raise RuntimeError("child stdout pipe was not created")
     binary_stderr = getattr(sys.stderr, "buffer", None)
     try:
-        while chunk := child_stdout.read(64 * 1024):
+        while chunk := os.read(child_stdout.fileno(), 64 * 1024):
             if binary_stderr is None:
                 sys.stderr.write(chunk.decode("utf-8", errors="replace"))
                 sys.stderr.flush()
@@ -950,7 +967,6 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                     test_set_digest=(
                         "" if resolved is None else resolved.acceptance_test_set_digest
                     ),
-                    revision=snapshot.revision,
                     enforce_current=(
                         resolved is not None
                         and resolved.status is not UnitStatus.SUPERSEDED
@@ -1014,7 +1030,6 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                     captured_pack_digest=(
                         capture.test_set_digest if capture.enforce_current else None
                     ),
-                    captured_revision=capture.revision,
                 )
                 revision = store.read_snapshot().revision
     except RefusedError as error:
@@ -1389,6 +1404,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         pack_test_file=[],
         reason="",
         lock_path=None,
+        test_job=[],
         edit_target=None,
         ledger="",
         anchor_mode=None,
@@ -1472,6 +1488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 payload,
                 tier=Tier(parsed.tier),
                 actor=parsed.actor,
+                test_jobs=tuple(parsed.test_job),
             )
         except (InitError, StoreError) as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)

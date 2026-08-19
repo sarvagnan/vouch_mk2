@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-cac2-01","deviation_type":"pack-defect","unit":{"name":"ci-adoption-closure","version":"1"}},"prev":"a209c1697a222c054f5de03c866a95ea6d852bb69d4c59c9241d05ba9f03baef","recorded_at":"2026-08-19T03:14:32+00:00","revision":427,"run_id":""}
