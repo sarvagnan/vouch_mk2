@@ -13,7 +13,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from enum import Enum
-from typing import Any, Callable, cast, get_args, get_origin, get_type_hints
+from typing import Callable, Protocol, cast, get_args, get_origin, get_type_hints
 
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
 from vouch_mk2.bundle import (
@@ -39,11 +39,19 @@ from vouch_mk2.core import (
     UnitStatus,
     UnitRef,
     decide,
+    valid_command_line,
 )
 from vouch_mk2.core import commands as command_module
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
+from vouch_mk2.git_merge import merge_git_stages
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
-from vouch_mk2.init import InitError, InitStatus, init_project
+from vouch_mk2.init import (
+    InitError,
+    InitIncompletePublication,
+    InitStatus,
+    generated_workflow,
+    init_project,
+)
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.io import (
@@ -80,6 +88,7 @@ from vouch_mk2.verify import (
     UpgradeResult,
     emit_context,
     emit_system_map,
+    pending_anchor_is_only_unchecked,
     record_evidence,
     record_formal_certificate,
     run_artifact_checks,
@@ -112,6 +121,7 @@ class _Arguments(argparse.Namespace):
     was_published: list[str]
     never_published: list[str]
     command_argv: list[str]
+    redact_arg: list[int]
     tree: str
     exclude: list[str]
     tier: str
@@ -280,7 +290,9 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         help="initialize the closed D-7 project file set",
         epilog=(
             "Exit codes: 0 initialized; 2 refused with nothing written; "
-            "3 suggestion files written—review/replace them and rerun init."
+            "3 suggestion files written—review/replace them and rerun init; "
+            "4 incomplete publication—complete remnants remain; fix the cause "
+            "and retry init."
         ),
     )
     init.add_argument("--project", required=True, help="target project directory")
@@ -301,8 +313,8 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         action="append",
         default=[],
         help=(
-            "GitHub Actions job id that must pass before anchoring; repeat for "
-            "multiple project test jobs"
+            "GitHub Actions job id to place in the printed reusable-workflow "
+            "caller gate; repeat for multiple project test jobs"
         ),
     )
     init.add_argument(
@@ -375,6 +387,16 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         default=default_actor(),
         help="recorded actor claim (default: OS user)",
     )
+    merge_git = commands.add_parser(
+        "merge-git-stages",
+        help="recover a conflicted store from Git index stages without staging it",
+    )
+    merge_git.add_argument("--root", required=True, help="conflicted store root directory")
+    merge_git.add_argument(
+        "--actor",
+        default=default_actor(),
+        help="recorded actor claim (default: OS user)",
+    )
     _add_lifecycle_parsers(commands)
     return parser
 
@@ -419,37 +441,6 @@ def _present_json(report: CheckReport) -> None:
     print(json.dumps(payload, sort_keys=True))
 
 
-def _only_pending_anchor_is_not_checked(
-    report: CheckReport, snapshot: Snapshot
-) -> bool:
-    """Whether a report is clean apart from unclaimed CI evidence anchors."""
-    if any(result.verdict is Verdict.FAIL for result in report.organizational):
-        return False
-    if any(result.verdict is Verdict.FAIL for result in report.mechanical):
-        return False
-    not_checked = tuple(
-        result
-        for result in report.mechanical
-        if result.verdict is Verdict.NOT_CHECKED
-    )
-    if len(not_checked) != 1:
-        return False
-    row = not_checked[0]
-    if row.check_id != mk2.CHECK_EVIDENCE_ANCHORS:
-        return False
-    pending = tuple(
-        head
-        for head in snapshot.evidence_heads
-        if not head.anchor_run_id
-    )
-    return bool(pending) and all(
-        (head.anchored == "GENESIS" and not head.anchor_run_id)
-        or (head.anchored != "GENESIS" and not head.anchor_run_id)
-        or (head.anchored != "GENESIS" and bool(head.anchor_run_id))
-        for head in snapshot.evidence_heads
-    )
-
-
 def _present_formal(run: FormalRun) -> None:
     for universe in run.universes:
         print(f"universe: {universe.universe_name}")
@@ -471,7 +462,13 @@ def _present_formal(run: FormalRun) -> None:
 
 
 type _LifecycleHandler = Callable[[argparse.Namespace], int]
-type _CommandClass = type[Any]
+type _CommandClass = type[Command]
+
+
+class _Subparsers(Protocol):
+    def add_parser(
+        self, name: str, **kwargs: object
+    ) -> argparse.ArgumentParser: ...
 
 
 def _kebab_case(name: str) -> str:
@@ -495,7 +492,12 @@ def _command_classes() -> tuple[_CommandClass, ...]:
         and dataclasses.is_dataclass(value)
         and hasattr(value, "ir_command")
     }
-    return tuple(sorted(reflected, key=lambda value: cast(str, value.ir_command)))
+    command_classes = cast(set[_CommandClass], reflected)
+    return tuple(sorted(command_classes, key=_command_class_label))
+
+
+def _command_class_label(command_type: _CommandClass) -> str:
+    return cast(str, command_type.ir_command)
 
 
 _LIFECYCLE_COMMANDS: dict[str, _CommandClass] = {
@@ -525,7 +527,7 @@ def _is_string_tuple(annotation: object) -> bool:
 
 def _add_reflected_field(
     parser: argparse.ArgumentParser,
-    field: dataclasses.Field[Any],
+    field: dataclasses.Field[object],
     annotation: object,
 ) -> None:
     flag = "--" + field.name.replace("_", "-")
@@ -561,7 +563,7 @@ def _add_reflected_field(
     )
 
 
-def _add_lifecycle_parsers(commands: Any) -> None:
+def _add_lifecycle_parsers(commands: _Subparsers) -> None:
     for verb, command_type in _LIFECYCLE_COMMANDS.items():
         documentation = (command_type.__doc__ or "").splitlines()[0]
         if not documentation or documentation.startswith(command_type.__name__ + "("):
@@ -602,7 +604,7 @@ def _add_lifecycle_parsers(commands: Any) -> None:
         if command_type is command_module.RecordEvidence:
             parser.usage = (
                 "%(prog)s [-h] --root ROOT [--json] [--actor ACTOR] --unit NAME@VERSION "
-                "--kind {red,green,refactor} -- <argv...>"
+                "--kind {red,green,refactor} [--redact-arg INDEX] -- <argv...>"
             )
             parser.epilog = (
                 "the recorded outcome is the exit status of a process this verb spawned."
@@ -612,6 +614,17 @@ def _add_lifecycle_parsers(commands: Any) -> None:
                 "--kind",
                 choices=tuple(kind.value for kind in EvidenceKind),
                 required=True,
+            )
+            parser.add_argument(
+                "--redact-arg",
+                action="append",
+                type=int,
+                default=[],
+                metavar="INDEX",
+                help=(
+                    "store <redacted> for this zero-based child argv position "
+                    "(repeatable; argv[0] cannot be redacted)"
+                ),
             )
             continue
         if command_type is command_module.RecordFormalCertificate:
@@ -667,8 +680,10 @@ def _wire_value(value: object) -> object:
             field.name: _wire_value(getattr(value, field.name))
             for field in dataclasses.fields(value)
         }
-    if isinstance(value, tuple | list):
-        return [_wire_value(item) for item in value]
+    if tuple in type(value).__mro__:
+        return [_wire_value(item) for item in cast(tuple[object, ...], value)]
+    if list in type(value).__mro__:
+        return [_wire_value(item) for item in cast(list[object], value)]
     if isinstance(value, dict):
         return {str(key): _wire_value(item) for key, item in value.items()}
     return value
@@ -950,12 +965,45 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
     if not command_argv:
         print("vouch-mk2: record-evidence requires -- <argv...>", file=sys.stderr)
         return 2
-    if _secret_looking_command(command_argv):
+    redacted_positions = cast(list[int], namespace.redact_arg)
+    if (
+        len(set(redacted_positions)) != len(redacted_positions)
+        or any(
+            position <= 0 or position >= len(command_argv)
+            for position in redacted_positions
+        )
+    ):
         print(
-            "vouch-mk2: warning: command line looks secret-bearing; it will be "
-            "stored verbatim in an immutable evidence object",
+            "vouch-mk2: evidence.redaction-invalid: --redact-arg positions "
+            "must be unique and select an existing child argument after argv[0]",
             file=sys.stderr,
         )
+        return 2
+    stored_argv = list(command_argv)
+    for position in redacted_positions:
+        stored_argv[position] = "<redacted>"
+    stored_command_line = shlex.join(stored_argv)
+    if not valid_command_line(stored_command_line):
+        print(
+            "vouch-mk2: evidence.command-line-invalid: stored command descriptor "
+            "must contain 1..4096 printable characters",
+            file=sys.stderr,
+        )
+        return 2
+    if _secret_looking_command(command_argv):
+        if redacted_positions:
+            print(
+                "vouch-mk2: warning: command line looks secret-bearing; explicitly "
+                "selected values will be stored as <redacted>, while unselected "
+                "arguments remain verbatim in the immutable evidence object",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "vouch-mk2: warning: command line looks secret-bearing; it will be "
+                "stored verbatim in an immutable evidence object",
+                file=sys.stderr,
+            )
     try:
         with Store.open(namespace.root) as store:
             with store.write_locked():
@@ -1015,7 +1063,7 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                     sequence=sequence,
                     parent=parent,
                     kind=kind,
-                    command_line=shlex.join(command_argv),
+                    command_line=stored_command_line,
                     outcome=outcome,
                     recorded_at=datetime.datetime.now(datetime.UTC).isoformat(
                         timespec="seconds"
@@ -1127,6 +1175,23 @@ def _merge_handler(namespace: argparse.Namespace) -> int:
     return 0
 
 
+def _merge_git_stages_handler(namespace: argparse.Namespace) -> int:
+    try:
+        result = merge_git_stages(namespace.root, actor=namespace.actor)
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    if isinstance(result, Refused):
+        return _present_refusal(False, result)
+    print(
+        f"merge-git-stages: {result.mode}; revision {result.snapshot.revision}; "
+        f"replayed {result.replayed_records} source record(s)"
+    )
+    next_step = shlex.join(("git", "add", "--", namespace.root))
+    print(f"review the resolved store, then run: {next_step}")
+    return 0
+
+
 LIFECYCLE_VERBS: dict[str, _LifecycleHandler] = {
     verb: (
         _record_evidence_handler
@@ -1171,7 +1236,7 @@ _SPECIALIZED_REQUIRED: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
 
 
 def _required_field_arguments(
-    field: dataclasses.Field[Any], annotation: object, command: str = ""
+    field: dataclasses.Field[object], annotation: object, command: str = ""
 ) -> tuple[tuple[str, str], ...]:
     specialized = _SPECIALIZED_REQUIRED.get((command, field.name))
     if specialized is not None:
@@ -1415,6 +1480,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         was_published=[],
         never_published=[],
         command_argv=[],
+        redact_arg=[],
         tree="",
         exclude=[],
         tier=Tier.LIGHTWEIGHT.value,
@@ -1429,6 +1495,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if parsed.command == "merge":
         return _merge_handler(parsed)
+    if parsed.command == "merge-git-stages":
+        return _merge_git_stages_handler(parsed)
 
     lifecycle_handler = LIFECYCLE_VERBS.get(parsed.command)
     if lifecycle_handler is not None:
@@ -1483,13 +1551,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if payload is None:
                     source_root = os.path.dirname(os.path.dirname(__file__))
                     payload = build_lock(source_root)
+            # Validate caller job ids before initialization; the ids belong in
+            # the adopter's existing workflow and never in the generated file.
+            generated_workflow(tuple(parsed.test_job))
             report = init_project(
                 parsed.project,
                 payload,
                 tier=Tier(parsed.tier),
+                anchor_mode=(
+                    AnchorMode.CI if parsed.test_job else AnchorMode.NONE
+                ),
                 actor=parsed.actor,
-                test_jobs=tuple(parsed.test_job),
             )
+        except InitIncompletePublication as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 4
         except (InitError, StoreError) as error:
             print(f"vouch-mk2: {error}", file=sys.stderr)
             return 2
@@ -1501,6 +1577,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "the colliding project file if appropriate, then rerun init."
             )
             return 3
+        if parsed.test_job:
+            print("Add this job to the workflow that owns your project test jobs:")
+            print("  vouch:")
+            print(f"    needs: [{', '.join(parsed.test_job)}]")
+            print(
+                "    if: github.event_name == 'push' && github.ref == "
+                "format('refs/heads/{0}', "
+                "github.event.repository.default_branch)"
+            )
+            print("    uses: ./.github/workflows/vouch.yml")
+            print("    with:")
+            print("      anchoring: true")
+            print("    permissions:")
+            print("      contents: write")
+        else:
+            print(
+                "Anchoring disabled: no --test-job gate was supplied; direct "
+                "runs validate only."
+            )
         print("Vouch requires Python 3.14+")
         return 0
 
@@ -1750,8 +1845,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         _present_text(report)
     if report.composed() is Verdict.PASS:
         return 0
-    if parsed.pending_anchor_ok and _only_pending_anchor_is_not_checked(
-        report, snapshot
-    ):
+    if parsed.pending_anchor_ok and pending_anchor_is_only_unchecked(report):
         return 0
     return 1

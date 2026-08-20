@@ -11,6 +11,7 @@ from vouch_mk2.core import (
     ReleaseState,
     Snapshot,
     Tier,
+    UnitRef,
     UnitStatus,
     blocking_deviations,
 )
@@ -24,6 +25,10 @@ class Invariant:
     description: str
     check: Callable[[Relation], tuple[str, ...]]
     detail: Callable[[Relation], str] | None = None
+
+
+def _unit_ref_key(ref: UnitRef) -> tuple[str, str]:
+    return ref.name, ref.version
 
 
 def _representatives(relation: Relation) -> dict[str, Snapshot]:
@@ -368,7 +373,7 @@ def _anchor_monotonic(relation: Relation) -> tuple[str, ...]:
         refs = {head.ref() for head in before.evidence_heads} | {
             head.ref() for head in after.evidence_heads
         }
-        for ref in sorted(refs, key=lambda item: (item.name, item.version)):
+        for ref in sorted(refs, key=_unit_ref_key):
             prior = before.evidence_head_ref(ref)
             current = after.evidence_head_ref(ref)
             if current is None:

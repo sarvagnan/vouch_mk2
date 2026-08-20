@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/lifecycle-cli-1.spec.md","role":"test","sha256":"80e928d9a4e2c22f60e23dd662538fea60efb113b56a14425ed7c1697727b092","size":6510},{"path":"tests/test_lifecycle_cli.py","role":"test","sha256":"564d575d5b941342f483340ea6c339a1b44302ba7f89f8fd277f3ac579b33e64","size":11338}],"pack_format":2}

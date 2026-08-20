@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/pytest -q tests/test_git_merge_recovery.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"d9c83af0f597ca90142a20d897cea5f90ac6e96426973a9ccb5d981c1638503e","parent":"GENESIS","recorded_at":"2026-08-20T13:37:03+00:00","sequence":1,"unit":{"name":"git-merge-recovery","version":"1"}}

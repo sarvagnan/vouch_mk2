@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from vouch_mk2.checks.results import CheckResult
-from vouch_mk2.core.model import Snapshot, UnitStatus
+from vouch_mk2.core.model import Snapshot, Unit, UnitStatus
 from vouch_mk2.core.invariants import current_pack_evidence_is_green
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Coverage, RequirementLevel, TierCell, TierRequirement, Verdict
 
 
 _PUBLISHED_STATUSES = frozenset({UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND})
+
+
+def _unit_label(unit: Unit) -> str:
+    return unit.ref().label()
 
 
 def _requirement(control_id: str) -> TierRequirement:
@@ -46,7 +50,7 @@ def check_pack_bound(snapshot: Snapshot) -> CheckResult:
         f"new inventory {item.new_inventory_digest}; old test set "
         f"{item.old_test_set_digest} -> new test set {item.new_test_set_digest}; "
         f"evidence head sequence {item.evidence_head_sequence}; reason {item.reason!r}"
-        for unit in sorted(snapshot.units, key=lambda row: row.ref().label())
+        for unit in sorted(snapshot.units, key=_unit_label)
         if unit.status is not UnitStatus.SUPERSEDED
         for item in unit.rebound_history
     )
@@ -186,7 +190,7 @@ def check_tier_high_attestation(snapshot: Snapshot) -> CheckResult:
             ),
         )
     failures: list[str] = []
-    for unit in sorted(snapshot.units, key=lambda item: item.ref().label()):
+    for unit in sorted(snapshot.units, key=_unit_label):
         if unit.status not in _PUBLISHED_STATUSES and not unit.published_once:
             continue
         head = snapshot.evidence_head_ref(unit.ref())

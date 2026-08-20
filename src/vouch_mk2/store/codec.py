@@ -98,8 +98,13 @@ def _event_wire_value(value: object) -> object:
             field.name: _event_wire_value(getattr(value, field.name))
             for field in fields(value)
         }
-    if isinstance(value, tuple | list):
-        return [_event_wire_value(item) for item in value]
+    if tuple in type(value).__mro__:
+        return [
+            _event_wire_value(item)
+            for item in cast(tuple[object, ...], value)
+        ]
+    if list in type(value).__mro__:
+        return [_event_wire_value(item) for item in cast(list[object], value)]
     return value
 
 

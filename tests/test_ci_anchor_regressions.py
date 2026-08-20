@@ -146,7 +146,10 @@ def test_generated_workflow_uses_a_real_repository_identity_guard(tmp_path: Path
     project.mkdir()
     assert _run("init", "--project", str(project))[0] == 0
     workflow = (project / ".github" / "workflows" / "vouch.yml").read_text()
-    assert "github.event_name == 'push'" in workflow
+    # Reusable workflows retain the caller event context; the default-false
+    # input is the explicit authority to plan an anchor.
+    assert "github.event_name == 'workflow_call'" not in workflow
+    assert "inputs.anchoring == true" in workflow
     assert "github.event.repository.fork == false" in workflow
     assert "github.event.repository.default_branch" in workflow
     assert workflow.index("python vouch.lock formal") < workflow.index("advance-anchor")
@@ -225,12 +228,12 @@ def test_generated_workflow_parses_as_yaml_with_the_intended_shape() -> None:
 
     document = yaml.safe_load(generated_workflow())
     jobs = document["jobs"]
-    assert set(jobs) == {"validation", "project-tests-required", "anchor"}
+    assert set(jobs) == {"validation", "anchor_plan", "anchor_publish"}
     assert jobs["validation"]["permissions"] == {"contents": "read"}
-    assert jobs["anchor"]["permissions"] == {"contents": "write"}
-    assert set(jobs["anchor"]["needs"]) == {"validation", "project-tests-required"}
-    placeholder_run = jobs["project-tests-required"]["steps"][0]["run"]
-    assert "exit 1" in placeholder_run and "--test-job" in placeholder_run
+    assert jobs["anchor_plan"]["permissions"] == {"contents": "read"}
+    assert jobs["anchor_publish"]["permissions"] == {"contents": "write"}
+    assert set(jobs["anchor_plan"]["needs"]) == {"validation"}
+    assert set(jobs["anchor_publish"]["needs"]) == {"anchor_plan"}
     assert document["concurrency"]["group"]
     assert document["concurrency"]["cancel-in-progress"] is False
     for job in jobs.values():

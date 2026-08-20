@@ -133,21 +133,22 @@ def test_init_can_wire_the_projects_own_test_job_into_the_gate(tmp_path: Path) -
     project.mkdir()
     lock = project / "vouch.lock"
     lock.write_bytes(build_lock(str(ROOT / "src")))
-    assert _run("init", "--project", str(project), "--lock", str(lock),
-                "--test-job", "unit-tests", "--test-job", "lint")[0] == 0
+    code, output = _run("init", "--project", str(project), "--lock", str(lock),
+                        "--test-job", "unit-tests", "--test-job", "lint")
+    assert code == 0
+    assert "needs: [unit-tests, lint]" in output
+    assert "uses: ./.github/workflows/vouch.yml" in output
     workflow = (project / ".github" / "workflows" / "vouch.yml").read_text()
-    anchor = workflow[workflow.index("anchor:"):]
-    assert "unit-tests" in anchor and "lint" in anchor, anchor[:600]
+    assert "unit-tests" not in workflow and "lint" not in workflow
 
 
-def test_without_a_test_job_the_generated_workflow_fails_loudly_rather_than_silently() -> None:
+def test_without_a_test_job_the_generated_workflow_disables_anchoring_by_default() -> None:
     from vouch_mk2.init import generated_workflow
 
     text = generated_workflow()
-    # A placeholder the adopter must replace — it must FAIL, not pass silently, so nobody
-    # believes their tests gate anchoring when they do not.
-    assert re.search(r"exit\s+1", text), "the unwired placeholder job must fail"
-    assert "--test-job" in text
+    assert "workflow_call:" in text
+    assert re.search(r"anchoring:\s*\n(?:\s+.*\n)*?\s+default:\s*false", text)
+    assert "project-tests-required" not in text
 
 
 # ---- --json forwards promptly, not only when the buffer fills ----

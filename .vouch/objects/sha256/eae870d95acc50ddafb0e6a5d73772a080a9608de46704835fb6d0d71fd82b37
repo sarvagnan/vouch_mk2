@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-ctb-01","deviation_type":"pack-defect","unit":{"name":"ci-trust-boundary","version":"1"}},"prev":"90c05557210063a3f1da56b8038144fe0d6a93219671a3798b718f75806fbeb3","recorded_at":"2026-08-19T09:26:14+00:00","revision":471,"run_id":""}

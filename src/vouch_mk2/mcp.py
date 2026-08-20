@@ -279,7 +279,7 @@ def _dispatch(root: str, raw: object) -> dict[str, object] | None:
             _object(params, "initialize params must be an object")
             result = {
                 "protocolVersion": _PROTOCOL_VERSION,
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": dict[str, object]()},
                 "serverInfo": {"name": "vouch-mk2", "version": __version__},
             }
             return None if is_notification else _response(identifier, result)

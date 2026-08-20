@@ -807,3 +807,113 @@ implemented. D-19 supersedes both; the generated workflow's shape is now owned b
 `generated-ci@1`'s pack, `ci-anchor@1` keeps its real promise (CI advances anchors and commits
 the result), and the rebind's reason names the superseding decision. A changed *promise* still
 requires the full deviation → amend → respecify → re-freeze path; this is narrower than that.
+
+## D-20 — CI trust boundary: callable gate, read-plan/write-publish (2026-08-19)
+
+**Status:** decided 2026-08-19 (user). The second B1 review showed that naming project jobs in
+the generated workflow cannot gate anything: GitHub Actions `needs` resolves only jobs in the
+same workflow run. It also showed that removing persisted checkout credentials does not make it
+safe to execute checked-out repository code in a job whose `GITHUB_TOKEN` has `contents: write`.
+
+- **Project-test gate.** The generated `.github/workflows/vouch.yml` is a reusable workflow as
+  well as a direct read-only validation workflow. `init --test-job NAME` does not put `NAME` in
+  the generated workflow's `needs`; it prints a caller job for the adopter to place in the
+  workflow that actually owns those jobs. That caller has the real `needs: [NAME, ...]` edge and
+  invokes the reusable Vouch workflow with anchoring explicitly enabled. Direct `push` and
+  `pull_request` runs validate only and can never anchor. `init` continues to own exactly D-7's
+  four paths: it neither edits an existing adopter workflow nor creates a fifth file.
+- **Privilege split.** Validation and anchor planning run with `contents: read`. Planning may
+  execute the checked-out, digest-verified `vouch.lock` and produces a candidate commit based on
+  the exact checked-out revision. A separate publisher job alone receives `contents: write`; it
+  executes no checked-out repository code. Before pushing, fixed workflow code verifies the
+  candidate's parent, allowed path set and modes, and confirms that the remote default-branch
+  head still equals the planned base. A stale or malformed candidate fails closed. Concurrency
+  remains an additional guard, not the correctness mechanism.
+- **Trust-root clarification.** The same-run candidate commit/bundle is transport between two
+  jobs under the already-recorded forge/runner organizational boundary. It is not evidence, is
+  never imported through a Vouch command, cannot advance an anchor on its own, and is discarded
+  if its structural checks fail. It therefore does not create the later-imported observation
+  artifact or second trust root rejected by D-18. The offline, stdlib-only `vouch.lock` contract
+  is unchanged; forge artifact transfer belongs to the CI adapter, not Vouch distribution.
+- **Self-hosting.** mk2's own workflow uses the same read-plan/write-publish boundary. A real
+  GitHub Actions adoption probe is required before B4/B5: adopter tests must genuinely gate the
+  reusable call, a fresh GENESIS anchor must advance, a stale candidate must fail, and the
+  publisher must not execute repository-controlled code.
+
+Rejected: dangling cross-workflow `needs`; a write-capable job that runs `vouch.lock` even with
+`persist-credentials: false`; automatically editing an adopter's existing workflow; a privileged
+`workflow_run` that checks out an untrusted revision; and a later command that imports an
+observation artifact as evidence.
+
+**D-7/D-19 amendment — init publication outcomes (2026-08-19, DEV-ipc-01).** A filesystem has
+no portable atomic operation meaning “unlink this pathname only if it still names inode X”;
+`stat` followed by `unlink` retains the same replacement race it was meant to close. The init
+interface therefore distinguishes the side of its publication seam instead of claiming an
+impossible rollback:
+
+- **refused** (exit 2): initialization stopped before its first project-visible publication;
+  the project is unchanged;
+- **suggested** (exit 3): the established collision sidecars were written and require operator
+  action;
+- **incomplete publication** (exit 4): project-visible publication began but did not complete;
+  every remaining owned artifact is complete, no project-visible pathname is removed during
+  unwind, and the output gives retry/verification guidance;
+- **initialized** (exit 0): the complete store is visible. Because `.vouch/` is published last,
+  a complete visible store is success-equivalent even if the process dies before returning.
+
+This preserves D-7's “a refusal never leaves a half-initialized project” literally: exit 2 is
+reserved for the pre-publication state. It supersedes D-19's broader “every failed init leaves
+nothing” wording only after publication has started; the real adoption requirement is that no
+failure leaves an unrecoverable project. Rejected: `stat`/`unlink` identity checks (still racy),
+an advisory lock (a concurrent writer need not cooperate), a transaction marker or ownership
+manifest (would expand D-7's closed path set), and deleting complete retryable remnants.
+
+**D-20 amendment note — reusable-workflow event context (2026-08-19, DEV-ctb-01).** A called
+GitHub Actions workflow retains the caller's event context, so a caller triggered by `push` has
+`github.event_name == 'push'`, not `'workflow_call'`. The frozen pack/1 test incorrectly required
+that comparison. D-20's decision is unchanged: the default-false `inputs.anchoring` value is the
+call-only capability, while the caller and the called workflow both retain default-branch and
+repository guards. Direct `push`/`pull_request` runs cannot set that input true.
+
+## D-21 — External-adoption closure remains GitHub-first (2026-08-19)
+
+**Status:** decided 2026-08-19 (user: proceed with the reproduced findings; defer a second CI
+adapter). The core remains forge-neutral, but GitHub Actions is the only adoption adapter for the
+first release. A public provider interface with one adapter would be speculative; portability is
+revisited only when a second provider is commissioned. The GitHub template may be made more local
+internally, but no generic adapter contract is added merely in anticipation.
+
+- **Published candidate validity.** Anchor planning runs the full Vouch semantic checks on the
+  post-`advance-anchor`, post-`generate` candidate before it is committed or transported:
+  `check --ci` without the pending-anchor exception, then `formal`. Publisher structure checks
+  remain necessary but are not semantic proof. A push authenticated by `GITHUB_TOKEN` is not
+  assumed to trigger another workflow. The first-release policy is an explicitly documented,
+  scoped ruleset/bypass for the already validated `.vouch/**` bot commit; an organization that
+  requires independent forge checks on that SHA must replace publication credentials with a
+  GitHub App token. Vouch does not claim that either organizational policy is mechanically
+  verified.
+- **Coherent initialization.** `standard` and `high` stores are not created with
+  `anchor_mode=none`. They require at least one `--test-job`, initialize CI anchoring as a
+  recorded store fact, and print the same-workflow caller. Without that gate, initialization
+  refuses before publication with an exact remediation. `lightweight` may remain validation-only
+  when no test job is supplied; supplying a gate initializes CI anchoring there too. No separate
+  `--anchor-mode` knob is added: it would allow combinations the generated adoption path cannot
+  honestly support.
+- **GitHub concurrency.** Generated and dogfood workflows use a Vouch-specific repository/ref
+  concurrency namespace rather than the caller-derived `${{ github.workflow }}` key. Remote-head
+  comparison remains the stale-candidate correctness mechanism.
+- **Evidence execution safety.** The rendered command is validated against the authoritative
+  evidence invariant before the child starts. A repeatable, explicit argument-position redaction
+  option replaces selected stored arguments with a visible `<redacted>` marker; the executable
+  itself cannot be redacted and no digest of the secret is retained. Environment-based secret
+  injection remains the preferred documented route. The warning and claim boundary stay honest.
+- **Assurance and operations.** D-1 is enforced by the actual Pyrefly strict preset. Git conflict
+  recovery gains a Git-index-stage adapter around the existing semantic merge, not a second merge
+  algorithm. D-19's `release@1` supplies MIT metadata, version identity, reproducible lock release
+  metadata/provenance, and a recoverable lock/config/workflow update plus rollback procedure;
+  `adoption-docs@1` then supplies the durable integration and compatibility guide.
+
+**Order:** `ci-candidate-validity@1`, `evidence-command-safety@1`, `strict-types@1`,
+`git-merge-recovery@1`, `release@1`, `adoption-docs@1`, then the already-open real GitHub
+adoption probe. Each is its own D-11 unit and is published before the next pack is frozen. A
+second provider adapter is outside this batch.

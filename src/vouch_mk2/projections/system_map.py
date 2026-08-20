@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from vouch_mk2.core.model import (
     ClosureRecord,
+    CiException,
     EvidenceHead,
     LaunchCriteria,
     PackRebound,
@@ -73,6 +74,26 @@ class SystemMap:
     status_facts: StatusFacts
 
 
+def _system_map_unit_name(row: SystemMapUnit) -> str:
+    return row.name
+
+
+def _system_map_deviation_id(row: SystemMapDeviation) -> str:
+    return row.deviation_id
+
+
+def _system_map_release_id(row: SystemMapRelease) -> str:
+    return row.release_id
+
+
+def _evidence_head_ref_key(head: EvidenceHead) -> tuple[str, str]:
+    return head.unit_name, head.unit_version
+
+
+def _ci_exception_unit_name(row: CiException) -> str:
+    return row.unit_name
+
+
 def system_map(snapshot: Snapshot) -> SystemMap:
     actions = next_actions(snapshot)
     units = tuple(
@@ -99,7 +120,7 @@ def system_map(snapshot: Snapshot) -> SystemMap:
                 )
                 for unit in snapshot.units
             ),
-            key=lambda row: row.name,
+            key=_system_map_unit_name,
         )
     )
     return SystemMap(
@@ -127,7 +148,7 @@ def system_map(snapshot: Snapshot) -> SystemMap:
                     )
                     for deviation in snapshot.deviations
                 ),
-                key=lambda row: row.deviation_id,
+                key=_system_map_deviation_id,
             )
         ),
         releases=tuple(
@@ -144,13 +165,13 @@ def system_map(snapshot: Snapshot) -> SystemMap:
                     )
                     for release in snapshot.releases
                 ),
-                key=lambda row: row.release_id,
+                key=_system_map_release_id,
             )
         ),
         evidence_heads=tuple(
             sorted(
                 snapshot.evidence_heads,
-                key=lambda head: (head.unit_name, head.unit_version),
+                key=_evidence_head_ref_key,
             )
         ),
         anchor_mode=snapshot.anchor_mode.value,
@@ -159,7 +180,7 @@ def system_map(snapshot: Snapshot) -> SystemMap:
         ci_exceptions=tuple(
             (item.unit_name, item.reason)
             for item in sorted(
-                snapshot.ci_exceptions, key=lambda row: row.unit_name
+                snapshot.ci_exceptions, key=_ci_exception_unit_name
             )
         ),
         formal_certificate_digest=snapshot.formal_certificate_digest,

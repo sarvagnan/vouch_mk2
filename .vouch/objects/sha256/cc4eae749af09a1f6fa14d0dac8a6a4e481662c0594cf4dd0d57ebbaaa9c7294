@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/defect-dispositions-1.spec.md","role":"test","sha256":"2585f8e7383dc8e831df241ee664b842aa2a3a2656d4d24001fc32f12af4a6ea","size":607},{"path":"tests/test_defect_dispositions.py","role":"test","sha256":"3f6999c9294d1588033cc6323c5b93e83373e82234d9bb586f63636686a0a505","size":7375}],"pack_format":2}

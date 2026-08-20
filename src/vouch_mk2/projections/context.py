@@ -10,7 +10,7 @@ from vouch_mk2.checks.organizational import (
     check_protective_closure_truthfulness,
 )
 from vouch_mk2.checks.tier import check_tier_controls
-from vouch_mk2.core.model import Snapshot
+from vouch_mk2.core.model import EvidenceHead, Snapshot, Unit
 from vouch_mk2.projections.next_actions import next_actions
 
 
@@ -27,6 +27,18 @@ def escape_markdown(text: str) -> str:
     )
 
 
+def _legacy_tier_controls(snapshot: Snapshot):
+    return check_tier_controls(snapshot, legacy_projection=True)
+
+
+def _evidence_head_label(head: EvidenceHead) -> str:
+    return head.ref().label()
+
+
+def _unit_label(unit: Unit) -> str:
+    return unit.ref().label()
+
+
 def agent_context(snapshot: Snapshot) -> str:
     actions = next_actions(snapshot)
     organizational = tuple(
@@ -37,9 +49,7 @@ def agent_context(snapshot: Snapshot) -> str:
             check_independence,
             check_causal_red_history,
             check_protective_closure_truthfulness,
-            lambda current: check_tier_controls(
-                current, legacy_projection=True
-            ),
+            _legacy_tier_controls,
         )
     )
     header = (
@@ -94,7 +104,7 @@ def agent_context(snapshot: Snapshot) -> str:
             )
             for head in sorted(
                 snapshot.evidence_heads,
-                key=lambda item: item.ref().label(),
+                key=_evidence_head_label,
             )
         ),
         *(("- none",) if not snapshot.evidence_heads else ()),
@@ -110,7 +120,7 @@ def agent_context(snapshot: Snapshot) -> str:
                 f"{rebound.evidence_head_sequence}; stated reason: "
                 f"{escape_markdown(rebound.reason)}"
             )
-            for unit in sorted(snapshot.units, key=lambda item: item.ref().label())
+            for unit in sorted(snapshot.units, key=_unit_label)
             for rebound in unit.rebound_history
         ),
         *(

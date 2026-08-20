@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"DeviationAmended","pack_digest":"","payload":{"amendment_version":"init-publication-closure-pack/2","deviation_id":"DEV-ipc-01","impact_set":["init-publication-closure"],"release_impact_set":[]},"prev":"2e53f3913c851fb585d7c43b2472551aad946bb153fa07746256fb9af841ada5","recorded_at":"2026-08-19T09:26:15+00:00","revision":479,"run_id":""}

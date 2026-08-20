@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/ci-candidate-validity-1.spec.md","role":"spec","sha256":"222b0e959604386d54b2879a25340f46400521dc4a1cc6e6bb8c70b4b94aba9e","size":3557},{"path":"tests/test_ci_candidate_validity.py","role":"test","sha256":"7efd53067726674fd49b5813270e6bd8be638890ba1d3b5aeae6c07cda3f8e91","size":6193}],"pack_format":2}

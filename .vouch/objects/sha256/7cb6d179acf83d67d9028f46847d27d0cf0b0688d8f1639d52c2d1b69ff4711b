@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-gmr-01","deviation_type":"pack-defect","unit":{"name":"git-merge-recovery","version":"1"}},"prev":"f985f0160ba9aab8c8909f0f3077ba22593f52fd97e02ec17e432186517ce738","recorded_at":"2026-08-20T13:38:03+00:00","revision":587,"run_id":""}

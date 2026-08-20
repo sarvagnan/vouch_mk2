@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q tests/test_init_publication_closure.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"b28ab96e52514a7fb1314db43f7b57b7184979d36506e9c7c0b023b92069646f","parent":"GENESIS","recorded_at":"2026-08-19T07:53:14+00:00","sequence":1,"unit":{"name":"init-publication-closure","version":"1"}}

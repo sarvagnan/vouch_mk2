@@ -39,6 +39,12 @@ class _LoggedEvent:
     record: events.EventRecord
 
 
+def _artifact_reference_key(
+    item: tuple[ArtifactKind, str],
+) -> tuple[str, str]:
+    return item[0].value, item[1]
+
+
 def _read_verified_chain(
     store: Store, snapshot: Snapshot, branch: str
 ) -> tuple[_LoggedEvent, ...]:
@@ -465,7 +471,7 @@ def _supporting_objects(
             copied[reference] = payload
     return tuple(
         (kind, copied[(kind, digest)])
-        for kind, digest in sorted(copied, key=lambda item: (item[0].value, item[1]))
+        for kind, digest in sorted(copied, key=_artifact_reference_key)
     )
 
 
@@ -516,7 +522,10 @@ def merge_store_roots(
                     ),
                 )
             )
-        ancestor = max(shared, key=lambda item: ours_positions[item.digest])
+        def ours_position(item: _LoggedEvent) -> int:
+            return ours_positions[item.digest]
+
+        ancestor = max(shared, key=ours_position)
 
         if ours.event_head == theirs.event_head:
             return MergeOutcome("no-op", ours, 0)

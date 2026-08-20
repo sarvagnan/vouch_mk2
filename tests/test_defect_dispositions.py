@@ -88,7 +88,14 @@ def test_store_lock_is_project_local_not_tempdir_derived(tmp_path: Path) -> None
         d.mkdir()
         env = {**os.environ, "TMPDIR": str(d), "PYTHONPATH": str(ROOT / "src")}
         procs.append(subprocess.Popen([sys.executable, "-c", code, str(root)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
-    assert [p.wait() for p in procs] == [0, 0, 0], [p.stderr.read()[:200] for p in procs]  # type: ignore[union-attr]
+
+    def stderr_prefix(process: subprocess.Popen[bytes]) -> bytes:
+        assert process.stderr is not None
+        return process.stderr.read()[:200]
+
+    assert [p.wait() for p in procs] == [0, 0, 0], [
+        stderr_prefix(p) for p in procs
+    ]
     with Store.open(str(root), read_only=True) as s:
         assert s.read_snapshot().revision == 75  # every commit landed; none discarded
     assert not any(p.name.startswith("vouch") for tmp in ("a", "b", "c") for p in (tmp_path / f"tmp-{tmp}").iterdir())

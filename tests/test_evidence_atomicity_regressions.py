@@ -139,8 +139,8 @@ def test_evidence_is_refused_when_unit_is_reversioned_mid_run(tmp_path: Path) ->
     assert b"evidence.pack-moved" in stdout + stderr
     with Store.open(root, read_only=True) as store:
         snapshot = store.read_snapshot()
-        assert snapshot.unit("u") is not None
-        assert snapshot.unit("u").version == "v2"  # type: ignore[union-attr]
+        unit = snapshot.unit("u")
+        assert unit is not None and unit.version == "v2"
         assert snapshot.evidence_head_ref(UnitRef("u", "v1")) is None
 
 

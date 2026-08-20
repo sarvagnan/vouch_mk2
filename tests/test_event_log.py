@@ -79,7 +79,7 @@ def test_state_format_4_upgrader_records_the_pre_log_gap(tmp_path: Path) -> None
     assert golden["state_format"] == 3 and "event_head" not in golden
     # The golden names evidence objects a bare directory does not hold; a legacy store with no
     # evidence is still a genuine legacy store, and keeps this fixture self-contained.
-    golden["evidence_heads"] = []
+    golden["evidence_heads"] = list[object]()
     (root / "state.json").write_text(
         json.dumps(golden, sort_keys=True, separators=(",", ":")) + "\n"
     )

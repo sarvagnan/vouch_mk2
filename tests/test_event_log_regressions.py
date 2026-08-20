@@ -62,7 +62,7 @@ def _genuine_format_three_store(tmp_path: Path, name: str) -> Path:
         (ROOT / "tests" / "fixtures" / "state-format" / "format3.golden.json").read_text()
     )
     assert document["state_format"] == 3 and "event_head" not in document
-    document["evidence_heads"] = []
+    document["evidence_heads"] = list[object]()
     (root / "state.json").write_text(
         json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
     )

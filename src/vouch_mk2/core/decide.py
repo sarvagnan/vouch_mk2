@@ -120,6 +120,7 @@ from vouch_mk2.core.model import (
     Snapshot,
     Tier,
     Unit,
+    UnitRef,
     UnitStatus,
     blocking_deviations,
 )
@@ -135,6 +136,26 @@ _SATISFIED_DEPENDENCY_STATUSES = frozenset(
 _CI_TERMINAL_UNIT_STATUSES = frozenset(
     {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND, UnitStatus.SUPERSEDED}
 )
+
+
+def _unit_ref_name(ref: UnitRef) -> str:
+    return ref.name
+
+
+def _roster_row_key(row: tuple[str, str, str]) -> tuple[str, str]:
+    return row[0], row[1]
+
+
+def _release_id(release: Release) -> str:
+    return release.release_id
+
+
+def _evidence_head_ref_key(head: EvidenceHead) -> tuple[str, str]:
+    return head.unit_name, head.unit_version
+
+
+def _ci_exception_unit_name(item: CiException) -> str:
+    return item.unit_name
 
 
 def _index(machine_name: str) -> Mapping[tuple[str, str], Transition]:
@@ -891,7 +912,7 @@ def _candidate_release(
                 for name in includes
                 if (unit := snapshot.unit(name)) is not None
             ),
-            key=lambda ref: ref.name,
+            key=_unit_ref_name,
         )
     )
     return Release(
@@ -1212,7 +1233,7 @@ def _roster_snapshot(
                 )
                 for ref in release.includes
             ),
-            key=lambda row: (row[0], row[1]),
+            key=_roster_row_key,
         )
     )
 
@@ -1426,7 +1447,7 @@ def _decide_amend(snapshot: Snapshot, command: AmendDeviation) -> Decision:
                 if release.state.value in _RELEASE_AMENDMENT_SOURCES
                 and any(ref.name in impacted for ref in release.includes)
             ),
-            key=lambda release: release.release_id,
+            key=_release_id,
         )
     )
     # Unit and release impact are separate typed fields — 0.6's "release:"
@@ -1583,7 +1604,7 @@ def _with_evidence_head(
 ) -> tuple[EvidenceHead, ...]:
     retained = tuple(head for head in heads if head.ref() != changed.ref())
     return tuple(
-        sorted(retained + (changed,), key=lambda head: (head.unit_name, head.unit_version))
+        sorted(retained + (changed,), key=_evidence_head_ref_key)
     )
 
 
@@ -1828,11 +1849,11 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                         for item in ci_exceptions
                         if item.unit_name != name
                     ),
-                    key=lambda item: item.unit_name,
+                    key=_ci_exception_unit_name,
                 )
             ) + (CiException(name, reason),)
             ci_exceptions = tuple(
-                sorted(ci_exceptions, key=lambda item: item.unit_name)
+                sorted(ci_exceptions, key=_ci_exception_unit_name)
             )
         case OpenInCiCleared(name=name):
             ci_exceptions = tuple(

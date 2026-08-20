@@ -288,7 +288,7 @@ def test_pack3_assertions_reject_unknown_status_and_cli_conflicts(
     document["units"] = [
         {
             "acceptance_pack_version": "p",
-            "depends_on": [],
+            "depends_on": list[object](),
             "name": "maybe",
             "status": "mystery",
             "version": "1",

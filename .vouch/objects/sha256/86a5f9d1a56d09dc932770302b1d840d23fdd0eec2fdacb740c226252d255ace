@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/evidence-semantics-1.spec.md","role":"test","sha256":"f53fb54a95d032e7237136181a7be838865f27f44da0e148ad92571c28c59fe0","size":7748},{"path":"tests/test_evidence_semantics.py","role":"test","sha256":"961527664d678266366a8db191f970e5982a0634d4c7ddc157847af5c299af6e","size":21320}],"pack_format":2}

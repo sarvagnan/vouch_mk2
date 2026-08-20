@@ -24,6 +24,10 @@ _ZIP_EXTERNAL_ATTR = 0o100644 << 16
 _COMPRESSLEVEL = 9
 
 
+def _archive_path(item: tuple[str, bytes]) -> str:
+    return item[0]
+
+
 def _entry(name: str) -> zipfile.ZipInfo:
     info = zipfile.ZipInfo(name, date_time=_ZIP_TIMESTAMP)
     info.compress_type = zipfile.ZIP_DEFLATED
@@ -88,7 +92,7 @@ def build_lock(source_root: str) -> bytes:
         compresslevel=_COMPRESSLEVEL,
     ) as bundle:
         bundle.comment = b""
-        for archive_path, payload in sorted(entries, key=lambda item: item[0]):
+        for archive_path, payload in sorted(entries, key=_archive_path):
             bundle.writestr(
                 _entry(archive_path),
                 payload,

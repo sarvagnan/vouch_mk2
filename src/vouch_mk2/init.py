@@ -2,25 +2,39 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import json
 import os
-import secrets
 import shutil
 import stat
+import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 
+from vouch_mk2.core import AnchorMode, AnchorModeSet, Snapshot, Tier, TierSet
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.lock import lock_digest
-from vouch_mk2.core import Snapshot, Tier, TierSet
 from vouch_mk2.store import Store, StoreError
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
 
 
 class InitError(StoreError):
     """Initialization refused before knowingly overwriting project content."""
+
+
+class InitIncompletePublication(InitError):
+    """Initialization stopped after project-visible publication began."""
+
+    def __init__(self, detail: str, complete_paths: Sequence[str]) -> None:
+        self.complete_paths = tuple(complete_paths)
+        remnants = ", ".join(self.complete_paths) or "none currently visible"
+        super().__init__(
+            f"incomplete publication: {detail}; complete remnants: {remnants}; "
+            "fix the cause and retry init"
+        )
 
 
 class InitStatus(Enum):
@@ -45,14 +59,24 @@ class _PlannedFile:
     needs_write: bool
 
 
+type _PublishedPath = str
+
+
 _WORKFLOW_TEMPLATE = """name: vouch
 
 on:
   push:
   pull_request:
+  workflow_call:
+    inputs:
+      anchoring:
+        description: Publish a Vouch anchor after the caller's required jobs pass
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: vouch-anchor-${{ github.repository_id }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -76,23 +100,33 @@ jobs:
       - name: Exhaustive Vouch formal check
         shell: bash
         run: python vouch.lock formal
-__PROJECT_TEST_PLACEHOLDER__
-  anchor:
-    needs: [__ANCHOR_NEEDS__]
-    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.repository.fork == false
+
+  anchor_plan:
+    needs: [validation]
+    if: inputs.anchoring == true && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.repository.fork == false
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      changed: ${{ steps.candidate.outputs.changed }}
+      candidate: ${{ steps.candidate.outputs.candidate }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.14'
-      - name: Advance evidence anchors and commit projections
+      - name: Verify vouch.lock against the recorded digest
+        shell: bash
+        run: python vouch.lock self-check --expect @.vouch/config.json
+      - name: Advance evidence anchors and prepare candidate
+        id: candidate
         shell: bash
         run: |
+          set -euo pipefail
           python - <<'PY' > "$RUNNER_TEMP/vouch-evidence-heads"
           import json
           from pathlib import Path
@@ -106,30 +140,95 @@ __PROJECT_TEST_PLACEHOLDER__
             python vouch.lock advance-anchor --root .vouch --unit-name "$unit_name"
           done < "$RUNNER_TEMP/vouch-evidence-heads"
           python vouch.lock generate --root .vouch
+          python vouch.lock check --ci --root .vouch --project .
+          python vouch.lock formal
           git add -- .vouch/
           if git diff --cached --quiet; then
+            printf 'changed=false\\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git config user.name "vouch-anchor-bot"
           git config user.email "vouch-anchor-bot@users.noreply.github.com"
           git commit -m "vouch: advance evidence anchors"
-      - name: Push anchored projections
+          candidate="$(git rev-parse HEAD)"
+          git branch vouch-candidate "$candidate"
+          git bundle create "$RUNNER_TEMP/vouch-candidate.bundle" refs/heads/vouch-candidate
+          git branch -D vouch-candidate
+          (cd "$RUNNER_TEMP" && sha256sum vouch-candidate.bundle > vouch-candidate.bundle.sha256)
+          printf 'changed=true\\ncandidate=%s\\n' "$candidate" >> "$GITHUB_OUTPUT"
+      - name: Upload same-run candidate transport
+        if: steps.candidate.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vouch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vouch-candidate.bundle
+            ${{ runner.temp }}/vouch-candidate.bundle.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  anchor_publish:
+    needs: [anchor_plan]
+    if: needs.anchor_plan.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download same-run candidate transport
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vouch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vouch-candidate
+      - name: Validate candidate and publish
         shell: bash
         env:
           VOUCH_PUSH_TOKEN: ${{ github.token }}
-        run: git push "https://x-access-token:${VOUCH_PUSH_TOKEN}@github.com/${{ github.repository }}.git" "HEAD:${{ github.event.repository.default_branch }}"
-"""
-
-
-_PROJECT_TEST_PLACEHOLDER = """
-  project-tests-required:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Refuse an anchor not gated by project tests
-        shell: bash
+          PLANNED_BASE: ${{ github.sha }}
+          CANDIDATE: ${{ needs.anchor_plan.outputs.candidate }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          echo "No project test job is wired into Vouch anchoring; rerun init with --test-job NAME."
-          exit 1
+          set -euo pipefail
+          transport="$RUNNER_TEMP/vouch-candidate"
+          (cd "$transport" && sha256sum -c vouch-candidate.bundle.sha256) || exit 1
+          [[ "$PLANNED_BASE" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || exit 1
+
+          publish="$RUNNER_TEMP/vouch-publish"
+          git init -q "$publish"
+          cd "$publish"
+          git remote add origin "https://x-access-token:${VOUCH_PUSH_TOKEN}@github.com/${{ github.repository }}.git"
+          git fetch -q --no-tags origin "$PLANNED_BASE"
+          git fetch -q "$transport/vouch-candidate.bundle" refs/heads/vouch-candidate
+          test "$(git rev-parse FETCH_HEAD)" = "$CANDIDATE" || exit 1
+
+          # The candidate has exactly one parent and it is the plan job's exact base.
+          parents="$(git rev-list --parents -n 1 "$CANDIDATE")"
+          test "$(printf '%s\\n' "$parents" | awk '{print NF - 1}')" -eq 1 || exit 1
+          test "$(git rev-parse "$CANDIDATE^")" = "$PLANNED_BASE" || exit 1
+
+          git diff-tree --no-commit-id --name-only -r -z "$PLANNED_BASE" "$CANDIDATE" > "$RUNNER_TEMP/vouch-paths"
+          git ls-tree -r -z "$CANDIDATE" -- .vouch > "$RUNNER_TEMP/vouch-tree"
+          # Reject paths outside .vouch/, symlink mode 120000, submodule 160000,
+          # or any other non-regular mode before the write credential is used.
+          python - "$RUNNER_TEMP/vouch-paths" "$RUNNER_TEMP/vouch-tree" <<'PY'
+          import sys
+          from pathlib import Path
+
+          paths = tuple(item for item in Path(sys.argv[1]).read_bytes().split(b"\\0") if item)
+          if not paths or any(not item.startswith(b".vouch/") for item in paths):
+              raise SystemExit("candidate changes a path outside .vouch/")
+          records = tuple(item for item in Path(sys.argv[2]).read_bytes().split(b"\\0") if item)
+          for record in records:
+              metadata, _path = record.split(b"\\t", 1)
+              mode = metadata.split(b" ", 1)[0]
+              if mode not in {b"100644", b"100755"}:
+                  raise SystemExit(f"candidate introduces non-regular mode {mode!r}")
+          PY
+
+          live="$(git ls-remote origin "refs/heads/$DEFAULT_BRANCH" | awk 'NR == 1 {print $1}')"
+          test "$live" = "$PLANNED_BASE" || exit 1
+          git config core.hooksPath /dev/null
+          git push origin "$CANDIDATE:refs/heads/$DEFAULT_BRANCH"
 """
 
 
@@ -147,13 +246,8 @@ def _validated_test_jobs(test_jobs: Sequence[str]) -> tuple[str, ...]:
 
 def generated_workflow(test_jobs: Sequence[str] = ()) -> str:
     """Return the exact GitHub Actions workflow fragment written by ``init``."""
-    jobs = _validated_test_jobs(test_jobs)
-    placeholder = "" if jobs else _PROJECT_TEST_PLACEHOLDER
-    anchor_needs = ", ".join(("validation", *(jobs or ("project-tests-required",))))
-    return (
-        _WORKFLOW_TEMPLATE.replace("__PROJECT_TEST_PLACEHOLDER__", placeholder)
-        .replace("__ANCHOR_NEEDS__", anchor_needs)
-    )
+    _validated_test_jobs(test_jobs)
+    return _WORKFLOW_TEMPLATE
 
 
 def _canonical_json(document: object) -> bytes:
@@ -348,73 +442,69 @@ def _stage_file(stage_root: str, index: int, plan: _PlannedFile) -> str:
     return staged
 
 
-def _place_staged_file(staged: str, plan: _PlannedFile) -> None:
-    """Publish one complete file by renaming a same-directory temporary."""
+def _place_staged_file(staged: str, plan: _PlannedFile) -> _PublishedPath:
+    """Atomically publish one complete file only if its pathname is absent."""
     directory = os.path.dirname(plan.destination)
-    temporary = os.path.join(
-        directory,
-        f".{os.path.basename(plan.destination)}.{secrets.token_hex(8)}.tmp",
-    )
-    temporary_exists = False
-    placed = False
+    published = False
     try:
-        os.link(staged, temporary, follow_symlinks=False)
-        temporary_exists = True
-        try:
-            os.lstat(plan.destination)
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            raise InitError(
-                f"{plan.destination}: cannot inspect placement target: {error}"
-            ) from error
-        else:
-            raise InitError(
-                f"{plan.destination}: init target appeared during placement; "
-                "refusing to overwrite"
-            )
-        os.rename(temporary, plan.destination)
-        temporary_exists = False
-        placed = True
+        # A hard link is a same-filesystem, atomic create-if-absent operation.
+        # Unlike rename, EEXIST cannot replace a concurrent winner.
+        os.link(staged, plan.destination, follow_symlinks=False)
+        published = True
         _fsync_directory(directory)
     except OSError as error:
-        if placed:
-            try:
-                os.unlink(plan.destination)
-            except FileNotFoundError:
-                pass
+        if published:
+            raise InitIncompletePublication(
+                f"{plan.destination}: cannot place staged init target: {error}",
+                (plan.report_path,),
+            ) from error
         raise InitError(
             f"{plan.destination}: cannot place staged init target: {error}"
         ) from error
-    finally:
-        if temporary_exists:
-            try:
-                os.unlink(temporary)
-            except FileNotFoundError:
-                pass
+    return plan.destination
 
 
-def _init_step(_step: str) -> None:
-    """Module-private fault-injection seam for recovery tests."""
-
-
-def _rollback_placements(
-    files: list[str],
-    store_path: str | None,
-    staged_store: str,
-    directories: list[str],
-) -> None:
-    """Remove only paths successfully created by this invocation."""
-    if store_path is not None:
-        # Rename the complete store back out of the project atomically. If the
-        # process dies on either side of this boundary, the store is either
-        # fully installed with all dependencies or wholly absent and retryable.
-        os.rename(store_path, staged_store)
-    for path in reversed(files):
+def _rename_directory_noreplace(source: str, destination: str) -> None:
+    """Atomically move a directory to an absent name on supported platforms."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    source_bytes = os.fsencode(source)
+    destination_bytes = os.fsencode(destination)
+    if sys.platform == "darwin":
+        renamex = libc.renamex_np
+        renamex.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        renamex.restype = ctypes.c_int
+        result = renamex(source_bytes, destination_bytes, 0x00000004)  # RENAME_EXCL
+    elif sys.platform.startswith("linux"):
         try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
+            renameat2 = libc.renameat2
+        except AttributeError as error:
+            raise InitError(
+                "platform: atomic no-replace directory rename is unavailable"
+            ) from error
+        renameat2.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        renameat2.restype = ctypes.c_int
+        result = renameat2(
+            -100, source_bytes, -100, destination_bytes, 0x00000001
+        )  # AT_FDCWD, RENAME_NOREPLACE
+    else:
+        raise InitError(
+            "platform: atomic no-replace directory rename is unavailable"
+        )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        if error_number == 0:
+            error_number = errno.EIO
+        raise OSError(error_number, os.strerror(error_number), destination)
+
+
+def _rollback_prepublication_directories(directories: list[str]) -> None:
+    """Remove directories created before any project file was published."""
     for path in reversed(directories):
         try:
             os.rmdir(path)
@@ -422,24 +512,45 @@ def _rollback_placements(
             pass
 
 
+def _complete_visible_plans(plans: Sequence[_PlannedFile]) -> tuple[str, ...]:
+    """Name complete planned files currently visible at their final paths."""
+    complete: list[str] = []
+    for plan in plans:
+        try:
+            current = read_regular_nofollow(
+                plan.destination, "published init target"
+            )
+        except StoreError:
+            continue
+        if current == plan.data:
+            complete.append(plan.report_path)
+    return tuple(complete)
+
+
 def init_project(
     project_root: str,
     lock_bytes: bytes,
     *,
     tier: Tier = Tier.LIGHTWEIGHT,
+    anchor_mode: AnchorMode = AnchorMode.NONE,
     actor: str | None = None,
-    test_jobs: Sequence[str] = (),
 ) -> tuple[InitResult, ...]:
     """Initialize exactly the D-7 store, lock, config, and CI workflow set.
 
     Target paths are planned and checked before a sibling staging directory is
     created. The prepared store is published last, after its lock and workflow,
     so an interruption cannot expose the re-initialization marker before the
-    project is retryable. A caught refusal rolls back paths created by this run.
+    project is retryable. A caught refusal before publication removes newly
+    created directories. Once publication begins, complete artifacts remain
+    in place for a retry instead of being unlinked during unwind.
 
-    ``test_jobs`` names the project's own GitHub Actions jobs that must pass
-    before the anchor job can run.
     """
+    if tier is not Tier.LIGHTWEIGHT and anchor_mode is not AnchorMode.CI:
+        raise InitError(
+            f"tier {tier.value} requires anchor_mode=ci; supply --test-job "
+            "when using the CLI"
+        )
+
     root = os.path.abspath(project_root)
     try:
         root_info = os.lstat(root)
@@ -463,7 +574,7 @@ def init_project(
         workflow_plan = _plan_file(
             root,
             ".github/workflows/vouch.yml",
-            generated_workflow(test_jobs).encode("utf-8"),
+            generated_workflow().encode("utf-8"),
             0o644,
         )
     except StoreError as error:
@@ -491,7 +602,7 @@ def init_project(
         raise InitError(f"init staging failed: {error}") from error
 
     staged_files: dict[str, str] = {}
-    placed_files: list[str] = []
+    placed_files: list[_PublishedPath] = []
     created_directories: list[str] = []
     placed_store: str | None = None
     staged_store = os.path.join(stage_root, "store")
@@ -504,13 +615,21 @@ def init_project(
                 staged_store,
                 initial_snapshot=Snapshot(),
             ) as store:
-                if tier is not Tier.LIGHTWEIGHT:
+                initial_events = (
+                    *((TierSet(tier),) if tier is not Tier.LIGHTWEIGHT else ()),
+                    *(
+                        (AnchorModeSet(anchor_mode),)
+                        if anchor_mode is not AnchorMode.NONE
+                        else ()
+                    ),
+                )
+                if initial_events:
                     with store.write_locked():
                         initial = store.read_snapshot()
                         commit_events(
                             store,
                             initial,
-                            (TierSet(tier),),
+                            initial_events,
                             actor=default_actor() if actor is None else actor,
                             run_id=ci_run_id(),
                         )
@@ -520,8 +639,6 @@ def init_project(
                 0o600,
                 "vouch config",
             )
-
-        _init_step("staged")
 
         if any(
             plan.needs_write
@@ -534,8 +651,9 @@ def init_project(
             )
 
         for plan in write_plans:
-            _place_staged_file(staged_files[plan.destination], plan)
-            placed_files.append(plan.destination)
+            placed_files.append(
+                _place_staged_file(staged_files[plan.destination], plan)
+            )
 
         if collisions:
             return tuple(
@@ -544,7 +662,7 @@ def init_project(
             )
 
         try:
-            os.rename(staged_store, store_path)
+            _rename_directory_noreplace(staged_store, store_path)
         except OSError as error:
             raise InitError(
                 f"{store_path}: cannot place staged store: {error}"
@@ -552,24 +670,44 @@ def init_project(
         placed_store = store_path
         _fsync_directory(root)
     except BaseException as error:
-        try:
-            _rollback_placements(
-                placed_files,
-                placed_store,
-                staged_store,
-                created_directories,
-            )
-        except OSError as rollback_error:
-            raise InitError(
-                f"init failed and rollback failed: {rollback_error}"
+        # Once the complete store is visible, preserve the success-equivalent
+        # installation and its dependencies. Once any file is visible, unwind
+        # never removes a project pathname because pathname deletion cannot be
+        # made conditional on the identity previously observed.
+        if placed_store is not None:
+            pass
+        elif placed_files or isinstance(error, InitIncompletePublication):
+            if isinstance(error, InitIncompletePublication):
+                raise
+            complete_paths = _complete_visible_plans(write_plans)
+            raise InitIncompletePublication(
+                f"init failed: {error}", complete_paths
             ) from error
-        if isinstance(error, InitError):
+        elif not isinstance(error, InitError):
+            complete_paths = _complete_visible_plans(write_plans)
+            if complete_paths:
+                raise InitIncompletePublication(
+                    f"init failed: {error}", complete_paths
+                ) from error
+            try:
+                _rollback_prepublication_directories(created_directories)
+            except OSError as rollback_error:
+                raise InitError(
+                    f"init failed and rollback failed: {rollback_error}"
+                ) from error
+            if isinstance(error, StoreError):
+                raise InitError(str(error)) from error
+            if isinstance(error, OSError):
+                raise InitError(f"init failed: {error}") from error
             raise
-        if isinstance(error, StoreError):
-            raise InitError(str(error)) from error
-        if isinstance(error, OSError):
-            raise InitError(f"init failed: {error}") from error
-        raise
+        else:
+            try:
+                _rollback_prepublication_directories(created_directories)
+            except OSError as rollback_error:
+                raise InitError(
+                    f"init failed and rollback failed: {rollback_error}"
+                ) from error
+            raise
     finally:
         shutil.rmtree(stage_root, ignore_errors=True)
 
@@ -583,6 +721,7 @@ def init_project(
 
 __all__ = [
     "InitError",
+    "InitIncompletePublication",
     "InitResult",
     "InitStatus",
     "generated_workflow",

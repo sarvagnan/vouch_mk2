@@ -142,6 +142,7 @@ def test_cli_init_with_supplied_lock_prints_four_report_lines(
         "written vouch.lock",
         "written .vouch/config.json",
         "written .github/workflows/vouch.yml",
+        "Anchoring disabled: no --test-job gate was supplied; direct runs validate only.",
         "Vouch requires Python 3.14+",
     ]
 
@@ -245,11 +246,12 @@ def test_init_crash_between_staging_and_placement_leaves_nothing(
 ) -> None:
     project = _project(tmp_path)
 
-    def crash_after_staging(step: str) -> None:
-        if step == "staged":
-            raise RuntimeError("simulated crash")
+    def crash_before_placement(
+        _staged: str, _plan: init_module._PlannedFile
+    ) -> init_module._PublishedPath:
+        raise RuntimeError("simulated crash")
 
-    monkeypatch.setattr(init_module, "_init_step", crash_after_staging)
+    monkeypatch.setattr(init_module, "_place_staged_file", crash_before_placement)
     with pytest.raises(RuntimeError, match="simulated crash"):
         init_project(str(project), LOCK_BYTES)
 

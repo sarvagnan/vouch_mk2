@@ -180,7 +180,8 @@ def test_record_evidence_runs_the_command_and_records_the_real_outcome(tmp_path:
     passing = [sys.executable, "-c", "raise SystemExit(0)"]
     assert main(["record-evidence", "--root", root, "--unit", "core@v1", "--kind", "green", "--", *passing]) == 0
     with Store.open(root) as store:
-        assert store.read_snapshot().evidence_head("core").head_sequence == 2  # type: ignore[union-attr]
+        head = store.read_snapshot().evidence_head("core")
+        assert head is not None and head.head_sequence == 2
 
 
 def test_record_evidence_refuses_an_incoherent_kind_and_records_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

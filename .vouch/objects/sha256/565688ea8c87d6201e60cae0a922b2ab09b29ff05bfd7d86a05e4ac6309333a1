@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"UnitSpecified","pack_digest":"","payload":{"depends_on":["evidence-command-safety"],"name":"strict-types","version":"1"},"prev":"e94cfa29528e960b79b21ee24ebb2bf54ecfa9ad27cc387fa3eb5b02d3814e7e","recorded_at":"2026-08-20T11:43:45+00:00","revision":544,"run_id":""}

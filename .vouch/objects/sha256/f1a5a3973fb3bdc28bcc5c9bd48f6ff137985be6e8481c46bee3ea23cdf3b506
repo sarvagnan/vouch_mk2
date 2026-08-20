@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/strict-types-1.spec.md","role":"spec","sha256":"f400e0d802ffbca5eb257883d2594e4f218ce023e6025a7f1cad2cf42c2ce1ac","size":3323},{"path":"tests/test_strict_types.py","role":"test","sha256":"883a0f148b5fd50e6a474f2bc13a61723e03632c9e4edbbcdc4cd0f6353f6100","size":3497}],"pack_format":2}

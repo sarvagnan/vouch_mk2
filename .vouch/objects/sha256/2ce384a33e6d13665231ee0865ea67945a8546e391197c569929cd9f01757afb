@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/ci-adoption-closure-1.spec.md","role":"spec","sha256":"c1f5f95c52e1001b111efc96ccda09b43719b72083134cebea348627242ce584","size":4867},{"path":"tests/test_ci_adoption_closure.py","role":"test","sha256":"3ead0e828ab82a9b32b9686f2b1ef367f5e7f373673712b5d1e26b4b6dcd5f58","size":10345}],"pack_format":2}

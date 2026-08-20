@@ -59,7 +59,13 @@ def test_init_refuses_an_existing_store_and_never_clobbers_a_workflow(tmp_path: 
 
 
 def test_init_tier_sets_the_store_tier_at_creation(tmp_path: Path) -> None:
-    _project, root = _init(tmp_path, "--tier", "standard")
+    _project, root = _init(
+        tmp_path,
+        "--tier",
+        "standard",
+        "--test-job",
+        "unit-tests",
+    )
     code, out = _run("status", "--root", root)
     assert code == 0, out
     assert "standard" in out
@@ -105,8 +111,13 @@ def test_hook_never_explores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
     calls: list[str] = []
     real = verify.run_formal
+
+    def traced_run_formal() -> object:
+        calls.append("x")
+        return real()
+
     monkeypatch.setattr(
-        verify, "run_formal", lambda *a, **k: (calls.append("x"), real(*a, **k))[1]
+        verify, "run_formal", traced_run_formal
     )
     _run("hook", "--edit-target", str(tmp_path / "f.py"))
     assert calls == [], "hook re-explored the bounded model"

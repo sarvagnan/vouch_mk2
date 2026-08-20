@@ -186,7 +186,8 @@ def test_specify_accepts_a_name_whose_only_records_are_superseded(tmp_path: Path
         active = snapshot.unit("api")
         assert active is not None and active.version == "v2" and active.status is UnitStatus.SPECIFIED
         assert sum(1 for u in snapshot.units if u.name == "api") == 2
-        assert snapshot.evidence_head("api") is None or snapshot.evidence_head("api").head_sequence == 0  # type: ignore[union-attr]
+        head = snapshot.evidence_head("api")
+        assert head is None or head.head_sequence == 0
     code, out = _run("specify", "--root", root, "--name", "api", "--version", "v1")
     assert code == 2 and "unit.exists" in out  # the same version cannot be re-created
 

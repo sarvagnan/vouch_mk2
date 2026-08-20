@@ -297,7 +297,7 @@ def test_release_missing_nested_field_is_refused(nested: str, field: str) -> Non
 def test_release_criteria_must_be_object_or_null() -> None:
     document = _baseline_document()
     release = _release_document()
-    release["criteria"] = []
+    release["criteria"] = list[object]()
     document["releases"] = [release]
     with pytest.raises(DecodeError, match="criteria: expected object"):
         decode_snapshot(_json_bytes(document))
@@ -437,7 +437,7 @@ def test_evidence_head_field_refusals(
             "head_sequence": 1,
             "anchored": "GENESIS",
             "anchor_run_id": "",
-            "pack_summaries": [],
+            "pack_summaries": list[object](),
         }
     ]
     heads = document["evidence_heads"]
@@ -508,10 +508,10 @@ def test_evidence_pack_summaries_refuse_non_deterministic_layout(
             "acceptance_pack_digest": "",
             "acceptance_test_set_digest": "",
             "acceptance_pack_version": "p1",
-            "depends_on": [],
+            "depends_on": list[object](),
             "name": "u",
-            "pack_history": [],
-            "rebound_history": [],
+            "pack_history": list[object](),
+            "rebound_history": list[object](),
             "published_once": False,
             "status": "acceptance-frozen",
             "version": "v1",

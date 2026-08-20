@@ -26,6 +26,10 @@ class NextAction:
     reason: str
 
 
+def _action_key(action: NextAction) -> tuple[str, str, str]:
+    return action.subject_kind, action.subject_id, action.command
+
+
 _UNIT_MACHINE = mk2.MK2.machine(mk2.UNIT_MACHINE)
 _DEVIATION_MACHINE = mk2.MK2.machine(mk2.DEVIATION_MACHINE)
 _RELEASE_MACHINE = mk2.MK2.machine(mk2.RELEASE_O_MACHINE)
@@ -283,10 +287,6 @@ def next_actions(snapshot: Snapshot) -> tuple[NextAction, ...]:
     return tuple(
         sorted(
             actions,
-            key=lambda action: (
-                action.subject_kind,
-                action.subject_id,
-                action.command,
-            ),
+            key=_action_key,
         )
     )

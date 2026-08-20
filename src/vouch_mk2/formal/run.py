@@ -42,6 +42,10 @@ class FormalRun:
         raise LookupError(f"unknown formal universe {name!r}")
 
 
+def _invariant_id(verdict: InvariantVerdict) -> str:
+    return verdict.invariant_id
+
+
 def _run_universe(universe: Universe) -> UniverseRun:
     relation = explore(universe)
     invariant_verdicts: list[InvariantVerdict] = []
@@ -79,7 +83,7 @@ def _run_universe(universe: Universe) -> UniverseRun:
         state_count=len(relation.states),
         transition_count=len(relation.transitions),
         invariants=tuple(
-            sorted(invariant_verdicts, key=lambda item: item.invariant_id)
+            sorted(invariant_verdicts, key=_invariant_id)
         ),
         relation=relation,
     )

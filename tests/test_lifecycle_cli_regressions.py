@@ -414,8 +414,8 @@ def test_stale_label_specified_evidence_cannot_poison_later_publication(
     with Store.open(str(root), read_only=True) as store:
         snapshot = store.read_snapshot()
     assert snapshot.evidence_head("u") is None
-    assert snapshot.unit("u") is not None
-    assert snapshot.unit("u").status is UnitStatus.DONE_PENDING_ACCEPTANCE  # type: ignore[union-attr]
+    unit = snapshot.unit("u")
+    assert unit is not None and unit.status is UnitStatus.DONE_PENDING_ACCEPTANCE
 
 
 def test_standard_label_only_pack_cannot_publish_after_red_green(
@@ -476,8 +476,12 @@ def test_verify_record_evidence_raises_typed_refusal_with_all_violations(
         Violation("evidence.first", "first detail"),
         Violation("evidence.second", "second detail"),
     )
+
+    def refuse_evidence(_snapshot: Snapshot, _command: object) -> Refused:
+        return Refused(violations)
+
     monkeypatch.setattr(
-        verify_module, "decide", lambda _snapshot, _command: Refused(violations)
+        verify_module, "decide", refuse_evidence
     )
     with Store.open(str(root)) as store:
         with pytest.raises(RefusedError) as raised:
@@ -491,13 +495,19 @@ def test_verify_record_formal_certificate_raises_typed_refusal(
     root = tmp_path / "store"
     _init_store(root)
     violations = (Violation("formal.refused", "formal detail"),)
-    monkeypatch.setattr(verify_module, "passed", lambda _run: True)
-    monkeypatch.setattr(
-        verify_module, "build_certificate", lambda _run: (object(), b"certificate")
-    )
-    monkeypatch.setattr(
-        verify_module, "decide", lambda _snapshot, _command: Refused(violations)
-    )
+
+    def formal_passed(_run: FormalRun) -> bool:
+        return True
+
+    def fake_certificate(_run: FormalRun) -> tuple[object, bytes]:
+        return object(), b"certificate"
+
+    def refuse_certificate(_snapshot: Snapshot, _command: object) -> Refused:
+        return Refused(violations)
+
+    monkeypatch.setattr(verify_module, "passed", formal_passed)
+    monkeypatch.setattr(verify_module, "build_certificate", fake_certificate)
+    monkeypatch.setattr(verify_module, "decide", refuse_certificate)
     fake_run = cast(FormalRun, object())
     with Store.open(str(root)) as store:
         with pytest.raises(RefusedError) as raised:
@@ -585,7 +595,11 @@ def test_record_formal_certificate_json_reports_its_own_commit_revision(
     own_revision: list[int] = []
     fake_run = cast(FormalRun, object())
     monkeypatch.setattr(cli_module, "run_formal", lambda: fake_run)
-    monkeypatch.setattr(cli_module, "passed", lambda _run: True)
+
+    def formal_passed(_run: FormalRun) -> bool:
+        return True
+
+    monkeypatch.setattr(cli_module, "passed", formal_passed)
 
     def fake_record(
         store: Store,

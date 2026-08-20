@@ -10,7 +10,10 @@ from vouch_mk2.core.model import (
     DeviationStatus,
     ReleaseState,
     Snapshot,
+    Unit,
     UnitStatus,
+    CiException,
+    Deviation,
     blocking_deviations,
 )
 from vouch_mk2.ir import mk2
@@ -41,6 +44,18 @@ _CI_TERMINAL_UNIT_STATUSES = frozenset(
 )
 
 
+def _ci_exception_unit_name(item: CiException) -> str:
+    return item.unit_name
+
+
+def _unit_name(unit: Unit) -> str:
+    return unit.name
+
+
+def _deviation_id(deviation: Deviation) -> str:
+    return deviation.deviation_id
+
+
 def _not_applicable(check_id: str, subjects: str) -> CheckResult:
     return CheckResult(
         check_id=check_id,
@@ -63,7 +78,7 @@ def check_ci_policy(snapshot: Snapshot, *, enforce: bool = False) -> CheckResult
                 for item in snapshot.ci_exceptions
                 if item.unit_name in eligible_refs
             ),
-            key=lambda item: item.unit_name,
+            key=_ci_exception_unit_name,
         )
     )
     exception_detail = (
@@ -264,7 +279,7 @@ def check_blocked_status_coherent(snapshot: Snapshot) -> CheckResult:
             mk2.CHECK_BLOCKED_STATUS_COHERENT, "blocking-deviations"
         )
     offenders: list[str] = []
-    for unit in sorted(subjects, key=lambda candidate: candidate.name):
+    for unit in sorted(subjects, key=_unit_name):
         blockers = blocking_deviations(snapshot, unit)
         if blockers and unit.status not in _BLOCKER_COHERENT_STATUSES:
             blocker_ids = tuple(sorted(d.deviation_id for d in blockers))
@@ -288,7 +303,7 @@ def check_published_units_gated(snapshot: Snapshot) -> CheckResult:
             mk2.CHECK_PUBLISHED_UNITS_GATED, "published-units"
         )
     offenders: list[str] = []
-    for unit in sorted(subjects, key=lambda candidate: candidate.name):
+    for unit in sorted(subjects, key=_unit_name):
         failures: list[str] = []
         if not unit.acceptance_pack_version:
             failures.append("acceptance_pack_version is empty")
@@ -343,7 +358,7 @@ def check_amended_deviations_complete(snapshot: Snapshot) -> CheckResult:
             mk2.CHECK_AMENDED_DEVIATIONS_COMPLETE, "amendment-records"
         )
     offenders: list[str] = []
-    for deviation in sorted(subjects, key=lambda candidate: candidate.deviation_id):
+    for deviation in sorted(subjects, key=_deviation_id):
         amended = deviation.status is DeviationStatus.AMENDED
         closed_with_record = deviation.status is DeviationStatus.CLOSED and (
             deviation.amendment_version != ""

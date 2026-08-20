@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/pending-anchor-locality-1.spec.md","role":"spec","sha256":"cbf9c558763391d614a358c6bb47aa7812aeed3f6a43c9e58471e0f4c4324b52","size":2044},{"path":"tests/test_pending_anchor_locality.py","role":"test","sha256":"c8e59ed8ff8ea36a9e52cca3db8266bd8cc698e429c6e444cb55db76b28c257d","size":4803}],"pack_format":2}

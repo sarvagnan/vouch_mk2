@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/adoption-seam-1.spec.md","role":"spec","sha256":"4aecea76378ab22a4e3380c601d198f07d070503aeae993d46e793c8d1c49bd2","size":7570},{"path":"tests/test_adoption_seam.py","role":"test","sha256":"9619a05f0f29dd86e9ec0fd38d79744c32ed908cb23a7989c8d47f5784901dd4","size":13592}],"pack_format":2}

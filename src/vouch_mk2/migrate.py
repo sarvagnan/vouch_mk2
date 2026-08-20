@@ -126,6 +126,10 @@ class MigrationRefused(StoreError):
     """An approval was refused without changing the target."""
 
 
+def _roster_row_key(row: tuple[str, str, str]) -> tuple[str, str]:
+    return row[0], row[1]
+
+
 _TOP_FIELDS = frozenset({"ledger"})
 _LEDGER_FIELDS = frozenset(
     {"project", "units", "deviations", "releases", "next_actions"}
@@ -772,9 +776,7 @@ def _closure_for(
     return ClosureRecord(
         trigger=closure.trigger,
         trigger_kind=ClosureTriggerKind(closure.trigger_kind),
-        roster_snapshot=tuple(
-            sorted(roster_snapshot, key=lambda row: (row[0], row[1]))
-        ),
+        roster_snapshot=tuple(sorted(roster_snapshot, key=_roster_row_key)),
         no_completion_claim=closure.no_completion_claim,
         observations=closure.observations,
     )

@@ -40,6 +40,10 @@ from vouch_mk2.ir.schema import ObligationScope, Verdict
 type CheckEvaluator = Callable[[Snapshot], CheckResult]
 
 
+def _check_id(result: CheckResult) -> str:
+    return result.check_id
+
+
 def _check_registry_complete(
     snapshot: Snapshot,
     mechanical: Mapping[str, CheckEvaluator],
@@ -289,7 +293,7 @@ def run_checks(
     return CheckReport(
         revision=snapshot.revision,
         mechanical=tuple(
-            sorted(mechanical_results, key=lambda result: result.check_id)
+            sorted(mechanical_results, key=_check_id)
         ),
         organizational=organizational_results,
     )

@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import TypedDict, cast
 
 import pytest
 
@@ -57,8 +57,29 @@ EXPECTED_KEYS = {
 }
 
 
+class _Policy(TypedDict, total=False):
+    unit_statuses: list[str]
+    unit_set_status_transitions: dict[str, list[str]]
+    release_transitions: dict[str, dict[str, list[str]]]
+    release_completion_claim_states: dict[str, list[str]]
+    release_protective_states: dict[str, list[str]]
+    release_negative_outcome_states: dict[str, list[str]]
+    release_active_states: dict[str, list[str]]
+    release_model_terminal_states: dict[str, list[str]]
+    supersession_no_op_release_states: list[str]
+    satisfied_dependency_statuses: list[str]
+    done_unit_statuses: list[str]
+    published_unit_statuses: list[str]
+    settled_unit_statuses: list[str]
+    marker_unit_statuses: list[str]
+    frozen_unit_statuses: list[str]
+    deviation_types: list[str]
+    supersession_policies: list[str]
+    closure_trigger_kinds: list[str]
+
+
 @pytest.fixture(scope="module")
-def policy() -> dict[str, Any]:
+def policy() -> _Policy:
     raw = FIXTURE.read_bytes()
     assert hashlib.sha256(raw).hexdigest() == FIXTURE_SHA256, (
         "vendored 0.6 lifecycle-policy.json changed; re-verify the transcription "
@@ -67,7 +88,7 @@ def policy() -> dict[str, Any]:
     document = json.loads(raw)
     assert isinstance(document, dict)
     assert set(document.keys()) == EXPECTED_KEYS
-    return document
+    return cast(_Policy, document)
 
 
 def machine(name: str) -> StateMachine:
@@ -89,11 +110,11 @@ def test_ir_is_structurally_valid() -> None:
     assert validate(VOUCH_06) == ()
 
 
-def test_unit_states_match(policy: dict[str, Any]) -> None:
+def test_unit_states_match(policy: _Policy) -> None:
     assert list(machine(UNIT_MACHINE).states) == policy["unit_statuses"]
 
 
-def test_unit_set_status_graph_matches(policy: dict[str, Any]) -> None:
+def test_unit_set_status_graph_matches(policy: _Policy) -> None:
     expected = {
         source: sorted(targets)
         for source, targets in policy["unit_set_status_transitions"].items()
@@ -119,7 +140,7 @@ def test_unit_invalidated_entered_only_by_adjudication() -> None:
     assert [e.target for e in m.adjudication_entries] == ["invalidated"]
 
 
-def test_release_transitions_match(policy: dict[str, Any]) -> None:
+def test_release_transitions_match(policy: _Policy) -> None:
     tables: dict[str, dict[str, list[str]]] = policy["release_transitions"]
     for machine_name, archetype in (
         (RELEASE_O_MACHINE, "operational"),
@@ -131,7 +152,7 @@ def test_release_transitions_match(policy: dict[str, Any]) -> None:
         assert command_graph(m, "advance") == expected, machine_name
 
 
-def test_claim_shapes_match_release_classification(policy: dict[str, Any]) -> None:
+def test_claim_shapes_match_release_classification(policy: _Policy) -> None:
     for machine_name, archetype in (
         (RELEASE_O_MACHINE, "operational"),
         (RELEASE_Q_MACHINE, "qualified"),
@@ -151,7 +172,7 @@ def test_claim_shapes_match_release_classification(policy: dict[str, Any]) -> No
         ), machine_name
 
 
-def test_active_states_are_exactly_the_claimless_states(policy: dict[str, Any]) -> None:
+def test_active_states_are_exactly_the_claimless_states(policy: _Policy) -> None:
     for machine_name, archetype, set_name in (
         (RELEASE_O_MACHINE, "operational", "release.active.operational"),
         (RELEASE_Q_MACHINE, "qualified", "release.active.qualified"),
@@ -164,7 +185,7 @@ def test_active_states_are_exactly_the_claimless_states(policy: dict[str, Any]) 
         assert set(VOUCH_06.state_set(set_name).states) == claimless
 
 
-def test_model_terminal_state_sets_match(policy: dict[str, Any]) -> None:
+def test_model_terminal_state_sets_match(policy: _Policy) -> None:
     for archetype, set_name in (
         ("operational", "release.model-terminal.operational"),
         ("qualified", "release.model-terminal.qualified"),
@@ -174,7 +195,7 @@ def test_model_terminal_state_sets_match(policy: dict[str, Any]) -> None:
         )
 
 
-def test_supersession_no_op_sets_match(policy: dict[str, Any]) -> None:
+def test_supersession_no_op_sets_match(policy: _Policy) -> None:
     no_op = set(policy["supersession_no_op_release_states"])
     for machine_name, set_name in (
         (RELEASE_O_MACHINE, "release.supersession-no-op.operational"),
@@ -189,7 +210,7 @@ def test_supersession_no_op_sets_match(policy: dict[str, Any]) -> None:
         assert set(supersession[0].excluded_sources) == no_op & set(m.states)
 
 
-def test_unit_classification_sets_match(policy: dict[str, Any]) -> None:
+def test_unit_classification_sets_match(policy: _Policy) -> None:
     for set_name, key in (
         ("unit.satisfied-dependency", "satisfied_dependency_statuses"),
         ("unit.done", "done_unit_statuses"),
@@ -201,7 +222,7 @@ def test_unit_classification_sets_match(policy: dict[str, Any]) -> None:
         assert list(VOUCH_06.state_set(set_name).states) == policy[key], set_name
 
 
-def test_vocabularies_match(policy: dict[str, Any]) -> None:
+def test_vocabularies_match(policy: _Policy) -> None:
     for vocab_name, key in (
         ("deviation-types", "deviation_types"),
         ("supersession-policies", "supersession_policies"),

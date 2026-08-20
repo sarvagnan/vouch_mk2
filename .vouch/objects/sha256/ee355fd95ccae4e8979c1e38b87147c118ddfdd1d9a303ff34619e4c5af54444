@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/pytest -q tests/test_generated_ci.py","evidence_format":2,"kind":"green","outcome":"tests-passed","pack_digest":"75300a3d127c0c8e8ec8a5e7581fc8e9f5af2e6778936b96851b2d375e19da36","parent":"903adde545e35e956bf96739d80ea3822dac22de8e69677ec190fa47cc8e425d","recorded_at":"2026-08-19T09:57:24+00:00","sequence":4,"unit":{"name":"generated-ci","version":"1"}}

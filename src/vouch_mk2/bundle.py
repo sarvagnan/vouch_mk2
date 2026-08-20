@@ -41,6 +41,18 @@ class InventoryError(BundleError):
     """A tree entry cannot safely participate in an inventory."""
 
 
+def _pack_path(item: tuple[RelPath, str]) -> str:
+    return path_text(item[0])
+
+
+def _directory_entry_name(entry: os.DirEntry[str]) -> str:
+    return entry.name
+
+
+def _inventory_entry_path(entry: InventoryEntry) -> str:
+    return entry.path
+
+
 def _pattern_segments(pattern: str) -> tuple[str, ...]:
     segments = tuple(pattern.split("/"))
     for segment in segments:
@@ -276,9 +288,7 @@ def build_pack_inventory(
         raise InventoryError(f"{absolute_root}: cannot open project: {error}") from error
     try:
         entries: list[PackEntry] = []
-        for relative, role in sorted(
-            relative_paths, key=lambda item: path_text(item[0])
-        ):
+        for relative, role in sorted(relative_paths, key=_pack_path):
             data = _read_relative_regular(root_fd, relative)
             entries.append(
                 PackEntry(
@@ -333,7 +343,7 @@ def build_inventory(root: str, exclusions: tuple[str, ...]) -> BundleInventory:
         directory, prefix = pending.pop()
         try:
             with os.scandir(directory) as iterator:
-                children = sorted(iterator, key=lambda entry: entry.name)
+                children = sorted(iterator, key=_directory_entry_name)
         except OSError as error:
             raise InventoryError(f"{directory}: cannot enumerate: {error}") from error
         for child in children:
@@ -371,7 +381,7 @@ def build_inventory(root: str, exclusions: tuple[str, ...]) -> BundleInventory:
                 )
             )
     return BundleInventory(
-        entries=tuple(sorted(entries, key=lambda entry: entry.path)),
+        entries=tuple(sorted(entries, key=_inventory_entry_path)),
         exclusions=exclusions,
     )
 

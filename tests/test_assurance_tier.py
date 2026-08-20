@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from vouch_mk2.store import Store, decode_snapshot, encode_snapshot
 from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 @contextlib.contextmanager
-def _tmp_store(snapshot: Snapshot | None = None):  # type: ignore[no-untyped-def]
+def _tmp_store(snapshot: Snapshot | None = None) -> Iterator[Store]:
     with tempfile.TemporaryDirectory() as d:
         store = Store.init(d + "/s")
         try:

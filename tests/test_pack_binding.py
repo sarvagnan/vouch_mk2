@@ -123,10 +123,12 @@ def test_freeze_without_files_is_label_only_and_bind_pack_binds_later(tmp_path: 
     project, root = _project(tmp_path)
     assert main(["freeze", "--root", root, "--name", "core", "--pack-version", "core-pack/1"]) == 0
     with Store.open(root, read_only=True) as store:
-        assert store.read_snapshot().unit("core").acceptance_pack_digest == ""  # type: ignore[union-attr]
+        unit = store.read_snapshot().unit("core")
+        assert unit is not None and unit.acceptance_pack_digest == ""
     assert main(["bind-pack", "--root", root, "--name", "core", "--project", str(project), "--pack-file", "tests/test_a.py"]) == 0
     with Store.open(root, read_only=True) as store:
-        assert len(store.read_snapshot().unit("core").acceptance_pack_digest) == 64  # type: ignore[union-attr]
+        unit = store.read_snapshot().unit("core")
+        assert unit is not None and len(unit.acceptance_pack_digest) == 64
 
 
 def test_binding_is_write_once_per_pack_version_and_respecify_clears_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -169,14 +171,15 @@ def test_freeze_refuses_a_pack_file_outside_the_project_or_missing(tmp_path: Pat
     assert main(["freeze", "--root", root, "--name", "core", "--pack-version", "p", "--project", str(project), "--pack-file", "../outside.py"]) == 2
     assert main(["freeze", "--root", root, "--name", "core", "--pack-version", "p", "--project", str(project), "--pack-file", "tests/nope.py"]) == 2
     with Store.open(root, read_only=True) as store:
-        assert store.read_snapshot().unit("core").status is UnitStatus.SPECIFIED  # type: ignore[union-attr]
+        unit = store.read_snapshot().unit("core")
+        assert unit is not None and unit.status is UnitStatus.SPECIFIED
 
 
 # ---- the checks: tier-scoped binding, working-tree re-verification ----
 
 
 def test_pack_bound_check_is_tier_scoped(tmp_path: Path) -> None:
-    from vouch_mk2.checks import run_checks
+    from vouch_mk2.checks import CheckResult, run_checks
     from vouch_mk2.core.model import Tier, Unit
     from vouch_mk2.ir import mk2
     from vouch_mk2.ir.schema import Verdict
@@ -184,7 +187,12 @@ def test_pack_bound_check_is_tier_scoped(tmp_path: Path) -> None:
     unbound = Unit("u", "1", UnitStatus.ACCEPTANCE_FROZEN, (), "u-pack/1", False)
     light = Snapshot(revision=1, tier=Tier.LIGHTWEIGHT, units=(unbound,))
     standard = Snapshot(revision=1, tier=Tier.STANDARD, units=(unbound,))
-    row = lambda s: next(r for r in run_checks(s).mechanical if r.check_id == mk2.CHECK_PACK_BOUND)  # noqa: E731
+    def row(snapshot: Snapshot) -> CheckResult:
+        return next(
+            result
+            for result in run_checks(snapshot).mechanical
+            if result.check_id == mk2.CHECK_PACK_BOUND
+        )
     assert row(light).verdict is Verdict.NOT_APPLICABLE and "label-only" in row(light).detail
     assert row(standard).verdict is Verdict.FAIL and "u@1" in row(standard).detail
     bound = Unit("u", "1", UnitStatus.ACCEPTANCE_FROZEN, (), "u-pack/1", False, acceptance_pack_digest="a" * 64)

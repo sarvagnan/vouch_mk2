@@ -36,7 +36,7 @@ def _legacy_store(tmp_path: Path, fixture: Path) -> str:
     document = json.loads(fixture.read_bytes())
     # The historical golden references dogfood evidence objects. A bare genuine legacy
     # store has no such CAS, so keep the canonical state shape but no evidence claims.
-    document["evidence_heads"] = []
+    document["evidence_heads"] = list[object]()
     (root / "state.json").write_bytes(
         json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n"
     )

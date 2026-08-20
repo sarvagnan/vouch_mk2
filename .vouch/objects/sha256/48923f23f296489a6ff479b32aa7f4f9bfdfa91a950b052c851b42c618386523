@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/pytest -q tests/test_evidence_command_safety.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"2ad9dda197b81d7f2a21d7bdcce0aa14f09cf3a50aff39784419c7359bace855","parent":"GENESIS","recorded_at":"2026-08-19T11:55:46+00:00","sequence":1,"unit":{"name":"evidence-command-safety","version":"1"}}

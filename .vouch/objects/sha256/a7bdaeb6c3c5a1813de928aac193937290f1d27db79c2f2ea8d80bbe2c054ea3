@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/init-publication-closure-1.spec.md","role":"spec","sha256":"85e39ef53b375934a5421b9f661e13998f1b6784395d06ee406f7623ad313322","size":3436},{"path":"tests/test_init_publication_closure.py","role":"test","sha256":"84074114246095465d9cafafba8072a4ff6f1ed3ad164d1159b8e93f8a1dc3dc","size":7536}],"pack_format":2}

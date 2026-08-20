@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from typing import assert_never
 
 from vouch_mk2.bundle import build_pack_inventory
-from vouch_mk2.checks import CheckResult, compose
+from vouch_mk2.checks import CheckReport, CheckResult, compose
 from vouch_mk2.checks.tier import check_pack_bound, tier_check_applies
 from vouch_mk2.core import (
     Accepted,
@@ -80,6 +80,37 @@ class _ChainWalk:
     head: EvidenceHead
     events: tuple[tuple[str, EvidenceEvent], ...]
     error: str
+
+
+def _unit_label(unit: Unit) -> str:
+    return unit.ref().label()
+
+
+def _check_id(result: CheckResult) -> str:
+    return result.check_id
+
+
+def pending_anchor_is_only_unchecked(report: CheckReport) -> bool:
+    """Return whether the pending CI anchor is the report's sole exception.
+
+    Verification owns both the structured result rows and their authoritative
+    check identifiers.  Keeping this classifier here prevents transports from
+    reinterpreting snapshot state after verification has already run.
+    """
+    if any(
+        result.verdict is Verdict.FAIL
+        for result in (*report.mechanical, *report.organizational)
+    ):
+        return False
+    not_checked = tuple(
+        result
+        for result in report.mechanical
+        if result.verdict is Verdict.NOT_CHECKED
+    )
+    return (
+        len(not_checked) == 1
+        and not_checked[0].check_id == mk2.CHECK_EVIDENCE_ANCHORS
+    )
 
 
 def _check_event_log(store: Store, snapshot: Snapshot) -> CheckResult:
@@ -623,7 +654,7 @@ def _check_pack_files_match(
             ),
         )
     failures: list[str] = []
-    for unit in sorted(subjects, key=lambda item: item.ref().label()):
+    for unit in sorted(subjects, key=_unit_label):
         try:
             inventory = decode_pack_inventory(
                 store.get_object(
@@ -916,7 +947,7 @@ def run_artifact_checks(
                 _check_pack_bound_objects(store, snapshot, walks),
                 _check_pack_files_match(store, snapshot, project),
             ),
-            key=lambda result: result.check_id,
+            key=_check_id,
         )
     )
 

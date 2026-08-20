@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/ci-trust-boundary-1.spec.md","role":"spec","sha256":"887c549bcb8ce2600d74a7564f3e4820842e27af3260657773f715d34e7b3e48","size":4347},{"path":"tests/test_ci_trust_boundary.py","role":"test","sha256":"f676769e77723189d12e9ff60a956bd3c6a919740b62a90cfb1c44275666d919","size":7106}],"pack_format":2}

@@ -19,6 +19,7 @@ build-backend = "uv_build"
 # D-1 ground rules (DECISIONS.md): these gates run in CI from the first commit.
 
 [tool.pyrefly]
+preset = "strict"
 project-includes = ["src", "tests"]
 
 [tool.importlinter]

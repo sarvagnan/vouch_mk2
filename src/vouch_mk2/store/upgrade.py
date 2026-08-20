@@ -84,7 +84,7 @@ def _upgrade_1_to_2(document: StateDocument) -> StateDocument:
                 continue
             copied = dict(cast(dict[str, object], raw_unit))
             copied["acceptance_pack_digest"] = ""
-            copied["pack_history"] = []
+            copied["pack_history"] = list[object]()
             units.append(copied)
         upgraded["units"] = units
     upgraded["state_format"] = 2
@@ -113,7 +113,7 @@ def _upgrade_2_to_3(document: StateDocument) -> StateDocument:
             copied_unit["acceptance_test_set_digest"] = unit.get(
                 "acceptance_pack_digest", ""
             )
-            copied_unit["rebound_history"] = []
+            copied_unit["rebound_history"] = list[object]()
             units.append(copied_unit)
             name = unit.get("name")
             version = unit.get("version")
@@ -131,7 +131,11 @@ def _upgrade_2_to_3(document: StateDocument) -> StateDocument:
                 continue
             copied = dict(cast(dict[str, object], raw_head))
             name = copied.get("unit_name")
-            records = candidates.get(name, []) if type(name) is str else []
+            records = (
+                candidates.get(name, list[tuple[str, str]]())
+                if type(name) is str
+                else list[tuple[str, str]]()
+            )
             active = [
                 version
                 for version, status in records
@@ -149,7 +153,7 @@ def _upgrade_2_to_3(document: StateDocument) -> StateDocument:
             else:
                 version = ""
             copied["unit_version"] = version
-            copied["pack_summaries"] = []
+            copied["pack_summaries"] = list[object]()
             heads.append(copied)
         upgraded["evidence_heads"] = heads
 
@@ -217,7 +221,7 @@ def _repair_pre_extension_format_three(document: StateDocument) -> StateDocument
             )
             changed = True
         if "rebound_history" not in copied:
-            copied["rebound_history"] = []
+            copied["rebound_history"] = list[object]()
             changed = True
         units.append(copied)
     if not changed:

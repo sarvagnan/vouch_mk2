@@ -233,10 +233,14 @@ def test_pack_files_check_is_tier_scoped_before_io_and_defaults_dot_vouch_parent
             ),
         ),
     )
+
+    def filesystem_touched(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("filesystem touched")
+
     monkeypatch.setattr(
         verify_module,
         "build_pack_inventory",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("filesystem touched")),
+        filesystem_touched,
     )
     with Store.open(str(empty_root), read_only=True) as store:
         rows = run_artifact_checks(store, lightweight, project=str(tmp_path))

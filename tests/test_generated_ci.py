@@ -100,10 +100,12 @@ def test_validation_job_has_no_write_credentials() -> None:
     text = _fragment()
     jobs = _jobs(text)
     validate = next(body for body in jobs.values() if "check --ci" in body)
-    anchor = next(body for body in jobs.values() if "advance-anchor" in body)
+    planner = next(body for body in jobs.values() if "advance-anchor" in body)
+    publisher = next(body for body in jobs.values() if "git push" in body)
     assert not re.search(r"^permissions:\s*\n\s+contents:\s*write", text, re.M), "no job-wide write permission"
     assert "contents: read" in validate and "contents: write" not in validate
-    assert "contents: write" in anchor
+    assert "contents: read" in planner and "contents: write" not in planner
+    assert "contents: write" in publisher
     assert "persist-credentials: false" in validate, "validation must not keep a usable git credential"
 
 
@@ -115,9 +117,12 @@ def test_third_party_actions_are_pinned_to_commit_shas() -> None:
 # ---- the anchor job cannot fight itself or strand a required check ----
 
 
-def test_anchor_job_only_runs_on_default_branch_pushes_and_never_on_pull_requests() -> None:
+def test_anchor_job_only_runs_when_a_default_branch_caller_explicitly_enables_it() -> None:
     anchor = next(body for body in _jobs(_fragment()).values() if "advance-anchor" in body)
-    assert re.search(r"if:.*github\.event_name\s*==\s*'push'", anchor)
+    # A called workflow retains the caller's event name (for the generated
+    # caller this is ``push``), so the explicit input is the capability gate.
+    assert not re.search(r"if:.*github\.event_name\s*==\s*'workflow_call'", anchor)
+    assert "inputs.anchoring == true" in anchor
     assert re.search(r"github\.ref\s*==\s*format\('refs/heads/\{0\}',\s*github\.event\.repository\.default_branch\)|github\.ref\s*==\s*'refs/heads/", anchor)
     assert "[skip ci]" not in anchor, (
         "a skipped bot commit on a PR head can leave a required check pending; anchoring on "
@@ -140,7 +145,7 @@ def test_fragment_tells_the_adopter_to_wire_their_own_tests() -> None:
     # FAILS until wired, and owns the assertions about that job. This unit's promise — the
     # adopter is TOLD to wire their own tests — is unchanged and asserted here.
     text = _fragment()
-    assert "--test-job" in text
+    assert "workflow_call:" in text and "anchoring:" in text
 
 
 # ---- mk2's own workflow keeps the property, stated once ----

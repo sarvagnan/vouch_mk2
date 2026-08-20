@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/pytest -q tests/test_strict_types.py","evidence_format":2,"kind":"green","outcome":"tests-passed","pack_digest":"1aa0ab72573250e36977c92c2164f4a3f8d1eff9d54e2b771c9be586dda962a9","parent":"f168039913954bb94f84571d8def38f9dd3a8cf3119a8ef896d8d396664f0b74","recorded_at":"2026-08-20T12:56:16+00:00","sequence":2,"unit":{"name":"strict-types","version":"1"}}

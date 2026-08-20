@@ -75,7 +75,13 @@ def _advance_to_published(root: str, name: str = "u") -> None:
 def test_init_records_strict_policy_selected_tier_and_python_314_transport(
     tmp_path: Path,
 ) -> None:
-    project, root = _init(tmp_path, "--tier", "standard")
+    project, root = _init(
+        tmp_path,
+        "--tier",
+        "standard",
+        "--test-job",
+        "unit-tests",
+    )
     with Store.open(root, read_only=True) as store:
         snapshot = store.read_snapshot()
     assert snapshot.tier is Tier.STANDARD

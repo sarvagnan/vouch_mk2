@@ -7,8 +7,9 @@ import json
 import runpy
 import sys
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Protocol, cast
 
 import pytest
 
@@ -55,8 +56,68 @@ from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapsh
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _pack3_helpers() -> dict[str, object]:
-    return runpy.run_path(str(ROOT / "tests" / "test_evidence_semantics.py"))
+class _Run(Protocol):
+    def __call__(self, *argv: str) -> tuple[int, str]: ...
+
+
+class _Project(Protocol):
+    def __call__(
+        self, tmp_path: Path, tier: str = "standard"
+    ) -> tuple[Path, str]: ...
+
+
+class _FrozenUnit(Protocol):
+    def __call__(
+        self, project: Path, root: str, name: str = "u"
+    ) -> None: ...
+
+
+class _Evidence(Protocol):
+    def __call__(
+        self, root: str, unit: str, kind: str, argv: list[str]
+    ) -> tuple[int, str]: ...
+
+
+class _PublishedWithRoles(Protocol):
+    def __call__(
+        self, tmp_path: Path, tier: str = "standard"
+    ) -> tuple[Path, str]: ...
+
+
+class _Rebind(Protocol):
+    def __call__(
+        self, project: Path, root: str, reason: str = "adapt"
+    ) -> tuple[int, str]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _Pack3Helpers:
+    run: _Run
+    project: _Project
+    frozen_unit: _FrozenUnit
+    evidence: _Evidence
+    published_with_roles: _PublishedWithRoles
+    rebind: _Rebind
+    ok: list[str]
+    fail: list[str]
+
+
+def _pack3_helpers() -> _Pack3Helpers:
+    namespace = runpy.run_path(
+        str(ROOT / "tests" / "test_evidence_semantics.py")
+    )
+    return _Pack3Helpers(
+        run=cast(_Run, namespace["_run"]),
+        project=cast(_Project, namespace["_project"]),
+        frozen_unit=cast(_FrozenUnit, namespace["_frozen_unit"]),
+        evidence=cast(_Evidence, namespace["_evidence"]),
+        published_with_roles=cast(
+            _PublishedWithRoles, namespace["_published_with_roles"]
+        ),
+        rebind=cast(_Rebind, namespace["_rebind"]),
+        ok=cast(list[str], namespace["OK"]),
+        fail=cast(list[str], namespace["FAIL"]),
+    )
 
 
 def _captured_main(*argv: str) -> tuple[int, str]:
@@ -387,9 +448,9 @@ def test_upgrade_two_to_three_copies_inventory_digest_to_test_set_digest() -> No
 
 def test_rebind_refuses_removed_bound_paths(tmp_path: Path) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_published_with_roles"](tmp_path)  # type: ignore[operator]
+    project, root = helpers.published_with_roles(tmp_path)
     (project / "tests" / "replacement.py").write_text("def test_ok():\n    pass\n")
-    code, out = helpers["_run"](  # type: ignore[operator]
+    code, out = helpers.run(
         *_rebind_args(
             project,
             root,
@@ -405,9 +466,9 @@ def test_rebind_refuses_removed_bound_paths(tmp_path: Path) -> None:
 
 def test_rebind_refuses_test_to_spec_demotion(tmp_path: Path) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_published_with_roles"](tmp_path)  # type: ignore[operator]
+    project, root = helpers.published_with_roles(tmp_path)
     (project / "tests" / "replacement.py").write_text("def test_ok():\n    pass\n")
-    code, out = helpers["_run"](  # type: ignore[operator]
+    code, out = helpers.run(
         *_rebind_args(
             project,
             root,
@@ -425,15 +486,15 @@ def test_rebind_refuses_test_to_spec_demotion(tmp_path: Path) -> None:
 
 def test_rebind_treats_every_format_one_path_as_executable(tmp_path: Path) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_project"](tmp_path)  # type: ignore[operator]
-    helpers["_frozen_unit"](project, root)  # type: ignore[operator]
-    assert helpers["_evidence"](root, "u@v1", "red", helpers["FAIL"])[0] == 0  # type: ignore[operator]
-    assert helpers["_evidence"](root, "u@v1", "green", helpers["OK"])[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("advance-anchor", "--root", root, "--unit-name", "u")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("mark-done", "--root", root, "--name", "u")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("publish", "--root", root, "--name", "u")[0] == 0  # type: ignore[operator]
+    project, root = helpers.project(tmp_path)
+    helpers.frozen_unit(project, root)
+    assert helpers.evidence(root, "u@v1", "red", helpers.fail)[0] == 0
+    assert helpers.evidence(root, "u@v1", "green", helpers.ok)[0] == 0
+    assert helpers.run("advance-anchor", "--root", root, "--unit-name", "u")[0] == 0
+    assert helpers.run("mark-done", "--root", root, "--name", "u")[0] == 0
+    assert helpers.run("publish", "--root", root, "--name", "u")[0] == 0
     (project / "tests" / "replacement.py").write_text("def test_ok():\n    pass\n")
-    code, out = helpers["_run"](  # type: ignore[operator]
+    code, out = helpers.run(
         *_rebind_args(
             project,
             root,
@@ -449,15 +510,15 @@ def test_rebind_treats_every_format_one_path_as_executable(tmp_path: Path) -> No
 
 def test_rebind_allows_changed_format_one_inventory_without_narrowing(tmp_path: Path) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_project"](tmp_path)  # type: ignore[operator]
-    helpers["_frozen_unit"](project, root)  # type: ignore[operator]
-    assert helpers["_evidence"](root, "u@v1", "red", helpers["FAIL"])[0] == 0  # type: ignore[operator]
-    assert helpers["_evidence"](root, "u@v1", "green", helpers["OK"])[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("advance-anchor", "--root", root, "--unit-name", "u")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("mark-done", "--root", root, "--name", "u")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("publish", "--root", root, "--name", "u")[0] == 0  # type: ignore[operator]
+    project, root = helpers.project(tmp_path)
+    helpers.frozen_unit(project, root)
+    assert helpers.evidence(root, "u@v1", "red", helpers.fail)[0] == 0
+    assert helpers.evidence(root, "u@v1", "green", helpers.ok)[0] == 0
+    assert helpers.run("advance-anchor", "--root", root, "--unit-name", "u")[0] == 0
+    assert helpers.run("mark-done", "--root", root, "--name", "u")[0] == 0
+    assert helpers.run("publish", "--root", root, "--name", "u")[0] == 0
     (project / "tests" / "t.py").write_text("def test_x():\n    assert True\n")
-    code, out = helpers["_run"](  # type: ignore[operator]
+    code, out = helpers.run(
         *_rebind_args(project, root, "--pack-file", "tests/t.py")
     )
     assert code == 0, out
@@ -465,9 +526,9 @@ def test_rebind_allows_changed_format_one_inventory_without_narrowing(tmp_path: 
 
 def test_rebind_allows_spec_to_test_promotion(tmp_path: Path) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_published_with_roles"](tmp_path)  # type: ignore[operator]
+    project, root = helpers.published_with_roles(tmp_path)
     (project / "packs" / "p.spec.md").write_text("promoted executable check\n")
-    code, out = helpers["_run"](  # type: ignore[operator]
+    code, out = helpers.run(
         *_rebind_args(
             project,
             root,
@@ -482,23 +543,23 @@ def test_rebind_allows_spec_to_test_promotion(tmp_path: Path) -> None:
 
 def test_rebind_refuses_an_unchanged_inventory_digest(tmp_path: Path) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_published_with_roles"](tmp_path)  # type: ignore[operator]
-    code, out = helpers["_rebind"](project, root, "same files")  # type: ignore[operator]
+    project, root = helpers.published_with_roles(tmp_path)
+    code, out = helpers.rebind(project, root, "same files")
     assert code == 2
     assert "rebind.no-change" in out
 
 
 def test_rebind_refuses_a_published_label_only_unit(tmp_path: Path) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_project"](tmp_path, tier="lightweight")  # type: ignore[operator]
-    assert helpers["_run"]("specify", "--root", root, "--name", "u", "--version", "v1")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("freeze", "--root", root, "--name", "u", "--pack-version", "p1")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("mark-ready", "--root", root, "--name", "u")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("start", "--root", root, "--name", "u")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("mark-done", "--root", root, "--name", "u")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("publish", "--root", root, "--name", "u")[0] == 0  # type: ignore[operator]
+    project, root = helpers.project(tmp_path, tier="lightweight")
+    assert helpers.run("specify", "--root", root, "--name", "u", "--version", "v1")[0] == 0
+    assert helpers.run("freeze", "--root", root, "--name", "u", "--pack-version", "p1")[0] == 0
+    assert helpers.run("mark-ready", "--root", root, "--name", "u")[0] == 0
+    assert helpers.run("start", "--root", root, "--name", "u")[0] == 0
+    assert helpers.run("mark-done", "--root", root, "--name", "u")[0] == 0
+    assert helpers.run("publish", "--root", root, "--name", "u")[0] == 0
     (project / "tests" / "t.py").write_text("def test_x():\n    pass\n")
-    code, out = helpers["_run"](  # type: ignore[operator]
+    code, out = helpers.run(
         *_rebind_args(project, root, "--pack-test-file", "tests/t.py")
     )
     assert code == 2
@@ -511,10 +572,10 @@ def test_rebound_history_is_durable_and_visible_in_every_reader_surface(
     from vouch_mk2.mcp import _call_tool
 
     helpers = _pack3_helpers()
-    project, root = helpers["_published_with_roles"](tmp_path)  # type: ignore[operator]
+    project, root = helpers.published_with_roles(tmp_path)
     reason = "adapt exact shared interface field"
     (project / "tests" / "t.py").write_text("def test_x():\n    assert True\n")
-    assert helpers["_rebind"](project, root, reason)[0] == 0  # type: ignore[operator]
+    assert helpers.rebind(project, root, reason)[0] == 0
     with Store.open(root, read_only=True) as store:
         unit = store.read_snapshot().unit("u")
         assert unit is not None
@@ -525,8 +586,8 @@ def test_rebound_history_is_durable_and_visible_in_every_reader_surface(
         assert rebound.old_test_set_digest != rebound.new_test_set_digest
         assert rebound.reason == reason
         assert rebound.evidence_head_sequence == 2
-    assert helpers["_run"]("generate", "--root", root)[0] == 0  # type: ignore[operator]
-    status_code, status = helpers["_run"]("status", "--root", root)[0:2]  # type: ignore[index,operator]
+    assert helpers.run("generate", "--root", root)[0] == 0
+    status_code, status = helpers.run("status", "--root", root)
     assert status_code == 0
     for value in (
         "rebound_pack_units: u@v1",
@@ -546,7 +607,7 @@ def test_rebound_history_is_durable_and_visible_in_every_reader_surface(
     assert reason in json.dumps(mapped)
     context = Path(root, "vouch-context.md").read_text()
     assert reason in context and rebound.old_inventory_digest in context
-    _, check = helpers["_run"]("check", "--root", root, "--project", str(project))  # type: ignore[operator]
+    _, check = helpers.run("check", "--root", root, "--project", str(project))
     assert "check.pack-bound" in check and reason in check
 
 
@@ -554,20 +615,20 @@ def test_reused_test_set_digest_needs_green_after_the_latest_rebound(
     tmp_path: Path,
 ) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_published_with_roles"](tmp_path)  # type: ignore[operator]
+    project, root = helpers.published_with_roles(tmp_path)
     original = (project / "tests" / "t.py").read_text()
     (project / "tests" / "t.py").write_text("def test_x():\n    assert True  # B\n")
-    assert helpers["_rebind"](project, root, "A to B")[0] == 0  # type: ignore[operator]
-    assert helpers["_evidence"](root, "u@v1", "green", helpers["OK"])[0] == 0  # type: ignore[operator]
+    assert helpers.rebind(project, root, "A to B")[0] == 0
+    assert helpers.evidence(root, "u@v1", "green", helpers.ok)[0] == 0
     (project / "tests" / "t.py").write_text(original)
-    assert helpers["_rebind"](project, root, "B back to A")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("generate", "--root", root)[0] == 0  # type: ignore[operator]
-    code, out = helpers["_run"]("check", "--root", root, "--project", str(project))  # type: ignore[operator]
+    assert helpers.rebind(project, root, "B back to A")[0] == 0
+    assert helpers.run("generate", "--root", root)[0] == 0
+    code, out = helpers.run("check", "--root", root, "--project", str(project))
     assert code == 1
     assert "check.evidence-chains" in out and "fresh GREEN" in out
-    assert helpers["_evidence"](root, "u@v1", "green", helpers["OK"])[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("generate", "--root", root)[0] == 0  # type: ignore[operator]
-    code, out = helpers["_run"]("check", "--root", root, "--project", str(project))  # type: ignore[operator]
+    assert helpers.evidence(root, "u@v1", "green", helpers.ok)[0] == 0
+    assert helpers.run("generate", "--root", root)[0] == 0
+    code, out = helpers.run("check", "--root", root, "--project", str(project))
     assert not any(
         "check.evidence-chains" in line and "FAIL" in line
         for line in out.splitlines()
@@ -578,11 +639,11 @@ def test_lightweight_rebound_still_requires_fresh_green_and_is_named(
     tmp_path: Path,
 ) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_published_with_roles"](tmp_path, "lightweight")  # type: ignore[operator]
+    project, root = helpers.published_with_roles(tmp_path, "lightweight")
     (project / "tests" / "t.py").write_text("def test_x():\n    assert True\n")
-    assert helpers["_rebind"](project, root, "lightweight adaptation")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("generate", "--root", root)[0] == 0  # type: ignore[operator]
-    code, out = helpers["_run"]("check", "--root", root, "--project", str(project))  # type: ignore[operator]
+    assert helpers.rebind(project, root, "lightweight adaptation")[0] == 0
+    assert helpers.run("generate", "--root", root)[0] == 0
+    code, out = helpers.run("check", "--root", root, "--project", str(project))
     assert code == 1
     assert any(
         "check.evidence-chains" in line and "FAIL" in line and "fresh GREEN" in line
@@ -600,17 +661,17 @@ def test_repeated_rebounds_keep_each_adaptation_green_legal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     helpers = _pack3_helpers()
-    project, root = helpers["_published_with_roles"](tmp_path)  # type: ignore[operator]
+    project, root = helpers.published_with_roles(tmp_path)
     for marker in ("B", "C"):
         (project / "tests" / "t.py").write_text(
             f"def test_x():\n    assert True  # {marker}\n"
         )
-        assert helpers["_rebind"](project, root, f"adapt {marker}")[0] == 0  # type: ignore[operator]
-        assert helpers["_evidence"](root, "u@v1", "green", helpers["OK"])[0] == 0  # type: ignore[operator]
+        assert helpers.rebind(project, root, f"adapt {marker}")[0] == 0
+        assert helpers.evidence(root, "u@v1", "green", helpers.ok)[0] == 0
     monkeypatch.setenv("GITHUB_RUN_ID", "fixture-run")
-    assert helpers["_run"]("advance-anchor", "--root", root, "--unit-name", "u")[0] == 0  # type: ignore[operator]
-    assert helpers["_run"]("generate", "--root", root)[0] == 0  # type: ignore[operator]
-    code, out = helpers["_run"]("check", "--root", root, "--project", str(project))  # type: ignore[operator]
+    assert helpers.run("advance-anchor", "--root", root, "--unit-name", "u")[0] == 0
+    assert helpers.run("generate", "--root", root)[0] == 0
+    code, out = helpers.run("check", "--root", root, "--project", str(project))
     assert code == 0, out
 
 

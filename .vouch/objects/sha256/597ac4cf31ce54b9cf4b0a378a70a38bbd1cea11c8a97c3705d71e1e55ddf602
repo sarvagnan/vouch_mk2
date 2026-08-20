@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"UnitRespecified","pack_digest":"","payload":{"gate":{"checks":[{"obligation_id":"gate.unblock.no-blocking-deviations","verdict":"pass"}],"transition":"invalidated->specified"},"name":"ci-trust-boundary"},"prev":"8b0997e1a7e130c353f65b2af3364fb259f4bdd1150052dfb724ff8c042d43f3","recorded_at":"2026-08-19T09:26:15+00:00","revision":476,"run_id":""}

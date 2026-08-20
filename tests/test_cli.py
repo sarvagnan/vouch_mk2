@@ -6,7 +6,7 @@ from pathlib import Path
 from pytest import CaptureFixture
 
 from vouch_mk2.checks import CheckReport, CheckResult
-from vouch_mk2.cli import _only_pending_anchor_is_not_checked, main
+from vouch_mk2.cli import main
 from vouch_mk2.core.model import (
     AnchorMode,
     CiPolicy,
@@ -31,7 +31,7 @@ from vouch_mk2.core import (
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 from vouch_mk2.store import Store
-from vouch_mk2.verify import record_evidence
+from vouch_mk2.verify import pending_anchor_is_only_unchecked, record_evidence
 from vouch_mk2.store.event_log import build_event_records, commit_events
 from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
@@ -58,7 +58,7 @@ def test_pending_anchor_tolerance_rejects_another_not_checked_row() -> None:
         ),
         organizational=(),
     )
-    assert not _only_pending_anchor_is_not_checked(report, Snapshot())
+    assert not pending_anchor_is_only_unchecked(report)
 
 
 def commit_drifted_snapshot(root: Path) -> None:

@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/pytest -q tests/test_event_log.py","evidence_format":2,"kind":"green","outcome":"tests-passed","pack_digest":"032540e6a6441186d6b86a27f626a885525196fde393ca45ef1b3757ff27d8dc","parent":"44ce968a17cd0d4ef2afa8036bb2a0a8562b4de9abe547961faa5da6cf4138aa","recorded_at":"2026-08-20T12:41:41+00:00","sequence":5,"unit":{"name":"event-log","version":"1"}}

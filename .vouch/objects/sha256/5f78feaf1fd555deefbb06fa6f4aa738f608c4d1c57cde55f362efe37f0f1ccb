@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q tests/test_ci_trust_boundary.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"4240a8a954413fa77cf1b83d93de6c8dc981eee1ece4799c1a227aea4a0e3718","parent":"GENESIS","recorded_at":"2026-08-19T07:53:13+00:00","sequence":1,"unit":{"name":"ci-trust-boundary","version":"1"}}

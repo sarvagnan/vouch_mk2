@@ -4,9 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vouch_mk2.core import Accepted, FreezeAcceptance, Snapshot, apply, decide
+from vouch_mk2.core import (
+    Accepted,
+    Deviation,
+    EvidenceHead,
+    FreezeAcceptance,
+    Release,
+    Snapshot,
+    Unit,
+    apply,
+    decide,
+)
 from vouch_mk2.formal.universe import Universe
 from vouch_mk2.ir import mk2
+from vouch_mk2.ir.schema import StateMachine
 
 type EmittedTransition = tuple[str, str, str, tuple[str, ...]]
 type EmittedAdjudication = tuple[
@@ -39,6 +50,26 @@ class StateLimitExceeded(Exception):
 _STATE_LIMIT = 400_000
 
 
+def _unit_name(unit: Unit) -> str:
+    return unit.name
+
+
+def _deviation_id(deviation: Deviation) -> str:
+    return deviation.deviation_id
+
+
+def _release_id(release: Release) -> str:
+    return release.release_id
+
+
+def _evidence_head_ref_key(head: EvidenceHead) -> tuple[str, str]:
+    return head.unit_name, head.unit_version
+
+
+def _machine_name(machine: StateMachine) -> str:
+    return machine.name
+
+
 def state_fingerprint(snapshot: Snapshot) -> str:
     """Return a deterministic fingerprint of all state except ``revision``."""
     units = tuple(
@@ -65,7 +96,7 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             unit.published_once,
             tuple(unit.depends_on),
         )
-        for unit in sorted(snapshot.units, key=lambda item: item.name)
+        for unit in sorted(snapshot.units, key=_unit_name)
     )
     deviations = tuple(
         (
@@ -79,7 +110,7 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             tuple(deviation.release_impact_set),
         )
         for deviation in sorted(
-            snapshot.deviations, key=lambda item: item.deviation_id
+            snapshot.deviations, key=_deviation_id
         )
     )
     releases = tuple(
@@ -107,7 +138,7 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             ),
             release.bundle_inventory_digest,
         )
-        for release in sorted(snapshot.releases, key=lambda item: item.release_id)
+        for release in sorted(snapshot.releases, key=_release_id)
     )
     heads = tuple(
         (
@@ -123,7 +154,7 @@ def state_fingerprint(snapshot: Snapshot) -> str:
         )
         for head in sorted(
             snapshot.evidence_heads,
-            key=lambda item: (item.unit_name, item.unit_version),
+            key=_evidence_head_ref_key,
         )
     )
     return repr(
@@ -198,7 +229,7 @@ def explore(universe: Universe) -> Relation:
 
 def emit_tables() -> EmittedTables:
     machines: list[EmittedMachine] = []
-    for machine in sorted(mk2.MK2.machines, key=lambda item: item.name):
+    for machine in sorted(mk2.MK2.machines, key=_machine_name):
         transitions: tuple[EmittedTransition, ...] = tuple(
             sorted(
                 (

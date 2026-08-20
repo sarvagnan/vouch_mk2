@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q tests/test_pending_anchor_locality.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"27ddf18b9999e50fb7206cec2b9744e5c812d0e18e6a6f83717683b3d22df870","parent":"GENESIS","recorded_at":"2026-08-19T07:53:14+00:00","sequence":1,"unit":{"name":"pending-anchor-locality","version":"1"}}

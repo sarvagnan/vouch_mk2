@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
-from vouch_mk2.core.model import Snapshot, UnitStatus
+from vouch_mk2.core.model import CiException, EvidenceHead, Snapshot, Unit, UnitStatus
 from vouch_mk2.projections.next_actions import NextAction
 
 
@@ -27,6 +27,18 @@ class StatusFacts:
     late_bound_pack_units: tuple[str, ...]
     rebound_pack_units: tuple[str, ...]
     pack_rebounds: tuple[str, ...]
+
+
+def _evidence_head_label(head: EvidenceHead) -> str:
+    return head.ref().label()
+
+
+def _ci_exception_unit_name(item: CiException) -> str:
+    return item.unit_name
+
+
+def _unit_label(unit: Unit) -> str:
+    return unit.ref().label()
 
 
 def _counts(values: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
@@ -53,7 +65,7 @@ def status_facts(
             (head.ref().label(), head.anchor_run_id)
             for head in sorted(
                 snapshot.evidence_heads,
-                key=lambda item: item.ref().label(),
+                key=_evidence_head_label,
             )
             if head.anchor_run_id
         ),
@@ -63,7 +75,7 @@ def status_facts(
         ci_exceptions=tuple(
             (item.unit_name, item.reason)
             for item in sorted(
-                snapshot.ci_exceptions, key=lambda row: row.unit_name
+                snapshot.ci_exceptions, key=_ci_exception_unit_name
             )
         ),
         formal_certificate_recorded=bool(snapshot.formal_certificate_digest),
@@ -101,7 +113,7 @@ def status_facts(
             f"new_test_set={rebound.new_test_set_digest} "
             f"evidence_head_sequence={rebound.evidence_head_sequence} "
             f"reason={rebound.reason!r}"
-            for unit in sorted(snapshot.units, key=lambda item: item.ref().label())
+            for unit in sorted(snapshot.units, key=_unit_label)
             for rebound in unit.rebound_history
         ),
     )

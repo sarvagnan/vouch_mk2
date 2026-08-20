@@ -182,16 +182,16 @@ def _regression_publication_provenance_survives_lifecycle_status_changes() -> No
         snapshot,
         OpenDeviation("d1", DeviationType.PACK_DEFECT, published.ref()),
     )
-    assert snapshot.unit("u") is not None
-    assert snapshot.unit("u").published_once  # type: ignore[union-attr]
+    current = snapshot.unit("u")
+    assert current is not None and current.published_once
     assert evidence_verdict(snapshot) is Verdict.FAIL
     snapshot = accepted(snapshot, RejectDeviation("d1"))
     snapshot = accepted(snapshot, CloseDeviation("d1"))
     snapshot = accepted(snapshot, BeginReverify("u"))
     assert evidence_verdict(snapshot) is Verdict.FAIL
     snapshot = accepted(snapshot, Supersede("u"))
-    assert snapshot.unit("u") is not None
-    assert snapshot.unit("u").published_once  # type: ignore[union-attr]
+    current = snapshot.unit("u")
+    assert current is not None and current.published_once
     assert evidence_verdict(snapshot) is Verdict.FAIL
 
 

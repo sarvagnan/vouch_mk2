@@ -43,6 +43,10 @@ class WitnessBuildError(Exception):
     """The invariant/witness registry is structurally invalid."""
 
 
+def _witness_id(witness: Witness) -> str:
+    return witness.witness_id
+
+
 def _with_representative(
     relation: Relation, snapshot: Snapshot
 ) -> tuple[Relation, str]:
@@ -517,7 +521,7 @@ def run_witness_harness(
     validate_witness_registry(witnesses, invariants)
     catalog = _catalog(invariants)
     verdicts: list[WitnessVerdict] = []
-    for witness in sorted(witnesses, key=lambda item: item.witness_id):
+    for witness in sorted(witnesses, key=_witness_id):
         mutated = witness.mutate(relation)
         # Discrimination = the witness's OWN invariant fails on the mutated
         # relation. Collateral failures of other invariants are permitted and

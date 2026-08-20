@@ -137,12 +137,13 @@ options:
   --tier {lightweight,standard,high}
                         initial assurance tier (default: lightweight)
   --lock LOCK_PATH      existing lock to vendor instead of building/copying the running code
-  --test-job TEST_JOB   GitHub Actions job id that must pass before anchoring; repeat for multiple
-                        project test jobs
+  --test-job TEST_JOB   GitHub Actions job id to place in the printed reusable-workflow caller
+                        gate; repeat for multiple project test jobs
   --actor ACTOR         recorded actor claim (default: OS user)
 
 Exit codes: 0 initialized; 2 refused with nothing written; 3 suggestion files
-written—review/replace them and rerun init.
+written—review/replace them and rerun init; 4 incomplete publication—complete remnants remain; fix
+the cause and retry init.
 ```
 
 ## mcp
@@ -195,6 +196,17 @@ options:
   --root ROOT    our store root directory
   --other OTHER  other store root directory
   --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
+```
+
+## merge-git-stages
+
+```text
+usage: vouch-mk2 merge-git-stages [-h] --root ROOT [--actor ACTOR]
+
+options:
+  -h, --help     show this help message and exit
+  --root ROOT    conflicted store root directory
   --actor ACTOR  recorded actor claim (default: OS user)
 ```
 
@@ -478,7 +490,7 @@ options:
 ## record-evidence
 
 ```text
-usage: vouch-mk2 record-evidence [-h] --root ROOT [--json] [--actor ACTOR] --unit NAME@VERSION --kind {red,green,refactor} -- <argv...>
+usage: vouch-mk2 record-evidence [-h] --root ROOT [--json] [--actor ACTOR] --unit NAME@VERSION --kind {red,green,refactor} [--redact-arg INDEX] -- <argv...>
 
 options:
   -h, --help            show this help message and exit
@@ -487,6 +499,8 @@ options:
   --actor ACTOR         recorded actor claim (default: OS user)
   --unit NAME@VERSION
   --kind {red,green,refactor}
+  --redact-arg INDEX    store <redacted> for this zero-based child argv position (repeatable;
+                        argv[0] cannot be redacted)
 
 the recorded outcome is the exit status of a process this verb spawned.
 ```
