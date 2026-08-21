@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"ci-test-hermeticity@1","reason":"Frozen pack implemented and locally green; owner verification and publication are in progress."},"prev":"3f257fb92f9e50f72edb6e8d97b0fbfbfacddafabd8086c1a779c0dd6311cdf8","recorded_at":"2026-08-21T09:18:47+00:00","revision":616,"run_id":""}

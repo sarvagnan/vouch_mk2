@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/pytest -q tests/test_ci_test_hermeticity.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"1c7508860c9c2ab0c4cb4383f9cfc5bdc964d351a8593f4a4b158d89a6d4dbb3","parent":"GENESIS","recorded_at":"2026-08-21T07:42:49+00:00","sequence":1,"unit":{"name":"ci-test-hermeticity","version":"1"}}

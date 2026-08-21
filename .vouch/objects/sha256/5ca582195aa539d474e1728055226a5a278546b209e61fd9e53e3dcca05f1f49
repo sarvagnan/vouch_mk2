@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/pytest -q tests/test_ci_action_node24.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"4d7ade13de5fb7e9fad0ed5195a63d4bb901ee2c4a052b21f874f98d1d753861","parent":"GENESIS","recorded_at":"2026-08-21T07:42:56+00:00","sequence":1,"unit":{"name":"ci-action-node24","version":"1"}}

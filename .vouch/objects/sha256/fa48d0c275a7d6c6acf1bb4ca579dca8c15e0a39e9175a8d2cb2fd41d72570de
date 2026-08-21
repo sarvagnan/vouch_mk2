@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/ci-test-hermeticity-1.spec.md","role":"spec","sha256":"d29e59cc869b2424d79d637a47484f05df44b5fa4ccf2511668c10145d348153","size":2245},{"path":"tests/test_ci_test_hermeticity.py","role":"test","sha256":"443a2c65c288d9b964d670dfc2661b9c2f65706fc587356be269807bc413db11","size":2117}],"pack_format":2}

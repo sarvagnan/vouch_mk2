@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/ci-action-node24-1.spec.md","role":"spec","sha256":"39db7e6ff9e938de6b6088905b7ce124fb0d9f85238a9d893f5c6d085c2bdf8e","size":2874},{"path":"tests/test_ci_action_node24.py","role":"test","sha256":"6948204277c13272612abb4585a3a658d8a0432607acb589e79ac4e4e8eec6b0","size":2534}],"pack_format":2}

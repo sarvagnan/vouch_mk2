@@ -917,3 +917,37 @@ internally, but no generic adapter contract is added merely in anticipation.
 `git-merge-recovery@1`, `release@1`, `adoption-docs@1`, then the already-open real GitHub
 adoption probe. Each is its own D-11 unit and is published before the next pack is frozen. A
 second provider adapter is outside this batch.
+
+## D-22 — CI simulations are hermetic; shipped GitHub actions use Node 24 (2026-08-21)
+
+**Status:** decided 2026-08-21 (user: repair the CI failure and its Node 20 warnings together).
+
+- **Simulated locality is explicit.** A repository test that claims to exercise a local anchor
+  clears every CI-provider run-identity variable recognized by Vouch before it invokes the public
+  CLI. Production `ci_run_id()` and `advance-anchor` behavior do not change: when a real CI run
+  identity is present, recording it remains the intended D-18 claim. Tests that intentionally
+  exercise a CI-observed anchor continue to set an explicit synthetic run identity.
+- **Both workflow surfaces move together.** The generated adopter workflow and mk2's checked-in
+  dogfood workflow use reviewed, full-commit action identities. Updating only mk2's instance would
+  violate D-19's standing generated-artifact rule; updating only the generator would leave the
+  dogfood path on a deprecated runtime.
+- **Node 24 action set.** The reviewed identities are
+  `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1` (v7.0.1),
+  `astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9` (v9.0.0),
+  `actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` (v7.0.1), and
+  `actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` (v8.0.1).
+  Their published manifests declare `node24`. The existing
+  `actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1` (v6) identity already
+  declares `node24` and stays pinned.
+- **No silent cache-policy change.** setup-uv v9 changed the default for `prune-cache` from true to
+  false. mk2 records `prune-cache: true` explicitly so this dependency refresh does not alter the
+  existing cache-retention choice.
+- **Compatibility boundary.** The generated adapter remains GitHub-hosted (`ubuntu-latest`) and
+  therefore has a Node-24-capable runner. A future self-hosted-runner option must require Actions
+  Runner 2.327.1 or newer; this repair does not add that option or a second CI adapter.
+
+The repair is split into `ci-test-hermeticity@1` and `ci-action-node24@1`: one preserves the
+meaning of the run-identity claim while making the test harness deterministic, and the other owns
+the externally executed workflow dependencies. Local acceptance proves the exact workflow bytes
+and synthetic-environment behavior; a real GitHub run remains the final check that the warning is
+absent and the candidate transport still works.

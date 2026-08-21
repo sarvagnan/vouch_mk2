@@ -220,7 +220,8 @@ def test_generated_workflow_parses_as_yaml_with_the_intended_shape() -> None:
     """Real parse, not the structural floor above. `pyyaml` is a DEV dependency only —
     the vendored lock stays dependency-free — so CI validates the fragment it hands adopters
     with an actual parser. Pinned action SHAs were verified against the GitHub API on
-    2026-08-18: actions/checkout@11d5960a… is the v4 tag, actions/setup-python@ece7cb06… is v6.
+    2026-08-21: actions/checkout@3d3c42e5… is v7.0.1 and
+    actions/setup-python@ece7cb06… is v6; both manifests declare Node 24.
     """
     import yaml
 

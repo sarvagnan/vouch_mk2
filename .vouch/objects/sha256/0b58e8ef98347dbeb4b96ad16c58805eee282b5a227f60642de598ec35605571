@@ -1,0 +1,1 @@
+{"actor":"sarvagnan","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"ci-action-node24@1","reason":"Frozen pack implemented and locally green; awaiting the required GitHub-hosted Node 24 and candidate-transport closure run."},"prev":"88586199023446244c949f3b0c9ac6716266c53a7ee0badc24c1eb6c8a178c26","recorded_at":"2026-08-21T09:18:47+00:00","revision":617,"run_id":""}
