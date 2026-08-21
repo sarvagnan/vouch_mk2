@@ -975,3 +975,35 @@ closing D-22.
 
 The repair is `projection-anchor-ordering@1`, a separate D-11 unit discovered during final
 verification of the two D-22 units.
+
+## D-24 — A real-project pilot gates the first release (2026-08-21)
+
+**Status:** decided 2026-08-21 (user: release remains paused until Vouch has governed a real
+product change outside Vouch itself).
+
+- **Corrected order.** The first-release path is `GitHub technical adoption probe` →
+  `real-project pilot` → `release@1` → `adoption-docs@1`. This supersedes D-21's closing order,
+  which placed the GitHub probe after release and documentation, and resolves its conflict with
+  D-20's requirement that the probe precede B4/B5.
+- **The probe is necessary but not adoption.** `vouch_mk2-b6g.9` exercises the exact generated
+  workflow in a scratch GitHub repository: project-test gating, first-run GENESIS anchoring,
+  pull-request privilege separation, scoped publication, stale/concurrent refusal, and an
+  idempotent rerun. Passing it validates the delivery adapter's real forge behavior; it does not
+  show that a project has used Vouch to deliver product behavior.
+- **The pilot is a real governed change.** Reactivated `vouch_mk2-bd4.4` requires a project that
+  is not Vouch itself to complete at least one genuine product change through specify, frozen
+  acceptance, red/green evidence, done, CI anchoring, and publication. Merely installing Vouch,
+  initializing a store, or running the scratch probe does not satisfy the pilot. The pilot records
+  operator friction, recovery experience, the standing stop-rule result, and an explicit release
+  go/no-go decision. Any Vouch behavior change discovered by the pilot becomes its own frozen D-11
+  unit rather than silently expanding the pilot.
+- **Bootstrap without circularity.** Because `release@1` is deliberately gated by the pilot, the
+  probe and pilot use a reproducibly built `vouch.lock` tied to an exact reviewed source revision
+  and recorded digest. They do not require a release artifact whose production they are meant to
+  authorize. `release@1` begins only after the pilot records a go decision.
+- **The 0.6 half remains withdrawn.** No real 0.6 ledger ever existed, so D-8's addendum still
+  governs migration: synthetic refusal/round-trip fixtures remain the available evidence, and a
+  real 0.6 migration is revisited only if such a ledger independently appears. It is not part of
+  `bd4.4` or a first-release prerequisite.
+
+The GitHub-first scope from D-21 is unchanged; a second delivery adapter remains parked.
