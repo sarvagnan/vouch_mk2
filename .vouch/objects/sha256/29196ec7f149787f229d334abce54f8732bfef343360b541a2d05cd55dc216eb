@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/projection-anchor-ordering-1.spec.md","role":"spec","sha256":"1e69acac4fac0e3db71ef3a934d72c53a576e91cb94bf10efa856be933049c5f","size":1866},{"path":"tests/test_projection_anchor_ordering.py","role":"test","sha256":"9ad05d068d248928dd001acdef88695340a2a15ffcbce367ede0c5f61529383d","size":2532}],"pack_format":2}

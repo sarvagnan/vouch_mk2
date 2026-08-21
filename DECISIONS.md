@@ -951,3 +951,27 @@ meaning of the run-identity claim while making the test harness deterministic, a
 the externally executed workflow dependencies. Local acceptance proves the exact workflow bytes
 and synthetic-environment behavior; a real GitHub run remains the final check that the warning is
 absent and the candidate transport still works.
+
+## D-23 — Projection anchor claims follow the authoritative unit-ref order (2026-08-21)
+
+**Status:** decided 2026-08-21 after GitHub Actions run `32468660968` exposed the defect while
+closing D-22.
+
+- **One canonical identity order.** Evidence heads and every projection derived from them use the
+  core's existing `(unit_name, unit_version)` order. A rendered `name@version` label is
+  presentation, not an alternative ordering key: lexicographic label order disagrees when one
+  name is a prefix of another, such as `ci-anchor` and `ci-anchor-closure`.
+- **Strict projection integrity remains.** `map.status_facts.anchor_run_claims` must still equal
+  the map's evidence-head claims exactly and canonically. The decoder does not become
+  order-insensitive and does not repair malformed artifacts; generation emits the one accepted
+  order and tampered claims remain refused.
+- **Narrow repair.** Align the status-facts projection with the already-authoritative evidence-head
+  order. Do not change evidence events, anchor semantics, the generated workflow, or the external
+  meaning of a run-ID claim.
+- **External closure.** Local round-trip acceptance is necessary but not sufficient. The same
+  GitHub candidate-planning path that found the defect must advance the pending heads, validate and
+  transfer the candidate, and complete the write-only publisher before D-22 and this repair can be
+  published.
+
+The repair is `projection-anchor-ordering@1`, a separate D-11 unit discovered during final
+verification of the two D-22 units.

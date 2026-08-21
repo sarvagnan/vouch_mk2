@@ -29,8 +29,8 @@ class StatusFacts:
     pack_rebounds: tuple[str, ...]
 
 
-def _evidence_head_label(head: EvidenceHead) -> str:
-    return head.ref().label()
+def _evidence_head_ref_key(head: EvidenceHead) -> tuple[str, str]:
+    return head.unit_name, head.unit_version
 
 
 def _ci_exception_unit_name(item: CiException) -> str:
@@ -65,7 +65,7 @@ def status_facts(
             (head.ref().label(), head.anchor_run_id)
             for head in sorted(
                 snapshot.evidence_heads,
-                key=_evidence_head_label,
+                key=_evidence_head_ref_key,
             )
             if head.anchor_run_id
         ),
