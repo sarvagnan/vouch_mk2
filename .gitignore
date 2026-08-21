@@ -13,5 +13,8 @@ dist/
 .beads/proxieddb/
 *.gate.lock*
 
+# Retired local recovery snapshot; its tracked duplicate shell was removed.
+.beads.backup-pre-recovery/
+
 # The dogfood store (D-10) IS committed; only its runtime lock file is not.
 .vouch/.lock
