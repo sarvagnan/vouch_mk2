@@ -1007,3 +1007,32 @@ product change outside Vouch itself).
   `bd4.4` or a first-release prerequisite.
 
 The GitHub-first scope from D-21 is unchanged; a second delivery adapter remains parked.
+
+## D-25 — Semantic merge replays open-in-CI exceptions by exact unit reference (2026-10-13)
+
+**Status:** decided 2026-10-13 (user: Vouch defects found by the activity_tracker_portal pilot are
+fixed in Vouch, as their own frozen units, before the pilot works around them).
+
+- **The finding.** The first divergent `.vouch` merge in the pilot (`bd4.4`) was refused:
+  `event OpenInCiMarked name='operational-store@1' … was refused by decide(): unit.unknown`. Since
+  the exact-reference fix, `OpenInCiMarked` and `OpenInCiCleared` record a `NAME@VERSION` label,
+  but semantic merge recovers their commands by passing that label as the bare unit name. Every
+  divergent merge in which the incoming branch marked or cleared a strict-CI exception is
+  therefore refused, by both `merge --other` and `merge-git-stages`.
+- **Replay by name, then require the same reference.** The recovered command resolves the unit
+  name parsed from the recorded label. The replay is accepted only when the decision's event
+  carries exactly the recorded label. If the current unit with that name now has another version
+  (the incoming exception was recorded for `X@1` and ours has superseded it with `X@2`), the merge
+  is refused as `merge.conflict`, naming both references. An exception is never silently
+  transferred to another version, and nothing is written.
+- **Narrow repair.** Do not change the event encoding, the `CiException` field, the strict CI
+  policy, `decide()` for these commands, or how other events are replayed. A bare name from the
+  short-lived pre-fix encoder cannot match an exact reference, so replaying one is refused as
+  `merge.conflict`. Such events exist only in history that predates the fix (none in mk2's own
+  store), so a merge never needs to replay one.
+- **Observation, not decided here.** Lifecycle events such as `UnitMarkedReady` record a bare
+  name, so their replay targets whichever version is current. Whether replay should also refuse
+  when the current version differs from the source branch's is a separate question
+  (`vouch_mk2-bd4.4` follow-up), not part of this unit.
+
+The repair is `merge-open-in-ci-replay@1`, the first D-11 unit discovered by the D-24 pilot.

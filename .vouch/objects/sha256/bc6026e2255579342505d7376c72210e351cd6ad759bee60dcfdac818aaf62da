@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"merge-open-in-ci-replay@1","reason":"D-25 pilot fix: frozen pack RED recorded; implementation in progress."},"prev":"97f684937a84b3e8e777bfc85e889539ae9b6c060efaf01e904ed689bc612530","recorded_at":"2026-10-12T20:26:06+00:00","revision":670,"run_id":""}

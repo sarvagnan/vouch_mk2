@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/python -m pytest -q tests/test_merge_open_in_ci_replay.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"b69181bc6e86335cd798123e91f11caa081fb74d9e6f2cbda658935ab407b66d","parent":"GENESIS","recorded_at":"2026-10-12T20:26:09+00:00","sequence":1,"unit":{"name":"merge-open-in-ci-replay","version":"1"}}
