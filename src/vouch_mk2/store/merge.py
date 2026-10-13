@@ -210,9 +210,9 @@ def _command_for_event(
         case events.CiPolicySet(policy=policy):
             return commands.SetCiPolicy(policy)
         case events.OpenInCiMarked(name=name, reason=reason):
-            return commands.MarkOpenInCi(name, reason)
+            return commands.MarkOpenInCi(name.split("@", 1)[0], reason)
         case events.OpenInCiCleared(name=name):
-            return commands.ClearOpenInCi(name)
+            return commands.ClearOpenInCi(name.split("@", 1)[0])
         case events.FormalCertificateRecorded(certificate_digest=digest):
             return commands.RecordFormalCertificate(digest)
         case events.MergeRecorded(ours_head=ours_head, theirs_head=theirs_head):
@@ -581,6 +581,23 @@ def merge_store_roots(
                 decision = decide(current, command)
                 if isinstance(decision, Refused):
                     return _conflict(item, decision)
+                source_event = item.record.folded_event
+                if isinstance(source_event, (events.OpenInCiMarked, events.OpenInCiCleared)):
+                    replayed_event = decision.events[0]
+                    if (
+                        not isinstance(replayed_event, (events.OpenInCiMarked, events.OpenInCiCleared))
+                        or replayed_event.name != source_event.name
+                    ):
+                        return Refused(
+                            violations=(
+                                Violation(
+                                    "merge.conflict",
+                                    f"event {_event_label(source_event)} from revision "
+                                    f"{item.record.revision} would replay as "
+                                    f"{_event_label(replayed_event)} instead of the recorded exact reference",
+                                ),
+                            )
+                        )
                 current = apply(current, decision.events)
                 replayed_events.extend(decision.events)
                 index += batch_length
