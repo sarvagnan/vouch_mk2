@@ -117,6 +117,9 @@ def _event_payload(event: Event) -> dict[str, object]:
 
 def encode_event_record(record: EventRecord) -> bytes:
     """Encode a new canonical event record using current payload formats."""
+    event = record.folded_event
+    if isinstance(event, event_module.AnchorAdvanced) and event.unit_version == "":
+        raise StoreError("an AnchorAdvanced record must name its resolved unit_version")
     return _canonical_json(
         {
             "actor": record.actor,
@@ -995,7 +998,18 @@ def _decode_event_value(value: object, annotation: object, path: str) -> object:
     if isinstance(annotation, type) and is_dataclass(annotation):
         annotations = get_type_hints(annotation)
         names = frozenset(field.name for field in fields(annotation))
-        obj = _fields(value, path, names)
+        if annotation is event_module.AnchorAdvanced:
+            # Only the pre-unit shape may omit the version. An explicit empty
+            # version is neither a legacy record nor an exact reference.
+            obj = _fields(
+                value, path, names - {"unit_version"}, frozenset({"unit_version"})
+            )
+            if "unit_version" not in obj:
+                obj = {**obj, "unit_version": ""}
+            elif _string(obj["unit_version"], _child(path, "unit_version")) == "":
+                raise DecodeError(f"{_child(path, 'unit_version')}: must be non-empty")
+        else:
+            obj = _fields(value, path, names)
         return annotation(
             **{
                 field.name: _decode_event_value(

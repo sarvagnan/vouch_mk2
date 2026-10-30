@@ -244,6 +244,7 @@ options:
 
 ```text
 usage: vouch-mk2 advance-anchor [-h] --root ROOT [--json] [--actor ACTOR] --unit-name UNIT_NAME
+                                [--unit-version UNIT_VERSION]
 
 options:
   -h, --help            show this help message and exit
@@ -251,6 +252,7 @@ options:
   --json                emit one JSON result instead of text
   --actor ACTOR         recorded actor claim (default: OS user)
   --unit-name UNIT_NAME
+  --unit-version UNIT_VERSION
 ```
 
 ## begin-reverify

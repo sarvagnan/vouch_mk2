@@ -223,8 +223,12 @@ workflow; Vouch records that caller-asserted value but does not verify it:
 ```sh
 python3 vouch.lock set-tier --root .vouch --tier standard
 python3 vouch.lock set-anchor-mode --root .vouch --mode ci
-GITHUB_RUN_ID=123456 python3 vouch.lock advance-anchor --root .vouch --unit-name greeter
+GITHUB_RUN_ID=123456 python3 vouch.lock advance-anchor --root .vouch --unit-name greeter --unit-version v1
 ```
+
+Use `--unit-version` to claim an exact reference; omitting it selects the current version.
+CI claims every unclaimed head by name and version, including a superseded version's head
+after a rebind.
 
 Consequently, in anchor mode `ci`, no project can compose `PASS` until a real CI run advances
 its current evidence anchor. Before that first run, even a local `advance-anchor` leaves

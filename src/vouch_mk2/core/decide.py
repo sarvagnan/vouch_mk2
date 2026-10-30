@@ -1128,18 +1128,26 @@ def _decide_record_evidence(
 
 
 def _decide_advance_anchor(snapshot: Snapshot, command: AdvanceAnchor) -> Decision:
-    head = snapshot.evidence_head(command.unit_name)
+    ref = UnitRef(command.unit_name, command.unit_version)
+    head = (
+        snapshot.evidence_head_ref(ref)
+        if command.unit_version
+        else snapshot.evidence_head(command.unit_name)
+    )
+    subject = ref.label() if command.unit_version else command.unit_name
     if head is None:
         return _refuse(
             "evidence.no-chain",
-            f"unit {command.unit_name!r} has no evidence chain",
+            f"unit {subject!r} has no evidence chain",
         )
     if head.anchored == head.head and not command.run_id:
         return _refuse(
             "evidence.anchor-current",
-            f"unit {command.unit_name!r} anchor is already current",
+            f"unit {subject!r} anchor is already current",
         )
-    return Accepted(events=(AnchorAdvanced(command.unit_name),))
+    return Accepted(
+        events=(AnchorAdvanced(unit_name=head.unit_name, unit_version=head.unit_version),)
+    )
 
 
 def _decide_set_anchor_mode(command: SetAnchorMode) -> Decision:
@@ -1825,10 +1833,16 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                 anchor_run_id="" if prior is None else prior.anchor_run_id,
             )
             evidence_heads = _with_evidence_head(evidence_heads, changed)
-        case AnchorAdvanced(unit_name=unit_name):
-            head = snapshot.evidence_head(unit_name)
+        case AnchorAdvanced(unit_name=unit_name, unit_version=unit_version):
+            ref = UnitRef(unit_name, unit_version)
+            head = (
+                snapshot.evidence_head_ref(ref)
+                if unit_version
+                else snapshot.evidence_head(unit_name)
+            )
             if head is None:
-                raise LookupError(f"event references unknown evidence head {unit_name!r}")
+                subject = ref.label() if unit_version else unit_name
+                raise LookupError(f"event references unknown evidence head {subject!r}")
             # Promotion-only by construction: the fold derives the target from
             # the head itself (D-4).
             evidence_heads = _with_evidence_head(

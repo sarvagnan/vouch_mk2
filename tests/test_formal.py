@@ -76,8 +76,8 @@ def test_history_v1_closes_exhaustively_with_stable_counts(
 ) -> None:
     history = formal_run.universe(HISTORY_V1.name)
     assert history.universe_name == HISTORY_V1.name == "history-v1"
-    assert history.state_count == 31_416
-    assert history.transition_count == 94_280
+    assert history.state_count == 62_832
+    assert history.transition_count == 219_976
     assert len(set(history.relation.states)) == history.state_count
     assert len(set(history.relation.transitions)) == history.transition_count
     assert all(verdict.held for verdict in history.invariants)

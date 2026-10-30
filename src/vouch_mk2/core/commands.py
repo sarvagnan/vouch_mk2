@@ -7,7 +7,7 @@ machine, so legality lives in the tables, not in code.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 from vouch_mk2.core.model import (
@@ -169,6 +169,7 @@ class AdvanceAnchor:
     ir_command: ClassVar[str] = mk2.CMD_ADVANCE_ANCHOR
     unit_name: str
     run_id: str = ""
+    unit_version: str = field(default="", kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)

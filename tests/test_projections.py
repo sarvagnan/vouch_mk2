@@ -481,9 +481,9 @@ def test_stagnant_ci_anchor_emits_advance_and_none_mode_does_not() -> None:
     head = EvidenceHead("u", "a" * 64, 1, "GENESIS", "v1")
     units = (Unit("u", "v1", UnitStatus.SPECIFIED),)
     ci = Snapshot(units=units, evidence_heads=(head,), anchor_mode=AnchorMode.CI)
-    assert _commands(ci, "evidence", "u") == {mk2.CMD_ADVANCE_ANCHOR}
+    assert _commands(ci, "evidence", "u@v1") == {mk2.CMD_ADVANCE_ANCHOR}
     none = Snapshot(units=units, evidence_heads=(head,), anchor_mode=AnchorMode.NONE)
-    assert _commands(none, "evidence", "u") == set()
+    assert _commands(none, "evidence", "u@v1") == set()
 
 
 def test_publish_next_action_is_suppressed_until_current_pack_is_green() -> None:
@@ -581,7 +581,8 @@ def test_every_emitted_reachable_action_names_a_legal_ir_edge() -> None:
                     for edge in machine.command_transitions
                 )
             elif action.subject_kind == "evidence":
-                head = snapshot.evidence_head(action.subject_id)
+                name, _, version = action.subject_id.rpartition("@")
+                head = snapshot.evidence_head_ref(UnitRef(name, version))
                 assert action.command == mk2.CMD_ADVANCE_ANCHOR
                 assert head is not None and head.anchored != head.head
             else:

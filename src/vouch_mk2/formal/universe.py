@@ -8,8 +8,9 @@ is a coverage decision, not a fix.
 # - core-v1 264,462/1,381,350: evidence.no-pack removes the previously accepted
 #   RecordEvidence edges before freeze and after respecify clears the pack. No
 #   command was dropped; the smaller relation is the new D-17 refusal surface.
-# - history-v1 31,416/94,280: restored u's seeded-history respecify loop with
-#   fresh p3 (p2 is already current) while retaining pack-binding@1 coverage.
+# - history-v1 62,832/219,976: D-26 seeds u@v1's unanchored head and offers
+#   its exact-reference advance. Each prior state has anchored/unanchored
+#   variants; prior edges double and 31,416 promotion edges connect them.
 # - tier-v1 294/2,024: D-18 adds both CI-policy values plus the valid
 #   mark/clear exception cycle. The whitespace-reason and missing-exception
 #   commands remain in the universe to cover their refusal paths; accepted
@@ -34,6 +35,7 @@ from vouch_mk2.core import (
     DeviationType,
     CiPolicy,
     EvidenceEvent,
+    EvidenceHead,
     EvidenceKind,
     EvidenceOutcome,
     FreezeAcceptance,
@@ -178,6 +180,15 @@ CORE_V1 = Universe(
 # decide() command.  Migration can produce it, so it is a first-class formal
 # start state until amendment-driven re-versioning exists.
 HISTORY_V1_INITIAL = Snapshot(
+    evidence_heads=(
+        EvidenceHead(
+            unit_name="u",
+            unit_version="v1",
+            head=_FIRST_DIGEST,
+            head_sequence=1,
+            anchored="GENESIS",
+        ),
+    ),
     units=(
         Unit(
             name="u",
@@ -223,6 +234,7 @@ _HISTORY_CRITERIA = LaunchCriteria(
 HISTORY_V1 = Universe(
     name="history-v1",
     commands=(
+        AdvanceAnchor(unit_name="u", unit_version="v1"),
         # Current u lifecycle from the seeded published record.
         FreezeAcceptance(name="u", pack_version="p2"),
         FreezeAcceptance(name="u", pack_version="p3"),

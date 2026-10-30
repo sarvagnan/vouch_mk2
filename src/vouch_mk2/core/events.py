@@ -5,7 +5,7 @@ without a gate record is unrepresentable)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from vouch_mk2.core.model import (
     AnchorMode,
@@ -214,9 +214,11 @@ class AnchorAdvanced:
 
     Deliberately payload-free (D-4): the target is derived from the head at
     fold time, so an arbitrary-rotation event is unrepresentable at the event
-    layer too, not just refused by decide()."""
+    layer too, not just refused by decide(). An empty version is the legacy
+    name-only shape and resolves the version current at that point in replay."""
 
     unit_name: str
+    unit_version: str = field(default="", kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)

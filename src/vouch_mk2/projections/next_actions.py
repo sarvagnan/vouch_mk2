@@ -269,14 +269,11 @@ def next_actions(snapshot: Snapshot) -> tuple[NextAction, ...]:
             pass
         case AnchorMode.CI:
             for head in snapshot.evidence_heads:
-                if (
-                    snapshot.evidence_head(head.unit_name) == head
-                    and head.anchored != head.head
-                ):
+                if head.anchored != head.head:
                     actions.append(
                         NextAction(
                             "evidence",
-                            head.unit_name,
+                            head.ref().label(),
                             mk2.CMD_ADVANCE_ANCHOR,
                             "Advance the CI anchor to the current evidence head.",
                         )

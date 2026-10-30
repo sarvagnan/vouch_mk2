@@ -960,9 +960,13 @@ def test_every_reflected_invocation_parses_with_the_real_parser_once_placeholder
         subject_field = next((f for f in ("name", "unit_name", "release_id", "deviation_id") if f in names), None)
         if subject_field is None:
             continue
-        line = invocation_for(NextAction(subject_kind_for[subject_field], "core", cls.ir_command, "why"), "/tmp/r").split("  # ")[0]
+        subject_id = "core@v1" if subject_field == "unit_name" else "core"
+        line = invocation_for(NextAction(subject_kind_for[subject_field], subject_id, cls.ir_command, "why"), "/tmp/r").split("  # ")[0]
         argv = [fillers.get(token, token) for token in shlex.split(line)]
         assert argv[0] == "vouch-mk2"
-        parser.parse_args(argv[1:])  # raises SystemExit(2) on an unknown/missing option
+        parsed = parser.parse_args(argv[1:])  # raises SystemExit(2) on an unknown/missing option
+        if subject_field == "unit_name":
+            assert parsed.unit_name == "core"
+            assert parsed.unit_version == "v1"
         checked += 1
     assert checked >= 20

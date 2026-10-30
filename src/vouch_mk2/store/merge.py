@@ -201,8 +201,8 @@ def _command_for_event(
             return commands.BindBundle(release_id, digest)
         case events.EvidenceRecorded(event=evidence, event_digest=digest):
             return commands.RecordEvidence(evidence, digest)
-        case events.AnchorAdvanced(unit_name=name):
-            return commands.AdvanceAnchor(name, run_id)
+        case events.AnchorAdvanced(unit_name=name, unit_version=version):
+            return commands.AdvanceAnchor(name, run_id, unit_version=version)
         case events.AnchorModeSet(mode=mode):
             return commands.SetAnchorMode(mode)
         case events.TierSet(tier=tier):

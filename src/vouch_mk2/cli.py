@@ -664,6 +664,12 @@ def _command_kwargs(
             )
             continue
         value = getattr(namespace, field.name)
+        if (
+            command_type is command_module.AdvanceAnchor
+            and field.name == "unit_version"
+            and value is None
+        ):
+            value = ""
         if _is_string_tuple(annotation):
             value = _deduplicated(value)
         elif isinstance(annotation, type) and issubclass(annotation, Enum):
@@ -747,11 +753,14 @@ def _accepted_text(command: Command, snapshot: Snapshot) -> str:
         release = snapshot.release(release_id)
         if release is not None:
             return f"release {release_id}: {release.state.value}"
-    unit_name = getattr(command, "unit_name", None)
-    if isinstance(unit_name, str):
-        head = snapshot.evidence_head(unit_name)
+    if isinstance(command, command_module.AdvanceAnchor):
+        head = (
+            snapshot.evidence_head_ref(UnitRef(command.unit_name, command.unit_version))
+            if command.unit_version
+            else snapshot.evidence_head(command.unit_name)
+        )
         if head is not None:
-            return f"{unit_name}: anchor {head.anchored[:16]}"
+            return f"{head.ref().label()}: anchor {head.anchored[:16]}"
     tier = getattr(command, "tier", None)
     if isinstance(tier, Enum):
         return f"tier: {tier.value}"
@@ -1283,6 +1292,10 @@ def _structured_invocation(
         subject_flag,
         action.subject_id,
     ]
+    if action.subject_kind == "evidence":
+        ref = _unit_ref(action.subject_id)
+        argv[-1] = ref.name
+        argv.extend(("--unit-version", ref.version))
     placeholders: list[str] = []
     placeholder_indexes: set[int] = set()
     annotations = get_type_hints(command_type)
