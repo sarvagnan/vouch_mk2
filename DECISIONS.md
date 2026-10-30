@@ -1036,3 +1036,110 @@ fixed in Vouch, as their own frozen units, before the pilot works around them).
   (`vouch_mk2-bd4.4` follow-up), not part of this unit.
 
 The repair is `merge-open-in-ci-replay@1`, the first D-11 unit discovered by the D-24 pilot.
+
+## D-26 — Anchor advances name the exact unit reference (2026-10-30)
+
+**Status:** decided 2026-10-30 by the user (Operator), after pilot finding 4
+(`vouch_mk2-bd4.4.7`): the design below was chosen by the user; it is recorded here, not re-asked.
+
+- **The finding.** The activity_tracker_portal pilot rebound the published
+  `manage-sender-enrollment@1` (`rebind-pack` plus a fresh GREEN), then specified, froze and
+  GREENed its successor `manage-sender-enrollment@2`, and merged both in one step. Main's store
+  then held two evidence heads named `manage-sender-enrollment`, both without a run claim:
+  version 1 at head 5 and version 2 at head 2. The generated CI anchor step loops over unclaimed
+  heads by `unit_name` and runs `advance-anchor --unit-name <name>`. `AdvanceAnchor` and
+  `AnchorAdvanced` carry only the name, and both `_decide_advance_anchor` and the fold resolve
+  `snapshot.evidence_head(unit_name)`, the CURRENT version's head. Both iterations claimed
+  version 2; version 1's head could never be claimed; `check.evidence-anchors` stayed
+  `NOT-CHECKED` ("anchor has no workflow run claim"), composed `NOT-CHECKED`, and the anchor
+  plan job exited 1 without committing (Project CI run 41036402336). Nothing on the pilot's
+  main could be anchored, so nothing could reach acceptance.
+- **Advances name the reference.** `AdvanceAnchor` and `AnchorAdvanced` name the unit
+  reference: `unit_name` and `unit_version`. The decision and the fold resolve the head by
+  reference (`Snapshot.evidence_head_ref`), so a superseded version's head can be claimed. The
+  `advance-anchor` verb gains an optional `--unit-version`; without it the command means the
+  version that is current for that name, exactly as before, so every existing caller and every
+  existing store behaves as it did. The event an accepted advance records always carries the
+  resolved exact version. D-4 is untouched: the event still carries no target; the fold still
+  derives the anchored digest from the named head.
+- **The generated CI step claims each head.** The anchor step emits `(unit_name, unit_version)`
+  for every head without a run claim and runs `advance-anchor --unit-name NAME --unit-version
+  VERSION` for each pair. mk2's own `ci.yml` does the same.
+- **Stores keep replaying; no invented state.** An `AnchorAdvanced` record written before this
+  unit has no `unit_version`. The decoder accepts that shape and the fold keeps its recorded
+  meaning: the version current for that name at that point of the replay, which is the version
+  that was current when it was recorded. The event log is content-addressed and is never
+  rewritten; the snapshot format does not change (`EvidenceHead` already carries
+  `unit_version`). A record that carries an empty `unit_version` is refused by the decoder: no
+  encoder of this unit writes one, so it cannot be legacy and cannot be exact.
+- **Everything that names the advance follows.** Semantic merge recovers `AdvanceAnchor` with
+  the recorded version. The next-actions projection proposes an advance for every lagging head,
+  including a superseded version's, and names the exact reference. The formal relation
+  witnesses claiming a superseded version's head in `history-v1` (a seeded unanchored head for
+  `u@v1`, one exact-reference command); `core-v1` and `tier-v1` do not change, so the 400k
+  state bound is not approached. Every count change is explained in the DONE file.
+- **Not decided here.** Finding 2 (`bd4.4.4`: heads whose anchor lags their head after a
+  claim) and finding 3 (`bd4.4.6`: merge replay dropping a run claim) stay separate units.
+
+The repair is `anchor-unit-ref@1`.
+
+## D-26 — Anchor advances name the unit reference; a superseded version's head is claimable (2026-10-30)
+
+**Status:** decided 2026-10-30 (user: the pilot's fourth finding, `vouch_mk2-bd4.4.7`, is fixed in
+Vouch as its own frozen D-11 unit; the Operator chose this design on 2026-10-30).
+
+- **The finding.** The activity_tracker_portal pilot rebound the published
+  `manage-sender-enrollment@1` (`rebind-pack` plus a fresh GREEN), then specified, froze and
+  GREENed its successor `manage-sender-enrollment@2`, and merged both to `main` in one step. Main's
+  store then held two evidence heads named `manage-sender-enrollment`, both with an empty
+  `anchor_run_id`: version 1 at head 5 and version 2 at head 2. The generated CI anchor step loops
+  over unclaimed heads by `unit_name` and runs `advance-anchor --unit-name NAME`. `AdvanceAnchor`
+  and `AnchorAdvanced` carry only the name, and both `_decide_advance_anchor` and the fold resolve
+  `snapshot.evidence_head(name)`, which is the CURRENT version's head only. Both iterations
+  therefore claimed version 2; version 1's head could never be claimed; `check --ci` reported
+  `check.evidence-anchors` NOT-CHECKED ("anchor has no workflow run claim"), composed was
+  NOT-CHECKED, and the `anchor_plan` job exited 1 without committing anything (Project CI run
+  41036402336). While that head exists no unit in the project can be anchored, so none can reach
+  acceptance.
+- **Decision: anchor commands and events name the unit REFERENCE.**
+  - `AdvanceAnchor(unit_name, unit_version="", run_id="")` and `AnchorAdvanced(unit_name,
+    unit_version="")`. An empty `unit_version` on the COMMAND means "the current version of that
+    name" (the exact pre-D-26 meaning), so every existing caller behaves as before. An accepted
+    decision always records the RESOLVED reference: a new `AnchorAdvanced` names a non-empty
+    version. The `advance-anchor` CLI gains optional `--unit-version`, defaulting to the current
+    version, and its success line names the claimed reference.
+  - `decide()` and the fold resolve the head by reference (`evidence_head_ref`), so a superseded
+    version's evidence head can be claimed; an unknown reference is `unit.unknown` and a known
+    reference without a chain stays `evidence.no-chain`. The promotion-only rule (D-4, M9) is
+    unchanged and now holds per reference.
+  - The generated CI anchor step (and mk2's own `ci.yml`) iterates `(unit_name, unit_version)`
+    pairs, tab-separated because a unit identifier may contain spaces but never a control
+    character, and passes `--unit-version` for every unclaimed head.
+  - `next_actions` offers `advance-anchor` for EVERY head whose anchor is behind its chain head,
+    naming the reference, and the CLI renders that action as `--unit-name NAME --unit-version V`.
+    Semantic merge recovers `AdvanceAnchor(name, version, run_id)` from a recorded
+    `AnchorAdvanced`, so a replayed advance lands on the recorded reference or is refused as
+    `merge.conflict`; it is never moved to another version.
+- **Stores keep replaying; no invented state.** The snapshot layout is unchanged
+  (`EvidenceHead` already carries `unit_version`), so the state format does not bump. Event
+  records are immutable content-addressed bytes (D-16): the codec decodes an `AnchorAdvanced`
+  payload WITHOUT `unit_version` (every record written before this unit; 93 in mk2's own store)
+  to `unit_version=""`, and the fold gives that value its recorded meaning — the version that was
+  current at that point of the chain — which replay reproduces exactly because replay is
+  deterministic. The decoder stays strict otherwise: unknown payload fields are still refused, and
+  no other event type gains an optional field. Rejected: re-encoding history (forbidden by D-16);
+  a decoder-side default that guesses a version (D-13's "no invented state"); and "one advance
+  claims every head of the name" (hides which reference a run observed, and an event that claims
+  several chains is unrepresentable under D-4's payload-free promotion).
+- **Formal coverage grows, never shrinks.** `history-v1` gains seeded evidence heads for the
+  superseded `u@v1` and the current `u@v2`, plus `AdvanceAnchor("u", "v1")` and `AdvanceAnchor("u")`,
+  so the relation shows a versioned advance promoting only the superseded record's anchor while the
+  bare-name advance targets the current one. `core-v1` and `tier-v1` keep their exact pinned sizes
+  (264,462/1,381,350 and 246/1,640); `history-v1` must grow from 31,416/94,280 and the new sizes
+  are pinned in the commit.
+- **Out of scope, recorded elsewhere.** `vouch_mk2-bd4.4.4` (CI anchors only heads with an empty
+  claim, so later evidence is never re-anchored) and `vouch_mk2-bd4.4.6` (merge replay drops the
+  run claim of a replayed advance) are separate findings and remain open; this unit changes
+  neither which heads the CI step selects nor how replay carries run ids.
+
+The repair is `anchor-by-unit-ref@1`, the fourth D-11 unit discovered by the D-24 pilot.

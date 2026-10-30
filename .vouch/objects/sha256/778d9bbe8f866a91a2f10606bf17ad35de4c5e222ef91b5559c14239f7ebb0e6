@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/python -m pytest -q tests/test_anchor_unit_ref.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"b1d6165ce80bb548730413998385cafe0112a92fca1e40681017fde3fcac23ef","parent":"GENESIS","recorded_at":"2026-10-30T11:27:25+00:00","sequence":1,"unit":{"name":"anchor-unit-ref","version":"1"}}
