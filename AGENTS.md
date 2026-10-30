@@ -50,7 +50,7 @@ cp -rf source dest          # NOT: cp -r source dest
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Working method (vouch mk2)
 
-Every forward change is a self-hosted unit: Fable plans + writes the frozen pack, Codex implements (direct `codex exec`) against it and may not edit it, Codex then Opus review, Fable's overall pass publishes through the DoD gates. Full procedure, roles, cost rules and commands: `docs/method.md`.
+Every forward change is a self-hosted unit: Claude (Opus 5.5, the main session) plans, writes the frozen pack, and publishes; GPT 6.1 Sol implements against it through a T3 delegated task and may not edit it; GPT 6 Astra reviews through a T3 delegated task; Claude's overall pass publishes through the DoD gates (D-27). Full procedure, roles, cost rules and commands: `docs/method.md`.
 
 ## Beads Issue Tracker
 

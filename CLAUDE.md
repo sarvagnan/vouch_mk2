@@ -60,7 +60,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Working method
 
-Every forward change is a self-hosted unit: Fable plans + writes the frozen pack, Codex implements (direct `codex exec`), Codex then Opus review, Fable's overall pass publishes through the DoD gates. The full procedure, roles, cost rules and commands: `docs/method.md`.
+Every forward change is a self-hosted unit: Claude (Opus 5.5, the main session) plans, writes the frozen pack, and publishes; GPT 6.1 Sol implements through a T3 delegated task; GPT 6 Astra reviews through a T3 delegated task; Claude's overall pass publishes through the DoD gates (D-27). The full procedure, roles, cost rules and commands: `docs/method.md`.
 
 ## Build & Test
 
