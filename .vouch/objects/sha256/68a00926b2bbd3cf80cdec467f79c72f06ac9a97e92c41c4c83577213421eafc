@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitRespecified","pack_digest":"","payload":{"gate":{"checks":[{"obligation_id":"gate.unblock.no-blocking-deviations","verdict":"pass"}],"transition":"invalidated->specified"},"name":"quickstart-formal-claim"},"prev":"3edc9f97b9932e1e35dbb3dc0145cce5bfb3fef8771419baa68ea49adc4c7f5e","recorded_at":"2026-11-02T19:00:50+00:00","revision":769,"run_id":""}

@@ -22,11 +22,12 @@ reachable relations and running M1–M11 and the witness mutations (`src/vouch_m
   [claim-boundary.md](claim-boundary.md#formal-certificate). Run `python3 vouch.lock formal
   --record --root .vouch` when you intend to perform and record that expensive exploration."
   Every prose paragraph of §8, its heading included, is pinned, so §8 cannot gain or change a
-  paragraph. No other prose paragraph that mentions the certificate names a verdict (pass, fail, not
-  checked, not applicable), after decoding HTML entities, folding Unicode compatibility forms,
-  and treating every dash and underscore as a hyphen. The verdict the pinned paragraph names is
-  the verdict the code reports for the row at every tier, with "not performed by `check`" in
-  its detail.
+  paragraph. No other prose paragraph that mentions the certificate names a verdict (pass, fail,
+  not checked, not applicable), compared word by word after decoding HTML entities, folding
+  Unicode compatibility forms, removing invisible formatting characters and inline Markdown
+  (`*`, `` ` ``, `~`), and unwrapping link text; every other character separates words. The
+  verdict the pinned paragraph names is the verdict the code reports for the row at every tier,
+  with "not performed by `check`" in its detail.
 - **R2** `test_quickstart_attaches_no_not_checked_verdict_to_formal_exploration`: no quickstart
   prose sentence that mentions invariants, witnesses, the formal model or the exploration
   contains `NOT_CHECKED` or `NOT-CHECKED`.
@@ -67,12 +68,20 @@ could carry the condition, and the following paragraph a false verdict ("The row
 at every tier."), each passing the paragraph rule on its own. Pack/5 pins every prose paragraph
 of §8, where the formal verdict is stated.
 
+## Amendment (pack/6, DEV-qfc-05)
+
+The reviewer then showed that Markdown emphasis inside a verdict ("reports **NOT**-CHECKED")
+passed the dash-and-entity patch. Pack/6 compares other paragraphs as words after removing
+inline markup and unwrapping links, which closes that family of formatting rather than one
+spelling at a time. This is the last amendment: the user decided on 2026-11-03 that anything a
+further review finds is recorded as a residual and the pack stands.
+
 ## Scope
 
 The pack guards against accidental misstatement by a maintainer (threat level 1). It checks
 verdict statements only. A sentence that misdescribes what `check` or `formal` does without
-naming a verdict, and text deliberately disguised to evade the check (look-alike characters,
-synonyms), are outside it and left to review. Outside §8 the check works one paragraph at a
+naming a verdict, and text deliberately disguised to evade the check (look-alike letters,
+synonyms, a verdict word broken apart by spaces), are outside it and left to review. Outside §8 the check works one paragraph at a
 time, so a verdict separated from its certificate condition across paragraphs there is not
 detected; that residual is recorded rather than chased further, because no text pattern can
 decide what a passage of prose asserts.

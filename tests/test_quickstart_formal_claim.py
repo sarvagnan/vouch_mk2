@@ -22,6 +22,10 @@ following paragraph the false verdict. R1 now pins every prose paragraph of §8,
 formal verdict is stated. Elsewhere the paragraph rule stands; a verdict split from its
 certificate condition across paragraphs outside §8 is a recorded residual.
 
+pack/6 (DEV-qfc-05): Markdown emphasis inside a verdict ("**NOT**-CHECKED") passed. Other
+paragraphs are now compared as words: entities decoded, Unicode folded, invisible formatting
+characters and inline markup removed, link text unwrapped.
+
 Intent: the quickstart states the verdict ``check`` actually produces for the formal model. With
 a certificate recorded, ``check.formal-certificate`` is PASS for the narrowed obligation at every
 tier, and its detail names what ``check`` did not perform.
@@ -57,8 +61,10 @@ QUICKSTART = ROOT / "docs" / "quickstart.md"
 _FENCE = re.compile(r"^```.*?^```[^\n]*$", re.M | re.S)
 _FORMAL_TOPIC = re.compile(r"invariant|witness|formal model|exploration|explore", re.I)
 _NOT_CHECKED = re.compile(r"NOT[_-]CHECKED")
-_VERDICT = re.compile(r"\b(pass(es|ed)?|fail(s|ed)?|not[- ]checked|not[- ]applicable)\b")
-_DASHES = re.compile(r"[_\u2010-\u2015\u2212\ufe58\ufe63\uff0d]")
+_VERDICT = re.compile(r" (pass|passes|passed|fail|fails|failed|not checked|not applicable) ")
+_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MARKUP = re.compile(r"[*`~]")
+_WORD = re.compile(r"[a-z0-9]+")
 
 
 def _sentences() -> list[str]:
@@ -74,10 +80,19 @@ def _paragraphs() -> list[str]:
     return [" ".join(part.split()) for part in re.split(r"\n\s*\n", prose) if part.strip()]
 
 
-def _normalized(text: str) -> str:
-    """Entities decoded, compatibility forms folded, every dash and underscore made a hyphen."""
+def _words(text: str) -> list[str]:
+    """The words of ``text``: entities decoded, Unicode folded, invisible formatting characters
+    and inline markup removed, link text unwrapped; any other character separates words."""
     folded = unicodedata.normalize("NFKC", html.unescape(text))
-    return _DASHES.sub("-", folded).lower()
+    visible = "".join(char for char in folded if unicodedata.category(char) != "Cf")
+    plain = _MARKUP.sub("", _LINK.sub(r"\1", visible))
+    return _WORD.findall(plain.lower())
+
+
+def _names_certificate_verdict(paragraph: str) -> bool:
+    words = _words(paragraph)
+    mentions = any(word.startswith("certificate") for word in words)
+    return mentions and _VERDICT.search(" " + " ".join(words) + " ") is not None
 
 
 def _row_sentences() -> list[str]:
@@ -160,9 +175,7 @@ def test_quickstart_names_the_formal_certificate_row_with_the_verdict_check_repo
     others = [
         paragraph
         for paragraph in paragraphs
-        if paragraph != _PARAGRAPH
-        and "certificate" in _normalized(paragraph)
-        and _VERDICT.search(_normalized(paragraph))
+        if paragraph != _PARAGRAPH and _names_certificate_verdict(paragraph)
     ]
     assert others == [], others
     claimed = re.search(r"reports `([A-Z_]+)`", _ROW_SENTENCE)
