@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/quickstart-formal-claim-1.spec.md","role":"spec","sha256":"64ef9146dd0215be4bee450dd11dea66ac364609bb818e30121f0e05e0c05de5","size":2268},{"path":"tests/test_quickstart_formal_claim.py","role":"test","sha256":"1087db2b445d3c3f57c5bd1f46e7d840b5926d449f343afdb46f7ade3f303b52","size":4901}],"pack_format":2}

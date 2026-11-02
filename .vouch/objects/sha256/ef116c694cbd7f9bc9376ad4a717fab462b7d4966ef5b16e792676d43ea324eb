@@ -1,0 +1,1 @@
+{"command_line":".venv/bin/python -m pytest -q tests/test_quickstart_formal_claim.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"9cd232c7ec67efdd2d86283d2feb944eee619e0c81d202b7b7b435724d140d19","parent":"GENESIS","recorded_at":"2026-11-02T16:39:59+00:00","sequence":1,"unit":{"name":"quickstart-formal-claim","version":"1"}}
