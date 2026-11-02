@@ -1117,3 +1117,31 @@ publisher, implementer will be Sol, then reviewers will be Astra."
   `anchor-by-unit-ref@1`, and beads `bd4.4.9` and `bd4.4.9.1`.
 - **Unchanged.** The lifecycle, the gates, the deviation procedure, and the user's role as
   decider: D-numbered decisions, contract conflicts, `git push`, `bd sync`.
+
+## D-28 — Rewording test-bound docs is exception (ii); the one claim correction is a unit (2026-11-02)
+
+**Status:** decided 2026-11-02 by the user, choosing option 2 of three: a ruling alone, a ruling
+plus a unit for the one claim correction, or a full unit for the whole rewrite.
+
+- **The ruling.** D-11 exception (ii) covers a rewording of a test-bound document when it adds,
+  removes and changes no statement about Vouch's behavior, guarantees, limits or non-claims,
+  keeps every test-pinned phrase, and passes the full suite. Statements may move between
+  documents. An independent reviewer checks claim preservation before the commit. A sentence
+  whose meaning must change is not rewording; it goes through a unit.
+- **Why.** The 2026-11-02 plain-prose rewrite of `README.md`, `docs/quickstart.md`,
+  `docs/claim-boundary.md`, `docs/threat-model.md` and `docs/performance.md`
+  (`vouch_mk2-c6i`) was much larger than the typo-level edits exception (ii) was written for.
+  Running it as a unit afterwards would have recorded a freeze after the implementation it
+  governs, with the planner as implementer; the method forbids both. So the ruling covers the
+  rewording, and the one real claim change is split out.
+- **The unit `quickstart-formal-claim@1`** (`vouch_mk2-4zh.1`). The quickstart says that at
+  `high`, `check` "reports `NOT_CHECKED` for invariant execution and mutation-witness
+  discrimination". The code reports one row, `check.formal-certificate`: `PASS` for the narrowed
+  obligation at every tier where a certificate is recorded, with the unexplored properties named
+  in its detail (`src/vouch_mk2/verify.py`). The claim boundary already says so. The rewording
+  commit keeps the original sentence verbatim, and the unit's pack binds the quickstart to the
+  verdict the code produces: R1, the quickstart names `check.formal-certificate` with `PASS`,
+  and the code yields `PASS` at every tier with the residual in the detail; R2, no quickstart
+  sentence attaches a `NOT_CHECKED` verdict to formal exploration; R3, certificate verification
+  is not limited to `high`; R4 (guard), the quickstart still shows `formal --record`.
+- **Unchanged.** D-11's other exceptions and the stop rule.
