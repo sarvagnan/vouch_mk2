@@ -331,9 +331,9 @@ python3 vouch.lock complete --root .vouch --release-id r1
 `check.event-log` replays the event log and requires it to reproduce the committed snapshot,
 which is a derived cache, byte for byte.
 
-`check` does not re-explore the bounded formal model. At `high` it cheaply verifies the
-recorded certificate, current policy tables, and checker identity, then reports
-`NOT_CHECKED` for invariant execution and mutation-witness discrimination. Run
+`check` does not re-explore the bounded formal model. With a valid recorded
+certificate, `check.formal-certificate` reports `PASS` at every tier for the narrowed
+obligation in [claim-boundary.md](claim-boundary.md#formal-certificate). Run
 `python3 vouch.lock formal --record --root .vouch` when you intend to perform and record
 that expensive exploration.
 

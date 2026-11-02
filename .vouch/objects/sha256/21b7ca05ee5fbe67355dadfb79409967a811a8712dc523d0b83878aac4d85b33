@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-qfc-02","deviation_type":"pack-defect","unit":{"name":"quickstart-formal-claim","version":"1"}},"prev":"acc46a6dacc02b5604514b5e1ae5dd2bf6f560c30690dc006e6a2cd47d146bfb","recorded_at":"2026-11-02T17:43:17+00:00","revision":722,"run_id":""}
