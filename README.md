@@ -38,7 +38,7 @@ the command was a test runner, or that the runner was honest.
 | [`docs/method.md`](docs/method.md) | how changes to mk2 itself run through Vouch |
 | [`DECISIONS.md`](DECISIONS.md) | the append-only decision log (D-1 typed Python, D-2 zipapp vendoring, …) |
 | [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) | the original build plan: phases 0–9, cross-cutting disciplines, foundational decisions, reuse from 0.6, risks |
-| [`architecture.html`](architecture.html) | entity/authority diagram, mutation flow, verification flow, threat levels (self-contained; open in a browser, light/dark) |
+| [`architecture.html`](architecture.html) | the original design proposal (2026-08-10), drawn before the event log (D-16): entity/authority diagram, mutation flow, verification flow, threat levels (self-contained; open in a browser, light/dark) |
 
 ## Layout
 

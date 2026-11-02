@@ -1,6 +1,7 @@
-# Project Instructions for AI Agents
+# Agent instructions
 
-This file provides instructions and context for AI coding agents working on this project.
+Vouch mk2 is a typed policy engine that governs units of work, including its own development.
+Start from `README.md`.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
@@ -57,25 +58,23 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
-
 ## Working method
 
-Every forward change is a self-hosted unit: Claude (Opus 5.5, the main session) plans, writes the frozen pack, and publishes; GPT 6.1 Sol implements through a T3 delegated task; GPT 6 Astra reviews through a T3 delegated task; Claude's overall pass publishes through the DoD gates (D-27). The full procedure, roles, cost rules and commands: `docs/method.md`.
+Every forward change to mk2 is a unit run through mk2's own lifecycle (D-11, D-27). Claude
+(Opus 5.5, the main session) plans, writes the frozen pack and publishes. GPT 6.1 Sol implements
+through a T3 delegated task and never edits the pack. GPT 6 Astra reviews through a T3 delegated
+task. The procedure, roles, cost rules and commands are in `docs/method.md`.
 
-## Build & Test
+## Gates
 
-_Add your build and test commands here_
+Before handing off, run the commands in `README.md` § Gates. They are what CI runs.
 
-```bash
-# Example:
-# npm install
-# npm test
-```
+## Gotchas
 
-## Architecture Overview
-
-_Add a brief overview of your project architecture_
-
-## Conventions & Patterns
-
-_Add your project-specific conventions here_
+- Prose in `README.md` and `docs/*.md` is test-bound. Tests pin exact phrases, some across a
+  line break, and `tests/test_operator_docs.py` runs every `sh` block in `docs/quickstart.md`.
+  Edit around the pinned phrases and run the full suite.
+- A frozen pack (`packs/<unit>-<v>.spec.md` plus its test file) is byte-bound in `.vouch/`.
+  Change it only through a deviation and a re-freeze (`docs/method.md` §3).
+- `cp`, `mv` and `rm` may be aliased to prompt. Use `cp -f`, `mv -f`, `rm -f` and `rm -rf` so a
+  command never waits for input, and `-o BatchMode=yes` with `ssh` and `scp`.

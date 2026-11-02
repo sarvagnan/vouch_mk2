@@ -1,57 +1,9 @@
-# Agent Instructions
+# Agent instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
-
-> **Architecture in one line:** Issues live in a local Dolt database
-> (`.beads/dolt/`); cross-machine sync uses `bd dolt push/pull` (a
-> git-compatible protocol), stored under `refs/dolt/data` on your git
-> remote — separate from `refs/heads/*` where your code lives.
-> `.beads/issues.jsonl` is a passive export, not the wire protocol.
->
-> See [sync-concepts](https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md)
-> for the one-screen overview and anti-patterns (don't treat JSONL as the
-> source of truth; don't `bd import` during normal operation; don't
-> reach for third-party Dolt hosting before trying the default).
-
-## Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
-```
-
-## Non-Interactive Shell Commands
-
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
-
-Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
-
-**Use these forms instead:**
-```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
-
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
-```
-
-**Other commands that may prompt:**
-- `scp` - use `-o BatchMode=yes` for non-interactive
-- `ssh` - use `-o BatchMode=yes` to fail instead of prompting
-- `apt-get` - use `-y` flag
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
+Vouch mk2 is a typed policy engine that governs units of work, including its own development.
+Start from `README.md`.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
-## Working method (vouch mk2)
-
-Every forward change is a self-hosted unit: Claude (Opus 5.5, the main session) plans, writes the frozen pack, and publishes; GPT 6.1 Sol implements against it through a T3 delegated task and may not edit it; GPT 6 Astra reviews through a T3 delegated task; Claude's overall pass publishes through the DoD gates (D-27). Full procedure, roles, cost rules and commands: `docs/method.md`.
-
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -105,3 +57,24 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
+
+## Working method
+
+Every forward change to mk2 is a unit run through mk2's own lifecycle (D-11, D-27). Claude
+(Opus 5.5, the main session) plans, writes the frozen pack and publishes. GPT 6.1 Sol implements
+through a T3 delegated task and never edits the pack. GPT 6 Astra reviews through a T3 delegated
+task. The procedure, roles, cost rules and commands are in `docs/method.md`.
+
+## Gates
+
+Before handing off, run the commands in `README.md` § Gates. They are what CI runs.
+
+## Gotchas
+
+- Prose in `README.md` and `docs/*.md` is test-bound. Tests pin exact phrases, some across a
+  line break, and `tests/test_operator_docs.py` runs every `sh` block in `docs/quickstart.md`.
+  Edit around the pinned phrases and run the full suite.
+- A frozen pack (`packs/<unit>-<v>.spec.md` plus its test file) is byte-bound in `.vouch/`.
+  Change it only through a deviation and a re-freeze (`docs/method.md` §3).
+- `cp`, `mv` and `rm` may be aliased to prompt. Use `cp -f`, `mv -f`, `rm -f` and `rm -rf` so a
+  command never waits for input, and `-o BatchMode=yes` with `ssh` and `scp`.
