@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"decisions-append-only@1","reason":"pack frozen and RED recorded; the bound acceptance tests fail until the implementation lands (D-29)"},"prev":"9cde96767ba7397987f1ef5b4ad0536f2725f4b867d64a81978cab05c90d90e1","recorded_at":"2026-11-12T07:39:19+00:00","revision":786,"run_id":""}

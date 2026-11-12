@@ -2,8 +2,13 @@
 
 Records decisions where the goal fixed an outcome but not one unique mechanism, with
 the rejected option and why — the 0.6 `DECISIONS.md` discipline, carried over. Entries
-cite the 0.6 precedents they uphold or reverse. Append-only; a reversed decision gets a
-new entry, never an edit.
+cite the 0.6 precedents they uphold or reverse.
+
+The log is append-only (D-29). Text already in the log never changes. An amendment,
+correction or note is appended to the end of the entry it amends, opened by a bold label that
+names its date and source; a reversed decision gets a new entry. After appending, run
+`uv run python scripts/decisions_guard.py pin`; the test suite runs `verify`, which fails when
+pinned text has changed.
 
 ## D-1 — Core language: typed Python
 
@@ -1145,3 +1150,35 @@ plus a unit for the one claim correction, or a full unit for the whole rewrite.
   sentence attaches a `NOT_CHECKED` verdict to formal exploration; R3, certificate verification
   is not limited to `high`; R4 (guard), the quickstart still shows `formal --record`.
 - **Unchanged.** D-11's other exceptions and the stop rule.
+
+## D-29 — The decision log is append-only within each entry, and a digest guard enforces it (2026-11-12)
+
+**Status:** decided 2026-11-12 by the user, choosing "append within an entry" of three rules: append
+within an entry, strict (every amendment is a new entry), or a grace window that freezes an entry
+when its first implementing unit publishes. Unit `decisions-append-only@1`.
+
+- **The gap.** The header said "Append-only; a reversed decision gets a new entry, never an edit",
+  and nothing checked it. Git shows seven rewrites of existing entry text: D-8 (`0ab81e2`,
+  `2d44410`), D-10 (`2b60a56`, `2d44410`), D-12 (`2d44410`, `7efb526`), D-18 (`26bc697`, a note
+  inserted mid-entry) and D-26 (`8d7ed57`, a withdrawn duplicate draft). D-10's is a reversal made
+  by editing: its deferral of self-hosting was rewritten in place when D-11 was proposed. Six other
+  changes only appended text, and the D-14 and D-17 amendments were written as dated notes later in
+  the file. The text those rewrites replaced survives only in git history; this entry records them
+  instead of restoring it.
+- **The rule.** Text already in the log never changes. An amendment, correction or note is appended
+  to the end of the entry it amends, opened by a bold label naming its date and source, the form
+  the D-14 and D-17 amendments already use. A reversed decision is a new entry. The header was
+  rewritten once, in the same change as this entry and before the first pin, to state this rule.
+- **The guard.** `scripts/decisions_guard.py` splits the log into the header and entries `D-1` to
+  `D-N`, and `DECISIONS.pins.json` records a SHA-256 digest of each section's pinned bytes.
+  `verify`, run by the test suite, fails when pinned bytes change, when an entry is missing, out of
+  order or misnumbered, or when text is not yet pinned. `pin` extends the pins to the current text
+  and refuses, writing nothing, if any pinned text has changed. 0.6 used the same technique for its
+  defect log (a digest-frozen D001–D049 prefix, 2026-08-07).
+- **What it does not claim.** The guard catches accidental and unreviewed edits. Someone who edits
+  an entry and hand-edits its digest in the pins file gets past it; that edit is visible only in
+  the diff, and reviewing the diff is the control. This is the same boundary as 0.6's
+  "repository-local checks cover accidental drift".
+- **Rejected.** Strict new-entry-only amendments: they separate an amendment from what it amends,
+  and history shows amendments kept next to their entry. A grace window: the guard would need to
+  know which unit implements which entry, which nothing records.

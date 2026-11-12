@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_decisions_append_only.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"07398ccc9410d237d0dfa1053a4034e25ad8fbd185a82df7d87e9f81c0a127b0","parent":"GENESIS","recorded_at":"2026-11-12T07:39:26+00:00","sequence":1,"unit":{"name":"decisions-append-only","version":"1"}}
