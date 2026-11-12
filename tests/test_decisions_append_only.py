@@ -8,11 +8,16 @@ as a black box on fixture logs, and once on mk2's own log.
 from __future__ import annotations
 
 import ast
+import fcntl
 import hashlib
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -249,5 +254,141 @@ def test_the_log_header_states_the_rule_and_d29_records_it() -> None:  # guard:
     assert "Text already in the log never changes." in header
     assert "appended to the end of the entry it amends" in header
     assert "uv run python scripts/decisions_guard.py pin" in header
-    assert "never an edit" not in header
     assert re.search(r"(?m)^## D-29 — The decision log is append-only within each entry", log)
+
+
+# R11
+FENCED_NOTE = (
+    "**D-3 note (2026-01-06, user):** An example heading for a later entry:\n\n"
+    "```markdown\n## D-4 — Example only\n```\n\nThe example stays part of D-3.\n"
+)
+
+
+def test_a_fenced_heading_is_content_of_the_entry_that_quotes_it(
+    pinned: tuple[Path, Path],
+) -> None:
+    log, pins = pinned
+    log.write_text(BASE + "\n" + FENCED_NOTE, encoding="utf-8")
+    pinning = _run("pin", log, pins)
+    assert pinning.returncode == 0, _out(pinning)
+    assert [section["key"] for section in _sections(pins)] == ["header", "D-1", "D-2", "D-3"]
+    assert _run("verify", log, pins).returncode == 0
+    inserted = (BASE + "\n" + FENCED_NOTE).replace(
+        "```markdown\n## D-4", "```markdown\nInserted.\n## D-4"
+    )
+    log.write_text(inserted, encoding="utf-8")
+    result = _run("verify", log, pins)
+    assert result.returncode == 1, _out(result)
+    assert f"D-3: {CHANGED}" in result.stdout
+
+
+def test_a_fenced_example_of_an_earlier_heading_is_a_legal_amendment(
+    pinned: tuple[Path, Path],
+) -> None:
+    log, pins = pinned
+    note = "**D-1 note (2026-01-06, user):** Quoting its heading:\n\n~~~\n## D-1 — First\n~~~\n\n"
+    log.write_text(HEADER + E1 + note + E2 + E3, encoding="utf-8")
+    pinning = _run("pin", log, pins)
+    assert pinning.returncode == 0, _out(pinning)
+    result = _run("verify", log, pins)
+    assert result.returncode == 0, _out(result)
+    assert "out of order" not in _out(result)
+    assert _sections(pins)[1] == _expected("D-1", E1 + note)
+
+
+def test_an_unclosed_fence_fails_and_pin_refuses(pinned: tuple[Path, Path]) -> None:
+    log, pins = pinned
+    before = pins.read_bytes()
+    log.write_text(BASE + "\n```\nnever closed\n", encoding="utf-8")
+    result = _run("verify", log, pins)
+    assert result.returncode == 1, _out(result)
+    assert "D-3: unclosed code fence" in result.stdout
+    refused = _run("pin", log, pins)
+    assert refused.returncode == 1, _out(refused)
+    assert pins.read_bytes() == before
+
+
+# R12
+def test_crlf_and_bom_bytes_are_pinned_exactly(tmp_path: Path) -> None:
+    log = tmp_path / "DECISIONS.md"
+    pins = tmp_path / "DECISIONS.pins.json"
+    crlf = b"\xef\xbb\xbf" + BASE.replace("\n", "\r\n").encode("utf-8")
+    log.write_bytes(crlf)
+    pinning = _run("pin", log, pins)
+    assert pinning.returncode == 0, _out(pinning)
+    assert _run("verify", log, pins).returncode == 0
+    assert _sections(pins)[0]["bytes"] == len(b"\xef\xbb\xbf" + HEADER.replace("\n", "\r\n").encode())
+    before = pins.read_bytes()
+    log.write_bytes(crlf.replace(b"\r\n", b"\n"))
+    for command in ("verify", "pin"):
+        result = _run(command, log, pins)
+        assert result.returncode == 1, (command, _out(result))
+        assert CHANGED in result.stdout
+    assert pins.read_bytes() == before
+
+
+# R13
+def test_problems_go_to_stdout_and_usage_errors_to_stderr(pinned: tuple[Path, Path]) -> None:
+    log, pins = pinned
+    log.write_text(BASE.replace("One.", "Uno."), encoding="utf-8")
+    problem = _run("verify", log, pins)
+    assert problem.returncode == 1
+    assert f"D-1: {CHANGED}" in problem.stdout
+    assert problem.stderr == ""
+    pins.write_text("{", encoding="utf-8")
+    usage = _run("verify", log, pins)
+    assert usage.returncode == 2
+    assert usage.stdout == ""
+    assert usage.stderr.strip() != ""
+
+
+# R14
+def _load_main(monkeypatch: pytest.MonkeyPatch) -> Callable[[Sequence[str] | None], int]:
+    name = "decisions_guard_under_test"
+    spec = importlib.util.spec_from_file_location(name, SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return cast(Callable[[Sequence[str] | None], int], getattr(module, "main"))
+
+
+def test_a_failed_replace_keeps_the_old_pins_and_leaves_no_temporary_file(
+    pinned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log, pins = pinned
+    main = _load_main(monkeypatch)
+    before = pins.read_bytes()
+    log.write_text(BASE + "\n## D-4 — Fourth (2026-01-04)\n", encoding="utf-8")
+
+    def refuse(src: object, dst: object) -> None:
+        raise OSError("injected replace failure")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(os, "replace", refuse)
+        assert main(["pin", "--log", str(log), "--pins", str(pins)]) == 2
+    assert pins.read_bytes() == before
+    assert sorted(path.name for path in log.parent.iterdir()) == [
+        "DECISIONS.md",
+        "DECISIONS.pins.json",
+    ]
+
+
+# R15
+def test_pin_waits_for_the_log_lock(pinned: tuple[Path, Path]) -> None:
+    log, pins = pinned
+    log.write_text(BASE + "\n## D-4 — Fourth (2026-01-04)\n", encoding="utf-8")
+    with log.open("rb") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+        process = subprocess.Popen(
+            [sys.executable, str(SCRIPT), "pin", "--log", str(log), "--pins", str(pins)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(1.5)
+        assert process.poll() is None, "pin finished while another process held the log lock"
+        fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+    stdout, stderr = process.communicate(timeout=30)
+    assert process.returncode == 0, stdout + stderr
+    assert _run("verify", log, pins).returncode == 0

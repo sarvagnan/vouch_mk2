@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationAmended","pack_digest":"","payload":{"amendment_version":"decisions-append-only-pack/2@231974862a7a95dc","deviation_id":"DEV-dao-03","impact_set":["decisions-append-only"],"release_impact_set":[]},"prev":"7ceb9d0897ba119a56a416c2386b1b44bc8889fbe29398c52cb57727a01e71ce","recorded_at":"2026-11-12T08:10:02+00:00","revision":801,"run_id":""}

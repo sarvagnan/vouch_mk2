@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitRespecified","pack_digest":"","payload":{"gate":{"checks":[{"obligation_id":"gate.unblock.no-blocking-deviations","verdict":"pass"}],"transition":"invalidated->specified"},"name":"decisions-append-only"},"prev":"f68fe4679fc980ada7f7089d8a47e355cf57030451c913bd8757231a25eb39dd","recorded_at":"2026-11-12T08:10:02+00:00","revision":809,"run_id":""}

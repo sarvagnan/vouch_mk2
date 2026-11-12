@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-dao-04","deviation_type":"pack-defect","unit":{"name":"decisions-append-only","version":"1"}},"prev":"e8337a39f89dbabc48f955530ea5143d820dfa78bc1dab2eaa7960258e498f46","recorded_at":"2026-11-12T08:10:02+00:00","revision":804,"run_id":""}
