@@ -225,13 +225,33 @@ def test_mk2_own_log_is_pinned_and_verifies_from_any_directory(tmp_path: Path) -
         check=False,
     )
     assert result.returncode == 0, _out(result)
-    log = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
-    numbers = [int(n) for n in re.findall(r"(?m)^## D-(\d+)\b", log)]
-    assert numbers == list(range(1, len(numbers) + 1))
-    assert len(numbers) >= 29
-    assert [section["key"] for section in _sections(pins)] == ["header"] + [
-        f"D-{n}" for n in numbers
-    ]
+    keys = [section["key"] for section in _sections(pins)]
+    assert keys == ["header"] + [f"D-{n}" for n in range(1, len(keys))]
+    assert len(keys) - 1 >= 29
+
+
+def test_a_copy_of_mk2_own_log_accepts_a_fenced_example_then_a_real_entry(tmp_path: Path) -> None:
+    log = tmp_path / "DECISIONS.md"
+    pins = tmp_path / "DECISIONS.pins.json"
+    log.write_bytes((ROOT / "DECISIONS.md").read_bytes())
+    pins.write_bytes((ROOT / "DECISIONS.pins.json").read_bytes())
+    keys = [section["key"] for section in _sections(pins)]
+    following = f"D-{len(keys)}"
+    note = (
+        f"\n**{keys[-1]} note (2026-11-12, user):** The next entry will open like this:\n\n"
+        f"```markdown\n## {following} — Example only\n```\n"
+    )
+    log.write_bytes(log.read_bytes() + note.encode("utf-8"))
+    for command in ("pin", "verify"):
+        result = _run(command, log, pins)
+        assert result.returncode == 0, (command, _out(result))
+    assert [section["key"] for section in _sections(pins)] == keys
+    entry = f"\n## {following} — A real entry (2026-11-13)\n\n- **Decision.** Real.\n"
+    log.write_bytes(log.read_bytes() + entry.encode("utf-8"))
+    for command in ("pin", "verify"):
+        result = _run(command, log, pins)
+        assert result.returncode == 0, (command, _out(result))
+    assert [section["key"] for section in _sections(pins)] == keys + [following]
 
 
 # R9
@@ -308,6 +328,27 @@ def test_an_unclosed_fence_fails_and_pin_refuses(pinned: tuple[Path, Path]) -> N
     assert pins.read_bytes() == before
 
 
+def test_inline_triple_backticks_open_no_fence(pinned: tuple[Path, Path]) -> None:
+    log, pins = pinned
+    inline = "**D-3 note (2026-01-06, user):** An inline span:\n\n```literal```\n"
+    log.write_text(BASE + "\n" + inline, encoding="utf-8")
+    for command in ("pin", "verify"):
+        result = _run(command, log, pins)
+        assert result.returncode == 0, (command, _out(result))
+    example = "\n```\n## D-4 — Example only\n```literal```\n```\n"
+    log.write_text(BASE + "\n" + inline + example, encoding="utf-8")
+    pinning = _run("pin", log, pins)
+    assert pinning.returncode == 0, _out(pinning)
+    assert [section["key"] for section in _sections(pins)] == ["header", "D-1", "D-2", "D-3"]
+    inserted = (BASE + "\n" + inline + example).replace(
+        "```\n## D-4", "```\nInserted.\n## D-4"
+    )
+    log.write_text(inserted, encoding="utf-8")
+    result = _run("verify", log, pins)
+    assert result.returncode == 1, _out(result)
+    assert f"D-3: {CHANGED}" in result.stdout
+
+
 # R12
 def test_crlf_and_bom_bytes_are_pinned_exactly(tmp_path: Path) -> None:
     log = tmp_path / "DECISIONS.md"
@@ -375,20 +416,31 @@ def test_a_failed_replace_keeps_the_old_pins_and_leaves_no_temporary_file(
 
 
 # R15
-def test_pin_waits_for_the_log_lock(pinned: tuple[Path, Path]) -> None:
+def test_pin_waits_for_the_pins_directory_lock(pinned: tuple[Path, Path]) -> None:
     log, pins = pinned
     log.write_text(BASE + "\n## D-4 — Fourth (2026-01-04)\n", encoding="utf-8")
-    with log.open("rb") as held:
-        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+    directory = os.open(pins.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(directory, fcntl.LOCK_EX)
         process = subprocess.Popen(
             [sys.executable, str(SCRIPT), "pin", "--log", str(log), "--pins", str(pins)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
-        time.sleep(1.5)
-        assert process.poll() is None, "pin finished while another process held the log lock"
-        fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+        time.sleep(1.0)
+        replacement = log.with_name("DECISIONS.md.saving")
+        replacement.write_text(
+            BASE + "\n## D-4 — Fourth (2026-01-04)\n\n## D-5 — Fifth (2026-01-05)\n",
+            encoding="utf-8",
+        )
+        os.replace(replacement, log)
+        time.sleep(0.5)
+        assert process.poll() is None, "pin finished while another process held the directory lock"
+        fcntl.flock(directory, fcntl.LOCK_UN)
+    finally:
+        os.close(directory)
     stdout, stderr = process.communicate(timeout=30)
     assert process.returncode == 0, stdout + stderr
+    assert [section["key"] for section in _sections(pins)][-1] == "D-5"
     assert _run("verify", log, pins).returncode == 0

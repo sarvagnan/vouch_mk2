@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitInvalidated","pack_digest":"","payload":{"name":"decisions-append-only","trigger_deviation_id":"DEV-dao-05"},"prev":"3778c0340c0679a8e7c60ef7f283f43a3ec3cf0fe8e91b2e5a5c5d78aef58f01","recorded_at":"2026-11-12T08:36:37+00:00","revision":819,"run_id":""}

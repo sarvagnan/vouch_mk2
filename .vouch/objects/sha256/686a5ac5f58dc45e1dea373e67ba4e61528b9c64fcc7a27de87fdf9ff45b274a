@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/decisions-append-only-1.spec.md","role":"spec","sha256":"4f39a6c799a26107faaf1381d126f4aeed6cf1cfcda1e55f40c137157ac72e1a","size":12636},{"path":"tests/test_decisions_append_only.py","role":"test","sha256":"5af25b4903140402d0301e26ebcff256c8040d615560d202865b8f82a57fc9be","size":16893}],"pack_format":2}

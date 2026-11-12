@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"decisions-append-only@1","reason":"pack/3 frozen and RED #3 recorded; the bound acceptance tests fail until the pack/3 fixes land (D-29)"},"prev":"5da7138709595cc26c7b30447a26b23296e40986e3cab1db63ef42a686660424","recorded_at":"2026-11-12T08:36:40+00:00","revision":836,"run_id":""}
