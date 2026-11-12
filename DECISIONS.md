@@ -1182,3 +1182,82 @@ when its first implementing unit publishes. Unit `decisions-append-only@1`.
 - **Rejected.** Strict new-entry-only amendments: they separate an amendment from what it amends,
   and history shows amendments kept next to their entry. A grace window: the guard would need to
   know which unit implements which entry, which nothing records.
+
+**D-29 note (2026-11-12, unit `decisions-append-only@1`):** As built (pack/3), a heading inside
+top-level fenced code is content of the entry that quotes it, an unclosed fence is a problem, and
+`pin` locks the directory that holds the pins file, because an editor's atomic save gives the log a
+new inode. The guard does not render Markdown. A heading-like line deliberately written so that the
+guard and a renderer disagree can create a section boundary inside an entry; like a hand-edited pins
+file, that is visible only in the diff and review is the control. An unsupported container, such as a
+fence inside a list item or block quote, can also make the guard refuse; that fails closed. See the
+pack's **Limits** section.
+
+## D-30 — The optimal-system design is the accepted direction after the first release, not current work (2026-11-12)
+
+**Status:** decided 2026-11-12 by the user.
+
+- **What exists.** On 2026-08-20 and 08-21 (bead `vouch_mk2-pv4`, nine grilling rounds in a Codex
+  thread), the user accepted a target design: `docs/design/vouch-optimal-system.md` with its
+  diagrams `vouch-system-diagram.html` and `vouch-mk2-system-diagram.html`, ADRs `0001`–`0004` in
+  `docs/adr/`, and an adoption glossary in `CONTEXT.md`. None of it was committed until 2026-11-12
+  (`1be2af4`), when the design documents also moved here from the parent `project_blueprint/` folder. It adds a separate adoption module and record beside the assurance kernel,
+  repository-local operation with no telemetry, distinct greenfield and brownfield adoption paths,
+  and sound fail-closed incremental verification. Until this entry, no decision referred to it.
+- **Decision.** It is the accepted direction for work after `release@1`. It does not change D-24's
+  order (GitHub probe, real-project pilot, `release@1`, `adoption-docs@1`). Nothing in it describes
+  current behaviour, and its own status labels ("Target", "External proof pending") still apply.
+  Each capability enters only through its own `D-n` entry and unit, citing the ADR it implements.
+  The ADRs record the design's reasoning; this log stays the only binding decision record.
+- **Q90.** Its answer on purity and unit kinds (`docs/design/vouch-optimal-system.md` §8) is superseded by D-31.
+  The rest of §8, one primary scope per path and propagation through dependency contracts, stands as
+  part of the accepted direction.
+- **Revisit** when the pilot records its release go/no-go (D-24).
+- **Rejected.** Building it now: the pilot has not yet shown Vouch governing a real change, and the
+  design itself says adoption claims need external proof. Dropping it: it is the only worked answer
+  to the adoption weakness this log keeps returning to.
+
+## D-31 — Every frozen pack declares its unit's effects; Q90 is superseded (2026-11-12)
+
+**Status:** decided 2026-11-12 by the user, after independent opinions from Fable, Sol and Astra.
+Unit `effect-declarations@1` (bead `vouch_mk2-bd4.8`), before `release@1`.
+
+- **The gap.** The blueprint (v2, 2026-08-01) and Vouch 0.6 (`kernel.md` rule 1, the unit-definition
+  schema's required `class`) made every unit exactly one of transform, observation or action, with
+  its effects disclosed. mk2's plan said the three kinds "carry over unchanged"
+  (`IMPLEMENTATION-PLAN.md` §1), but the mk2 `Unit` has no kind, and D-8 dropped `class` as a concern
+  "outside the mk2 core snapshot" that nothing else picked up. The optimal-system design's Q90
+  (2026-08-21) then said Vouch should not treat pure and effectful as universal unit types; it was
+  accepted in a batch and was not presented as a reversal. The tier report meanwhile prints
+  "Typed contracts, declared classes, purity checks" as PARTIAL, citing mk2's own pyrefly and
+  import-linter, with the residual "declared classes are human reviewed", although nothing can be
+  declared. The real-project pilot kept the principle on its own: each unit contract under
+  `activity_tracker_portal/governance/scopes/` lists its `observable_effects`.
+- **Decision.** Every frozen acceptance pack carries a required effect declaration, byte-bound with
+  the pack. It lists the effects of the behaviour the unit introduces or changes. Each effect is an
+  **observation**, which names the one external source it reads and captures what it reads as an
+  immutable artifact, or an **action**, which names the one external system it changes and whether
+  the change is confirmed, compensated or declared irreversible. An empty list declares no effects:
+  the unit's behaviour is a **transform**. A unit may declare several effects. This keeps the three
+  kinds and their disclosures and replaces the earlier rule that a unit is exactly one kind.
+- **What Vouch checks.** Mechanically: the declaration is present, strictly well-formed, consistent
+  with each kind's disclosures, and bound into the frozen pack. `NOT_CHECKED`: that the declaration is
+  true or complete, that a transform has no undeclared effect, that a compensation works. A project
+  may bind its own effect checker (an import contract, a lint rule, a type-level effect system); Vouch
+  records the run as evidence and reports "checker X passed rule Y over scope Z", never "pure".
+  Vouch does not infer purity; that part of Q90 stands.
+- **Existing units.** No upgrade invents a declaration (D-13). Units frozen before the change report
+  "effects not declared"; a declaration arrives only with a new pack version or an explicit recorded
+  amendment, never by inference from names or code layout.
+- **mk2's own units.** A self-hosted unit is a change, so it declares the effects of the behaviour it
+  adds or modifies. A change with no runtime behaviour, such as a docs or process change, declares an
+  empty list, and that claim is reviewed, not checked.
+- **The tier row** is corrected in the same unit: it stops citing mk2's own tools as evidence about a
+  governed project, and its residual names the effect declaration.
+- **Sequencing.** The declaration, any state-format change and the tier-row correction land before
+  `release@1`; D-24's order is otherwise unchanged. Binding a project's effect checker as evidence may
+  follow the release.
+- **Rejected.** A single `kind` field on the unit (Fable's recommendation): the pilot's
+  `send-outbox-message` declares three effects, so one kind would force splitting units or hiding
+  effects. Optional, project-level effect contracts only (Astra's recommendation): an optional
+  declaration is how the principle was lost. Keeping Q90 as written: it answered inference, not
+  declaration.
