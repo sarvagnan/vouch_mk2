@@ -37,6 +37,7 @@ from vouch_mk2.core import (
     Snapshot,
     Tier,
     UnitStatus,
+    Unit,
     UnitRef,
     decide,
     valid_command_line,
@@ -108,6 +109,7 @@ class _Arguments(argparse.Namespace):
     project: str
     pack_file: list[str]
     pack_test_file: list[str]
+    pack_effects_file: str
     reason: str
     lock_path: str | None
     test_job: list[str]
@@ -189,6 +191,7 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         ("generate", "generate the canonical system map"),
         ("next", "show binding next actions"),
         ("status", "show aggregate snapshot status facts"),
+        ("show-effects", "show each active unit's declared effects"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument(
@@ -196,7 +199,7 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
             default=".",
             help="store root directory (default: current directory)",
         )
-        if name in {"next", "status"}:
+        if name in {"next", "status", "show-effects"}:
             command.add_argument(
                 "--json",
                 dest="json_output",
@@ -600,6 +603,10 @@ def _add_lifecycle_parsers(commands: _Subparsers) -> None:
                 default=[],
                 help="project-relative executable acceptance test file (repeatable)",
             )
+            parser.add_argument(
+                "--pack-effects-file", default="",
+                help="project-relative effects declaration JSON",
+            )
             continue
         if command_type is command_module.RecordEvidence:
             parser.usage = (
@@ -832,12 +839,17 @@ def _pack_binding_handler(
         pack_test_files = tuple(cast(list[str], namespace.pack_test_file))
         if pack_files or pack_test_files:
             inventory = build_pack_inventory(
-                namespace.project, pack_files, pack_test_files
+                namespace.project, pack_files, pack_test_files,
+                namespace.pack_effects_file,
             )
             data = encode_pack_inventory(inventory)
             digest = digest_of(ArtifactKind.ACCEPTANCE_PACK, data)
             test_set_digest = pack_test_set_digest(inventory)
         else:
+            if namespace.pack_effects_file:
+                raise StoreError(
+                    "--pack-effects-file requires --pack-file or --pack-test-file"
+                )
             test_set_digest = ""
             if command_type in {
                 command_module.BindPack,
@@ -852,12 +864,14 @@ def _pack_binding_handler(
                 pack_version=namespace.pack_version,
                 pack_digest=digest,
                 test_set_digest=test_set_digest,
+                effects_declared=(inventory is not None and inventory.effects is not None),
             )
         elif command_type is command_module.BindPack:
             command = command_module.BindPack(
                 name=namespace.name,
                 pack_digest=digest,
                 test_set_digest=test_set_digest,
+                effects_declared=(inventory is not None and inventory.effects is not None),
             )
         elif command_type is command_module.RebindPack:
             command = None
@@ -885,6 +899,7 @@ def _pack_binding_handler(
                         reason=namespace.reason,
                         old_inventory=old_inventory,
                         new_inventory=inventory,
+                        old_pack_digest="" if unit is None else unit.acceptance_pack_digest,
                     )
                 assert command is not None
                 decision = decide(snapshot, command)
@@ -1375,6 +1390,82 @@ def _format_counts(rows: tuple[tuple[str, int], ...]) -> str:
     return ",".join(f"{status}={count}" for status, count in rows)
 
 
+def _effect_unit_name(unit: Unit) -> str:
+    return unit.name
+
+
+def _show_effects(root: str, json_output: bool) -> int:
+    from vouch_mk2.core import ActionEffect, ObservationEffect
+    from vouch_mk2.store import ArtifactKind, decode_pack_inventory
+    from vouch_mk2.store.codec import effects_objects
+    from typing import assert_never
+
+    rows: list[dict[str, object]] = []
+    lines: list[str] = []
+    try:
+        with Store.open(root, read_only=True) as store:
+            snapshot = store.read_snapshot()
+            for unit in sorted(snapshot.units, key=_effect_unit_name):
+                if unit.status is UnitStatus.SUPERSEDED:
+                    continue
+                declaration = "no-pack"
+                effects = None
+                text = "no pack bound, effects not declared"
+                if unit.acceptance_pack_digest:
+                    try:
+                        inventory = decode_pack_inventory(
+                            store.get_object(
+                                ArtifactKind.ACCEPTANCE_PACK, unit.acceptance_pack_digest,
+                            )
+                        )
+                    except StoreError:
+                        declaration = "unavailable"
+                        text = "pack inventory unavailable"
+                    else:
+                        if inventory.effects is None:
+                            declaration = "not-declared"
+                            text = "effects not declared"
+                        else:
+                            declaration = "declared"
+                            effects = effects_objects(inventory.effects)
+                            descriptions: list[str] = []
+                            for effect in inventory.effects:
+                                match effect:
+                                    case ActionEffect():
+                                        descriptions.append(
+                                            f"action {effect.name} (system: {effect.system}; "
+                                            f"declared outcome: {effect.outcome.value})"
+                                        )
+                                    case ObservationEffect():
+                                        descriptions.append(
+                                            f"observation {effect.name} (source: {effect.source}; "
+                                            f"captures: {effect.capture})"
+                                        )
+                                    case _:
+                                        assert_never(effect)
+                            text = (
+                                " | ".join(descriptions) if descriptions else "declares no effects"
+                            )
+                rows.append({
+                    "unit": unit.ref().label(), "declaration": declaration, "effects": effects,
+                })
+                # Preserve one line per unit even when a disclosure contains newlines.
+                lines.append(
+                    f"{unit.ref().label()}: {text}".replace("\r", "\\r").replace("\n", "\\n")
+                )
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    if json_output:
+        print(json.dumps(
+            {"effects_required": snapshot.effects_required, "units": rows}, sort_keys=True,
+        ))
+    else:
+        for line in lines:
+            print(line)
+    return 0
+
+
 def _status_object(facts: object) -> dict[str, object]:
     from vouch_mk2.projections import StatusFacts
 
@@ -1390,6 +1481,7 @@ def _status_object(facts: object) -> dict[str, object]:
         "anchor_mode": facts.anchor_mode,
         "tier": facts.tier,
         "ci_policy": facts.ci_policy,
+        "effects_required": facts.effects_required,
         "ci_exceptions": [list(row) for row in facts.ci_exceptions],
         "formal_certificate_recorded": facts.formal_certificate_recorded,
         "next_action_count": facts.next_action_count,
@@ -1768,6 +1860,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         print(written)
         return 0
+
+    if parsed.command == "show-effects":
+        return _show_effects(parsed.root, parsed.json_output)
 
     if parsed.command in ("next", "status"):
         try:

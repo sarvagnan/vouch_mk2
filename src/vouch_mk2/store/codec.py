@@ -13,11 +13,12 @@ event record is never rewritten merely because the live state format changes.
 from __future__ import annotations
 
 import json
+import re
 import types
 from collections.abc import Callable
 from dataclasses import fields, is_dataclass
 from enum import Enum
-from typing import cast, get_args, get_origin, get_type_hints
+from typing import assert_never, cast, get_args, get_origin, get_type_hints
 
 from vouch_mk2.core.invariants import (
     valid_command_line,
@@ -25,6 +26,9 @@ from vouch_mk2.core.invariants import (
     validate_snapshot,
 )
 from vouch_mk2.core.model import (
+    ActionEffect,
+    ActionOutcome,
+    ObservationEffect,
     AnchorMode,
     BundleInventory,
     ClosureRecord,
@@ -149,6 +153,7 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
     """Encode every Snapshot field as stable canonical JSON plus one newline."""
     document = {
         "anchor_mode": snapshot.anchor_mode.value,
+        **({"effects_required": True} if snapshot.effects_required else {}),
         "tier": snapshot.tier.value,
         "formal_certificate_digest": snapshot.formal_certificate_digest,
         "deviations": [
@@ -330,13 +335,110 @@ def encode_bundle_inventory(inventory: BundleInventory) -> bytes:
     )
 
 
+def _effect_name(effect: ObservationEffect | ActionEffect) -> str:
+    return effect.name
+
+
+def effects_objects(
+    effects: tuple[ObservationEffect | ActionEffect, ...],
+) -> list[dict[str, object]]:
+    """Canonical effect objects shared by inventory encoding and presentation."""
+    result: list[dict[str, object]] = []
+    for effect in sorted(effects, key=_effect_name):
+        match effect:
+            case ObservationEffect():
+                row: dict[str, object] = {
+                    "kind": "observation", "name": effect.name,
+                    "source": effect.source, "capture": effect.capture,
+                }
+            case ActionEffect():
+                if not isinstance(effect.outcome, ActionOutcome):
+                    raise StoreError("effect outcome must be an ActionOutcome")
+                row = {
+                    "kind": "action", "name": effect.name,
+                    "system": effect.system, "outcome": effect.outcome.value,
+                }
+            case _:
+                assert_never(effect)
+        if effect.detail:
+            row["detail"] = effect.detail
+        elif not isinstance(effect.detail, str):
+            raise StoreError("effect detail must be a string")
+        result.append(row)
+    # Apply the same strict field and uniqueness rules at both ingresses.
+    try:
+        _decode_effects(result)
+    except DecodeError as error:
+        raise StoreError(str(error)) from error
+    return result
+
+
+def _effect_string(value: object, path: str) -> str:
+    text = _string(value, path)
+    if not text.strip():
+        raise DecodeError(f"{path}: expected a non-blank string")
+    return text
+
+
+def _decode_effects(value: object) -> tuple[ObservationEffect | ActionEffect, ...]:
+    result: list[ObservationEffect | ActionEffect] = []
+    names: set[str] = set()
+    for index, raw in enumerate(_array(value, "effects")):
+        path = f"effects[{index}]"
+        obj = _object(raw, path)
+        kind = _string(obj.get("kind"), f"{path}.kind")
+        if kind == "observation":
+            required = frozenset({"kind", "name", "source", "capture"})
+        elif kind == "action":
+            required = frozenset({"kind", "name", "system", "outcome"})
+        else:
+            raise DecodeError(f"{path}.kind: expected observation or action")
+        obj = _fields(obj, path, required, frozenset({"detail"}))
+        for key, value in obj.items():
+            if isinstance(value, str):
+                try:
+                    value.encode("utf-8")
+                except UnicodeEncodeError as error:
+                    raise DecodeError(
+                        f"{path}.{key}: must be valid UTF-8 without surrogate code points"
+                    ) from error
+        name = _effect_string(obj["name"], f"{path}.name")
+        if re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name) is None:
+            raise DecodeError(f"{path}.name: expected a lowercase hyphenated name")
+        if name in names:
+            raise DecodeError(f"{path}.name: duplicate name {name!r}")
+        names.add(name)
+        detail = _string(obj.get("detail", ""), f"{path}.detail")
+        if kind == "observation":
+            result.append(ObservationEffect(
+                name, _effect_string(obj["source"], f"{path}.source"),
+                _effect_string(obj["capture"], f"{path}.capture"), detail,
+            ))
+        else:
+            result.append(ActionEffect(
+                name, _effect_string(obj["system"], f"{path}.system"),
+                _enum_value(obj["outcome"], f"{path}.outcome", ActionOutcome), detail,
+            ))
+    return tuple(sorted(result, key=_effect_name))
+
+
+def decode_effects_file(data: bytes) -> tuple[ObservationEffect | ActionEffect, ...]:
+    obj = _fields(
+        _decode_json(data, "effects file"), "",
+        frozenset({"effects_format", "effects"}),
+    )
+    if _integer(obj["effects_format"], "effects_format") != 1:
+        raise DecodeError("effects_format: expected 1")
+    return _decode_effects(obj["effects"])
+
+
 def encode_pack_inventory(inventory: PackInventory) -> bytes:
     """Encode one canonical acceptance-pack inventory (D-14)."""
     if not inventory.entries:
         raise StoreError("acceptance pack inventory must contain at least one entry")
-    if inventory.pack_format not in {1, 2}:
+    if type(inventory.pack_format) is not int or inventory.pack_format not in {1, 2, 3}:
         raise StoreError(
-            f"unsupported acceptance pack format {inventory.pack_format}; expected 1 or 2"
+            f"unsupported acceptance pack format {inventory.pack_format}; expected 1, 2 or 3"
         )
     if inventory.pack_format == 2 and not any(
         entry.role == "test" for entry in inventory.entries
@@ -344,6 +446,17 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
         raise StoreError(
             "acceptance pack format 2 must contain at least one role 'test' entry"
         )
+    if inventory.pack_format == 3:
+        if (
+            inventory.effects is None
+            or sum(entry.role == "effects" for entry in inventory.entries) != 1
+            or len(inventory.entries) < 2
+        ):
+            raise StoreError(
+                "pack format 3 requires effects, exactly one effects entry and another entry"
+            )
+    elif inventory.effects is not None:
+        raise StoreError("legacy pack formats cannot carry effects")
     previous = ""
     for entry in inventory.entries:
         RelPath.parse(entry.path)
@@ -365,9 +478,13 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
                 raise StoreError(
                     f"pack entry {entry.path!r}: pack format 1 cannot carry role {entry.role!r}"
                 )
-        elif entry.role not in {"test", "spec"}:
+        elif entry.role not in (
+            {"test", "spec", "effects"}
+            if inventory.pack_format == 3 else {"test", "spec"}
+        ):
             raise StoreError(
-                f"pack entry {entry.path!r}: role must be 'test' or 'spec'"
+                f"pack entry {entry.path!r}: invalid role {entry.role!r} "
+                f"for pack format {inventory.pack_format}"
             )
         previous = entry.path
     entries = [
@@ -375,7 +492,7 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
             "path": entry.path,
             "sha256": entry.sha256,
             "size": entry.size,
-            **({"role": entry.role} if inventory.pack_format == 2 else {}),
+            **({"role": entry.role} if inventory.pack_format >= 2 else {}),
         }
         for entry in inventory.entries
     ]
@@ -383,6 +500,7 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
         {
             "pack_format": inventory.pack_format,
             "entries": entries,
+            **({"effects": effects_objects(inventory.effects)} if inventory.effects is not None else {}),
         }
     )
 
@@ -465,6 +583,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "event_head": map.event_head,
             "anchor_mode": map.anchor_mode,
             "tier": map.tier,
+            **({"effects_required": True} if map.effects_required else {}),
             **(
                 {"ci_policy": map.ci_policy}
                 if map.ci_policy != CiPolicy.LEDGER.value
@@ -541,6 +660,7 @@ def encode_system_map(map: SystemMap, source_state_digest: str) -> bytes:
             "status_facts": {
                 "anchor_mode": map.status_facts.anchor_mode,
                 "tier": map.status_facts.tier,
+                **({"effects_required": True} if map.status_facts.effects_required else {}),
                 **(
                     {"ci_policy": map.status_facts.ci_policy}
                     if map.status_facts.ci_policy != CiPolicy.LEDGER.value
@@ -803,7 +923,7 @@ _SNAPSHOT_FIELDS = frozenset(
         "state_format",
     }
 )
-_SNAPSHOT_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions"})
+_SNAPSHOT_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions", "effects_required"})
 _SYSTEM_MAP_DOCUMENT_FIELDS = frozenset(
     {"map_format", "source_state_digest", "map"}
 )
@@ -823,7 +943,7 @@ _SYSTEM_MAP_FIELDS = frozenset(
         "status_facts",
     }
 )
-_SYSTEM_MAP_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions"})
+_SYSTEM_MAP_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions", "effects_required"})
 _SYSTEM_MAP_UNIT_FIELDS = frozenset(
     {
         "name",
@@ -861,7 +981,7 @@ _STATUS_FACTS_FIELDS = frozenset(
         "unbound_pack_units",
     }
 )
-_STATUS_FACTS_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions"})
+_STATUS_FACTS_OPTIONAL_FIELDS = frozenset({"ci_policy", "ci_exceptions", "effects_required"})
 
 
 def _digest(value: object, path: str, *, allow_empty: bool = False) -> str:
@@ -913,6 +1033,7 @@ _EVENT_TYPE_NAMES = (
     "AnchorModeSet",
     "TierSet",
     "CiPolicySet",
+    "EffectsRequired",
     "OpenInCiMarked",
     "OpenInCiCleared",
     "FormalCertificateRecorded",
@@ -1087,10 +1208,15 @@ def _parent(value: object, path: str) -> str:
     return _digest(parent, path)
 
 
-def _pack_role(value: object, path: str) -> str:
+def _pack_role(value: object, path: str, *, effects_allowed: bool = False) -> str:
     role = _string(value, path)
-    if role not in {"test", "spec"}:
-        raise DecodeError(f"{path}: expected 'test' or 'spec'")
+    allowed = {"test", "spec", "effects"} if effects_allowed else {"test", "spec"}
+    if role not in allowed:
+        expected = (
+            f"expected one of {sorted(allowed)!r}"
+            if effects_allowed else "expected 'test' or 'spec'"
+        )
+        raise DecodeError(f"{path}: {expected}")
     return role
 
 
@@ -1495,10 +1621,13 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
         _decode_json(data, "acceptance pack inventory"),
         "",
         _PACK_INVENTORY_FIELDS,
+        frozenset({"effects"}),
     )
     pack_format = _integer(obj["pack_format"], "pack_format")
-    if pack_format not in {1, 2}:
-        raise DecodeError(f"pack_format: expected 1 or 2, got {pack_format}")
+    if pack_format not in {1, 2, 3}:
+        raise DecodeError(f"pack_format: expected 1, 2 or 3, got {pack_format}")
+    if ("effects" in obj) != (pack_format == 3):
+        raise DecodeError("effects: required only in pack format 3")
     raw_entries = _array(obj["entries"], "entries")
     if not raw_entries:
         raise DecodeError("entries: acceptance pack inventory must not be empty")
@@ -1532,18 +1661,27 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
                 role=(
                     ""
                     if pack_format == 1
-                    else _pack_role(fields["role"], f"{path}.role")
+                    else _pack_role(
+                        fields["role"], f"{path}.role", effects_allowed=pack_format == 3
+                    )
                 ),
             )
         )
         seen_paths.add(text)
         previous = text
-    inventory = PackInventory(entries=tuple(entries), pack_format=pack_format)
+    inventory = PackInventory(
+        entries=tuple(entries), pack_format=pack_format,
+        effects=_decode_effects(obj["effects"]) if pack_format == 3 else None,
+    )
     if pack_format == 2 and not any(entry.role == "test" for entry in entries):
         raise DecodeError(
             "entries: acceptance pack format 2 must contain at least one role 'test' entry"
         )
-    if encode_pack_inventory(inventory) != data:
+    try:
+        canonical = encode_pack_inventory(inventory)
+    except StoreError as error:
+        raise DecodeError(str(error)) from error
+    if canonical != data:
         raise DecodeError("$: non-canonical acceptance pack inventory encoding")
     return inventory
 
@@ -1748,6 +1886,7 @@ def decode_snapshot(data: bytes) -> Snapshot:
             "formal_certificate_digest",
             allow_empty=True,
         ),
+        effects_required=_boolean(obj.get("effects_required", False), "effects_required"),
         ci_policy=(
             CiPolicy.LEDGER
             if "ci_policy" not in obj
@@ -1938,6 +2077,7 @@ def _decode_status_facts(value: object, path: str) -> StatusFacts:
             obj["anchor_mode"], f"{path}.anchor_mode", AnchorMode
         ).value,
         tier=_enum_value(obj["tier"], f"{path}.tier", Tier).value,
+        effects_required=_boolean(obj.get("effects_required", False), f"{path}.effects_required"),
         ci_policy=(
             CiPolicy.LEDGER.value
             if "ci_policy" not in obj
@@ -2104,6 +2244,7 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
             obj["anchor_mode"], "map.anchor_mode", AnchorMode
         ).value,
         tier=_enum_value(obj["tier"], "map.tier", Tier).value,
+        effects_required=_boolean(obj.get("effects_required", False), "map.effects_required"),
         ci_policy=(
             CiPolicy.LEDGER.value
             if "ci_policy" not in obj
@@ -2122,6 +2263,8 @@ def decode_system_map(data: bytes) -> tuple[SystemMap, str]:
         next_actions=actions,
         status_facts=_decode_status_facts(obj["status_facts"], "map.status_facts"),
     )
+    if map.status_facts.effects_required != map.effects_required:
+        raise DecodeError("map.status_facts.effects_required: must equal map.effects_required")
     if map.status_facts.tier != map.tier:
         raise DecodeError(
             "map.status_facts.tier: must equal map.tier "

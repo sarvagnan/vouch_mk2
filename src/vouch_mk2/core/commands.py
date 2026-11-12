@@ -41,6 +41,7 @@ class FreezeAcceptance:
     pack_version: str
     pack_digest: str = ""
     test_set_digest: str = ""
+    effects_declared: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,7 @@ class BindPack:
     name: str
     pack_digest: str
     test_set_digest: str = ""
+    effects_declared: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,7 @@ class RebindPack:
     test_set_digest: str = ""
     old_inventory: PackInventory | None = None
     new_inventory: PackInventory | None = None
+    old_pack_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +188,13 @@ class SetTier:
 
 
 @dataclass(frozen=True, slots=True)
+class RequireEffects:
+    """Require effect declarations on future pack bindings (one-way)."""
+
+    ir_command: ClassVar[str] = mk2.CMD_REQUIRE_EFFECTS
+
+
+@dataclass(frozen=True, slots=True)
 class SetCiPolicy:
     """Choose whether CI reports ledger coherence or requires terminal units."""
 
@@ -302,6 +312,7 @@ type Command = (
     | SetAnchorMode
     | SetTier
     | SetCiPolicy
+    | RequireEffects
     | MarkOpenInCi
     | ClearOpenInCi
     | RecordFormalCertificate

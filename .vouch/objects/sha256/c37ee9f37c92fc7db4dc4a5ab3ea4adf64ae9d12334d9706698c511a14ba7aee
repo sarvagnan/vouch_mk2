@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-ed-07","deviation_type":"pack-defect","unit":{"name":"effect-declarations","version":"1"}},"prev":"a7fb6556c8f9e7858ed34527570eff45291dec6e2dc5142cbd6520e3f3435728","recorded_at":"2026-11-12T12:59:05+00:00","revision":884,"run_id":""}

@@ -82,6 +82,7 @@ ARTIFACT_RESULTS = tuple(
         mk2.CHECK_MAP_FRESHNESS,
         mk2.CHECK_CONTEXT_FRESHNESS,
         mk2.CHECK_PACK_BOUND,
+        mk2.CHECK_EFFECTS_DECLARED,
         mk2.CHECK_PACK_FILES_MATCH,
         mk2.CHECK_EVENT_LOG,
     )
@@ -405,7 +406,7 @@ def test_organizational_checks_are_always_not_checked_with_detail() -> None:
     )
     for snapshot in snapshots:
         report = run_checks(snapshot)
-        assert len(report.organizational) == 6
+        assert len(report.organizational) == 7
         assert all(
             found.verdict is Verdict.NOT_CHECKED and found.detail
             for found in report.organizational

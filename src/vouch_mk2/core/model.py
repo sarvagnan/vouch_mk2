@@ -250,10 +250,33 @@ class PackEntry:
     role: str = ""
 
 
+class ActionOutcome(Enum):
+    CONFIRMED = "confirmed"
+    COMPENSATED = "compensated"
+    IRREVERSIBLE = "irreversible"
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationEffect:
+    name: str
+    source: str
+    capture: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ActionEffect:
+    name: str
+    system: str
+    outcome: ActionOutcome
+    detail: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class PackInventory:
     entries: tuple[PackEntry, ...]
     pack_format: int = 1
+    effects: tuple[ObservationEffect | ActionEffect, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +303,7 @@ class Snapshot:
     formal_certificate_digest: str = ""
     ci_policy: CiPolicy = CiPolicy.STRICT
     ci_exceptions: tuple[CiException, ...] = ()
+    effects_required: bool = False
 
     def unit(self, name: str) -> Unit | None:
         """The CURRENT record for ``name`` (D-9): the one non-superseded record

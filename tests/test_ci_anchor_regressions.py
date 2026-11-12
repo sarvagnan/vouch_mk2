@@ -47,6 +47,7 @@ def _unit_with_local_anchor(project: Path, name: str) -> None:
     test_file = project / "tests" / f"test_{name}.py"
     test_file.parent.mkdir(exist_ok=True)
     test_file.write_text("def test_ok():\n    assert True\n")
+    (project / "effects.json").write_text('{"effects_format":1,"effects":[]}\n')
     assert _run("specify", "--root", root, "--name", name, "--version", "v1")[0] == 0
     assert _run(
         "freeze",
@@ -60,6 +61,7 @@ def _unit_with_local_anchor(project: Path, name: str) -> None:
         str(project),
         "--pack-test-file",
         str(test_file.relative_to(project)),
+        "--pack-effects-file", "effects.json",
     )[0] == 0
     assert _run("record-evidence", "--root", root, "--unit", f"{name}@v1", "--kind", "red", "--", sys.executable, "-c", "raise SystemExit(1)")[0] == 0
     assert _run("advance-anchor", "--root", root, "--unit-name", name)[0] == 0

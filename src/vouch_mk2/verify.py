@@ -6,27 +6,34 @@ This CI/verify layer loads the claimed bytes and proves their content addressing
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import assert_never
 
-from vouch_mk2.bundle import build_pack_inventory
+from vouch_mk2.bundle import build_pack_inventory, parse_effects_file, read_pack_file
 from vouch_mk2.checks import CheckReport, CheckResult, compose
 from vouch_mk2.checks.tier import check_pack_bound, tier_check_applies
 from vouch_mk2.core import (
     Accepted,
+    AcceptanceFrozen,
+    AcceptancePackBound,
+    AcceptancePackRebound,
     AnchorMode,
     EvidenceEvent,
     EventRecord,
     EvidenceHead,
     EvidenceKind,
+    EffectsRequired,
     PackRebound,
+    PreLogHistoryRecorded,
     RecordEvidence,
     RecordFormalCertificate,
     Snapshot,
     Tier,
     Unit,
+    UnitSpecified,
     UnitStatus,
     apply,
     decide,
@@ -619,6 +626,121 @@ def _check_pack_bound_objects(
     )
 
 
+def _packs_bound_after_effects_required(store: Store, snapshot: Snapshot) -> set[str]:
+    """Trace current packs to their introducing binding, within each unit version."""
+    units = {
+        unit.name: unit for unit in snapshot.units
+        if unit.status is not UnitStatus.SUPERSEDED and unit.acceptance_pack_digest
+    }
+    pending = {name: unit.acceptance_pack_digest for name, unit in units.items()}
+    bindings: dict[str, int] = {}
+    required_revision: int | None = None
+    digest = snapshot.event_head
+    visited: set[str] = set()
+    while digest and digest != "GENESIS":
+        if digest in visited:
+            raise StoreError("event chain cycle while checking effect declarations")
+        visited.add(digest)
+        record = decode_event_record(store.get_object(ArtifactKind.EVENT, digest))
+        match record.folded_event:
+            case EffectsRequired():
+                required_revision = record.revision
+            case AcceptancePackRebound(
+                name=name, old_pack_digest=old_digest, new_pack_digest=new_digest,
+            ) if name in pending:
+                if pending[name] != new_digest:
+                    raise StoreError(f"{units[name].ref().label()}: broken pack binding chain")
+                pending[name] = old_digest
+            case AcceptanceFrozen(name=name, pack_digest=pack_digest) | AcceptancePackBound(
+                name=name, pack_digest=pack_digest,
+            ) if name in pending and pack_digest:
+                if pending[name] != pack_digest:
+                    raise StoreError(f"{units[name].ref().label()}: broken pack binding chain")
+                bindings[name] = record.revision
+                del pending[name]
+            case UnitSpecified(name=name) if name in pending:
+                # Digests can be reused by another version of the same name.
+                raise StoreError(f"{units[name].ref().label()}: pack binding origin not found")
+            case PreLogHistoryRecorded(baseline=baseline):
+                # The checkpoint attests to earlier bindings without inventing events.
+                for name in tuple(pending):
+                    unit = baseline.unit(name)
+                    if (
+                        unit is not None and unit.ref() == units[name].ref()
+                        and unit.acceptance_pack_digest == pending[name]
+                    ):
+                        bindings[name] = record.revision
+                        del pending[name]
+        digest = record.prev
+    if pending and snapshot.event_head:
+        labels = ", ".join(units[name].ref().label() for name in sorted(pending))
+        raise StoreError(f"{labels}: pack binding origin not found")
+    if required_revision is None:
+        return set()
+    return {
+        name for name, revision in bindings.items() if revision > required_revision
+    }
+
+
+def _check_effects_declared(
+    store: Store, snapshot: Snapshot, project: str | None,
+) -> CheckResult:
+    declared = 0
+    empty = 0
+    undeclared: list[str] = []
+    failures: list[str] = []
+    try:
+        bound_after_requirement = _packs_bound_after_effects_required(store, snapshot)
+    except StoreError as error:
+        bound_after_requirement = set()
+        failures.append(f"effects binding history unavailable: {error}")
+    for unit in sorted(snapshot.units, key=_unit_label):
+        if unit.status is UnitStatus.SUPERSEDED:
+            continue
+        if not unit.acceptance_pack_digest:
+            undeclared.append(unit.ref().label())
+            continue
+        try:
+            inventory = decode_pack_inventory(store.get_object(
+                ArtifactKind.ACCEPTANCE_PACK, unit.acceptance_pack_digest,
+            ))
+        except StoreError as error:
+            failures.append(f"{unit.ref().label()}: pack inventory unavailable: {error}")
+            continue
+        if inventory.effects is None:
+            undeclared.append(unit.ref().label())
+            if unit.name in bound_after_requirement:
+                failures.append(f"{unit.ref().label()}: bound after effects were required")
+        else:
+            declared += 1
+            empty += not inventory.effects
+            if project is not None and tier_check_applies(snapshot, mk2.CHECK_PACK_FILES_MATCH):
+                entry = next(entry for entry in inventory.entries if entry.role == "effects")
+                try:
+                    data = read_pack_file(project, entry.path)
+                except StoreError:
+                    # Missing or changed files belong to check.pack-files-match.
+                    continue
+                if hashlib.sha256(data).hexdigest() != entry.sha256:
+                    continue
+                try:
+                    matches = parse_effects_file(data) == inventory.effects
+                except StoreError:
+                    matches = False
+                if not matches:
+                    failures.append(
+                        f"{unit.ref().label()}: effects file {entry.path!r} does not match embedded declaration"
+                    )
+    detail = f"{declared} declared ({empty} with no effects), {len(undeclared)} not declared"
+    if undeclared:
+        detail += ": " + ", ".join(undeclared)
+    return CheckResult(
+        check_id=mk2.CHECK_EFFECTS_DECLARED,
+        verdict=Verdict.FAIL if failures else Verdict.PASS,
+        detail=" ".join("; ".join((detail, *failures)).splitlines()),
+    )
+
+
 def _check_pack_files_match(
     store: Store, snapshot: Snapshot, project: str | None
 ) -> CheckResult:
@@ -668,17 +790,19 @@ def _check_pack_files_match(
             )
             continue
         try:
+            # Include the effects path among raw files. This check compares
+            # hashes and sizes, never reparses or compares the declaration.
             actual = build_pack_inventory(
                 project_root,
                 tuple(
                     entry.path
                     for entry in inventory.entries
-                    if inventory.pack_format == 1 or entry.role == "spec"
+                    if inventory.pack_format == 1 or entry.role in {"spec", "effects"}
                 ),
                 tuple(
                     entry.path
                     for entry in inventory.entries
-                    if inventory.pack_format == 2 and entry.role == "test"
+                    if inventory.pack_format >= 2 and entry.role == "test"
                 ),
             )
         except StoreError as error:
@@ -686,8 +810,8 @@ def _check_pack_files_match(
             continue
         actual_by_path = {entry.path: entry for entry in actual.entries}
         for expected in inventory.entries:
-            found = actual_by_path[expected.path]
-            if found.size != expected.size or found.sha256 != expected.sha256:
+            found = actual_by_path.get(expected.path)
+            if found is None or found.size != expected.size or found.sha256 != expected.sha256:
                 failures.append(
                     f"unit {unit.ref().label()!r}: changed pack file {expected.path!r}"
                 )
@@ -946,6 +1070,7 @@ def run_artifact_checks(
                 _check_context_freshness(store, snapshot),
                 _check_pack_bound_objects(store, snapshot, walks),
                 _check_pack_files_match(store, snapshot, project),
+                _check_effects_declared(store, snapshot, project),
             ),
             key=_check_id,
         )

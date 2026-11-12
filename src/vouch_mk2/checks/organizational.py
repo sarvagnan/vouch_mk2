@@ -8,6 +8,14 @@ from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
 
 
+def check_effects_truth(_snapshot: Snapshot) -> CheckResult:
+    return CheckResult(
+        check_id=mk2.ORG_EFFECTS_TRUTH,
+        verdict=Verdict.NOT_CHECKED,
+        detail="a declaration records what was declared, not that the code has only those effects",
+    )
+
+
 def check_acceptance_ownership(_snapshot: Snapshot) -> CheckResult:
     return CheckResult(
         check_id=mk2.ORG_ACCEPTANCE_OWNERSHIP,

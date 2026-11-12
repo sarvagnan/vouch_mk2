@@ -11,6 +11,35 @@ questions on 2026-11-12:
 - Label-only freezes stay allowed and are reported.
 - The requirement is a one-way store switch that `init` sets.
 
+## Amendments
+
+- **pack/2 (2026-11-12, after implementation; adjudicated by the owner).**
+  - DEV-ed-01, a pack defect: the pack's tests used `typing.Any`, which the bound strict-types
+    guard forbids. They are rewritten with `cast`, and the assertions are unchanged.
+  - DEV-ed-02, a plan gap: a third bound fixture, `tests/test_event_log.py` (`event-log@1`), assumes
+    `init` records no event. It is added to the prerequisite below.
+  - DEV-ed-03 is rejected: re-recording the formal certificate and regenerating the dogfood
+    projections are owner obligations this pack already assigns.
+- **pack/3 (2026-11-12, Astra's review; adjudicated by the owner).**
+  - DEV-ed-04: merge replayed a rebind recorded against another pack (for example `u@1`'s, onto
+    `u@2`), checking effects against the wrong old inventory. `RebindPack` gains `old_pack_digest`
+    (R10b).
+  - DEV-ed-05: fast-forward adoption does not re-run `decide()`, so a crafted undeclared bind could
+    enter a store that requires effects. `check.effects-declared` now verifies the rule from the
+    event log (R13c).
+  - DEV-ed-06: the pack excluded comparing the effects file with the embedded declaration, so a
+    library caller could detach them. Where pack files are verified, the check compares them (R13d).
+  - DEV-ed-07: `effects-v1` reaches the requirement but cannot discriminate removal of the gate,
+    because declarations live in pack objects, not the snapshot. The claim boundary says so (R18).
+  - R2 gains two lone-surrogate refusals. Astra found an implementation defect: a surrogate parsed,
+    then crashed encoding. These cases pin it.
+  - Freeze replay onto a different unit version is the existing open decision `vouch_mk2-bd4.4.2`
+    and stays out of scope.
+- **pack/4 (2026-11-12, Astra's re-check; adjudicated by the owner).** DEV-ed-08: R13c treated a
+  declaration-preserving rebind as a fresh binding, so a grandfathered unit's ordinary D-14
+  adaptation after `require-effects` failed the check, and nothing could repair it. A rebind now
+  inherits its predecessor's binding (R13e).
+
 ## Promise
 
 A pack can carry an effects declaration. It is embedded in the pack inventory (pack format 3), next
@@ -87,6 +116,12 @@ not. So effects edits never void RED or GREEN (D-17).
 - `RebindPack`: when the old and new inventories' `effects` differ (including `None` against a
   tuple), the rebind is refused with `rebind.effects-changed`. This check runs before the existing
   path checks.
+- `RebindPack` also gains `old_pack_digest: str = ""` (pack/3). When it is non-empty and differs
+  from the unit's current `acceptance_pack_digest`, the rebind is refused with `rebind.stale-pack`
+  and that violation alone, checked before the other rebind rules.
+  - The CLI sets it to the unit's current digest.
+  - Merge sets it from the replayed event's `old_pack_digest`.
+  - An empty value asserts nothing, so existing callers keep working.
 - `freeze`, `bind-pack` and `rebind-pack` gain `--pack-effects-file PATH`. An invalid effects file,
   or `--pack-effects-file` given without any `--pack-file` or `--pack-test-file`, exits 2 and writes
   nothing.
@@ -105,13 +140,24 @@ invents no state (D-13).
 **Reports:**
 - **`check.effects-declared`** (IR: `CHECK_EFFECTS_DECLARED`, scope `ARTIFACT_CHECK`). Its subjects
   are the active, non-superseded units.
-  - It is **FAIL**, naming the unit, when a bound inventory object is missing or does not decode.
+  - It is **FAIL**, naming the unit, in any of these cases:
+    - a bound inventory object is missing or does not decode;
+    - (pack/3, pack/4) an active unit's bound pack is undeclared, and the freeze or bind that
+      introduced it comes after the first `EffectsRequired` event in the event log. A rebind never
+      counts as that event: it preserves the declaration status (`rebind.effects-changed`), so the
+      check follows rebinds from the current pack digest back to the freeze or bind that
+      introduced the chain, and judges that event. The detail
+      contains `<name@version>` and "bound after effects were required". This holds whatever route
+      the event came by, a fast-forward merge included. Undeclared packs bound before the
+      requirement stay grandfathered.
+    - (pack/3) at a tier where pack files are verified (`standard` or `high`) and a project root is
+      available, the effects file at the effects entry's path matches the entry's sha256 but parses
+      to a different declaration from the embedded one. The detail contains `<name@version>` and
+      "does not match". A missing or changed file is left to `check.pack-files-match`.
   - Otherwise it is **PASS**, with a one-line detail that starts with
     `"<n> declared (<m> with no effects), <k> not declared"`. The undeclared units are named as
     `name@version` (bound but undeclared packs, and label-only freezes).
   - It never fails because a unit is undeclared, so `check --ci` stays green for older units.
-  - It does not compare effects files on disk: `check.pack-files-match` already binds their raw
-    bytes, scoped by tier.
 - **`org.effects-truth`** (IR: `ORG_EFFECTS_TRUTH`, scope `ORGANIZATIONAL`), always NOT_CHECKED. Its
   detail contains "a declaration records what was declared, not that the code has only those
   effects".
@@ -150,7 +196,8 @@ invents no state (D-13).
 ## Requirements
 
 - **R1** `test_an_effects_file_parses_to_typed_effects_sorted_by_name`.
-- **R2** `test_an_invalid_effects_file_is_refused`: 15 refusals.
+- **R2** `test_an_invalid_effects_file_is_refused`: 17 refusals, including two lone surrogates
+  (pack/3).
 - **R3** `test_a_format_3_inventory_round_trips_and_legacy_formats_do_not_change`: the encode
   refusals are each isolated, and malformed format-3 or legacy JSON is refused on decode.
 - **R4** `test_building_hashes_and_parses_the_same_effects_bytes`:
@@ -164,11 +211,16 @@ invents no state (D-13).
 - **R8** `test_a_store_that_requires_effects_refuses_an_undeclared_pack`.
 - **R9** `test_the_decision_and_the_library_enforce_the_requirement`.
 - **R10** `test_rebind_keeps_the_declaration_exactly`.
+- **R10b** (pack/3) `test_a_rebind_must_name_the_pack_it_replaces`: the `decide()` rule, plus a
+  directory merge of two diverged rebinds, refused with `rebind.stale-pack` and the store unchanged.
 - **R11** `test_init_requires_effects_for_new_projects`.
 - **R12** `test_a_merge_replays_declared_packs_onto_a_store_that_requires_effects` and
   `test_a_merge_refuses_an_undeclared_pack_onto_a_store_that_requires_effects`.
 - **R13** `test_check_reports_declared_and_undeclared_units_without_failing` and
   `test_an_unreadable_declared_inventory_fails_the_effects_row`.
+- **R13c** (pack/3) `test_check_fails_an_undeclared_pack_bound_after_effects_were_required`.
+- **R13d** (pack/3) `test_check_fails_a_declaration_detached_from_its_effects_file`.
+- **R13e** (pack/4) `test_a_legacy_rebind_after_the_requirement_stays_grandfathered`.
 - **R14** `test_show_effects_lists_each_active_unit`.
 - **R15** `test_status_and_agent_context_state_the_requirement`.
 - **R16** `test_the_tier_row_claims_declared_effects_only`.
@@ -176,26 +228,31 @@ invents no state (D-13).
 - **R18** `test_the_docs_show_effect_declarations`:
   - `docs/quickstart.md` freezes with `--pack-effects-file` and shows an `.effects.json` file.
   - `docs/claim-boundary.md` states the effects claim, including the phrase above and how
-    `require-effects` works.
+    `require-effects` works. It also states the formal limit, containing "reaches the effects
+    requirement but does not verify its gate" (pack/3).
   - `docs/commands.md` is regenerated, with `## require-effects` and `## show-effects`.
   - `scripts/walkthrough.py` freezes with `--pack-effects-file`, because `init` now requires it.
 - **R19** (`# guard:`) `test_d31_records_the_decision`.
 
 ## Prerequisite at publication (owner)
 
-Two published units' bound tests build their fixture with `init` and then freeze with pack files
-and no effects file:
-- `tests/test_anchor_unit_ref.py` (`anchor-unit-ref@1`);
-- `tests/test_ci_anchor.py` (`ci-anchor@1`).
+Three published units' bound tests build their fixture with `init`:
+- `tests/test_anchor_unit_ref.py` (`anchor-unit-ref@1`) freezes with pack files and no effects file;
+- `tests/test_ci_anchor.py` (`ci-anchor@1`) does the same, and `tests/test_ci_test_hermeticity.py`
+  re-runs that fixture;
+- `tests/test_event_log.py` (`event-log@1`) assumes `init` records no event (pack/2).
 
-Once `init` requires effects, those fixtures are refused. Sol does not edit them. Sol reports the
+Once `init` requires effects, the first two fixtures are refused, and the third sees one more event
+before its own. Sol does not edit them. Sol reports the
 failures in the DONE file and confirms each one comes only from `pack.effects-required`.
 
-After implementation, the owner adapts each fixture so its freezes pass an empty declaration
-(`--pack-effects-file` with `{"effects_format": 1, "effects": []}`). The assertions stay unchanged.
-The owner then runs `rebind-pack` for each of the two units with a stated reason (the D-14
-amendment, shared-interface adaptation) and records fresh GREEN for each, before this unit
-publishes.
+After implementation, the owner adapts each fixture. The two freezing fixtures pass an empty
+declaration (`--pack-effects-file` with `{"effects_format": 1, "effects": []}`). The event-log
+fixture asserts that its record follows `init`'s recorded event instead of `GENESIS`. The
+behavioural assertions stay unchanged. The owner then runs `rebind-pack` for each of the three units
+with a stated reason (the D-14 amendment, shared-interface adaptation) and records fresh GREEN for
+each, before this unit publishes. The owner also re-records the formal certificate and regenerates
+the dogfood store's projections.
 
 ## Ground rules
 
@@ -228,5 +285,7 @@ publishes.
   declaration.
 - Showing per-unit effects in the system map and agent context. Only the requirement line is in
   scope; per-unit lists are in `show-effects`.
-- Comparing an effects file's parse on disk against the embedded copy: `check.pack-files-match`
-  binds the raw bytes.
+- Freeze replay onto a different version of the same unit name (`vouch_mk2-bd4.4.2`, an open
+  decision that predates this unit).
+- Re-running `decide()` over a fast-forwarded suffix in general. The effects rule is verified after
+  the fact by R13c instead.

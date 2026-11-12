@@ -266,6 +266,7 @@ def test_divergent_merge_resolves_legacy_anchor_to_ours_current_version(tmp_path
     (project / "packs").mkdir()
     (project / "tests").mkdir()
     (project / "packs/u.spec.md").write_text("# Unit u\n")
+    (project / "packs/u.effects.json").write_text('{"effects_format":1,"effects":[]}\n')
     (project / "tests/t.py").write_text("def test_u():\n    assert True\n")
     must("set-tier", "--root", root, "--tier", "standard")
     must("set-anchor-mode", "--root", root, "--mode", "ci")
@@ -275,6 +276,7 @@ def test_divergent_merge_resolves_legacy_anchor_to_ours_current_version(tmp_path
             "freeze", "--root", root, "--name", "u", "--pack-version", f"u-pack/{version}",
             "--project", str(project), "--pack-file", "packs/u.spec.md",
             "--pack-test-file", "tests/t.py",
+            "--pack-effects-file", "packs/u.effects.json",
         )
         must("mark-ready", "--root", root, "--name", "u")
         must("start", "--root", root, "--name", "u")

@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"effect-declarations@1","reason":"pack/3 frozen and RED #3 recorded; the pack/3 fixes land in the next implementation pass (D-31)"},"prev":"029aadc9482831c0be7a2eca98ba9b526519f7235b59e22b1f7a7143a2e9edb6","recorded_at":"2026-11-12T12:59:08+00:00","revision":902,"run_id":""}

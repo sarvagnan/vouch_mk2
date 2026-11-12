@@ -8,6 +8,8 @@ import stat
 
 from vouch_mk2.core import (
     Accepted,
+    ActionEffect,
+    ObservationEffect,
     BindBundle,
     BindPack,
     BundleInventory,
@@ -26,6 +28,7 @@ from vouch_mk2.store import (
     encode_bundle_inventory,
     encode_pack_inventory,
 )
+from vouch_mk2.store.codec import decode_effects_file
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
 
 
@@ -249,17 +252,56 @@ def path_text(path: RelPath) -> str:
     return "/".join(path.segments)
 
 
+def parse_effects_file(data: bytes) -> tuple[ObservationEffect | ActionEffect, ...]:
+    """Parse strict UTF-8 effects JSON; no I/O and no inference about code."""
+    try:
+        return decode_effects_file(data)
+    except StoreError as error:
+        raise InventoryError(str(error)) from error
+
+
+def _open_project_root(project: str) -> int:
+    absolute_root = os.path.abspath(project)
+    try:
+        info = os.lstat(absolute_root)
+    except OSError as error:
+        raise InventoryError(f"{absolute_root}: cannot inspect project: {error}") from error
+    if stat.S_ISLNK(info.st_mode):
+        raise InventoryError(f"{absolute_root}: symlink project root refused")
+    if not stat.S_ISDIR(info.st_mode):
+        raise InventoryError(f"{absolute_root}: expected project directory")
+    try:
+        return os.open(absolute_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise InventoryError(f"{absolute_root}: cannot open project: {error}") from error
+
+
+def read_pack_file(project: str, path: str) -> bytes:
+    """Read one safe project-relative pack file for hashing and parsing together."""
+    relative = RelPath.parse(path)
+    root_fd = _open_project_root(project)
+    try:
+        return _read_relative_regular(root_fd, relative)
+    finally:
+        os.close(root_fd)
+
+
 def build_pack_inventory(
     project: str,
     pack_files: tuple[str, ...],
     pack_test_files: tuple[str, ...] = (),
+    effects_file: str = "",
 ) -> PackInventory:
     """Hash an explicit, canonical set of project-relative acceptance files."""
     if not pack_files and not pack_test_files:
         raise InventoryError("acceptance pack must contain at least one file")
     relative_paths: list[tuple[RelPath, str]] = []
     seen: set[str] = set()
-    for files, role in ((pack_files, "spec"), (pack_test_files, "test")):
+    for files, role in (
+        (pack_files, "spec"),
+        (pack_test_files, "test"),
+        ((effects_file,) if effects_file else (), "effects"),
+    ):
         for text in files:
             try:
                 relative = RelPath.parse(text)
@@ -271,25 +313,14 @@ def build_pack_inventory(
             seen.add(canonical)
             relative_paths.append((relative, role))
 
-    absolute_root = os.path.abspath(project)
-    try:
-        info = os.lstat(absolute_root)
-    except OSError as error:
-        raise InventoryError(f"{absolute_root}: cannot inspect project: {error}") from error
-    if stat.S_ISLNK(info.st_mode):
-        raise InventoryError(f"{absolute_root}: symlink project root refused")
-    if not stat.S_ISDIR(info.st_mode):
-        raise InventoryError(f"{absolute_root}: expected project directory")
-    try:
-        root_fd = os.open(
-            absolute_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-        )
-    except OSError as error:
-        raise InventoryError(f"{absolute_root}: cannot open project: {error}") from error
+    root_fd = _open_project_root(project)
     try:
         entries: list[PackEntry] = []
+        effects: tuple[ObservationEffect | ActionEffect, ...] | None = None
         for relative, role in sorted(relative_paths, key=_pack_path):
             data = _read_relative_regular(root_fd, relative)
+            if role == "effects":
+                effects = parse_effects_file(data)
             entries.append(
                 PackEntry(
                     path=path_text(relative),
@@ -300,7 +331,8 @@ def build_pack_inventory(
             )
         return PackInventory(
             entries=tuple(entries),
-            pack_format=2 if pack_test_files else 1,
+            pack_format=3 if effects_file else (2 if pack_test_files else 1),
+            effects=effects,
         )
     finally:
         os.close(root_fd)
@@ -309,10 +341,17 @@ def build_pack_inventory(
 def pack_test_set_digest(inventory: PackInventory) -> str:
     """Digest the executable entries, preserving format-1 whole-pack semantics."""
     test_inventory = inventory
-    if inventory.pack_format == 2:
+    if inventory.pack_format >= 2 and any(
+        entry.role == "test" for entry in inventory.entries
+    ):
         test_inventory = PackInventory(
             entries=tuple(entry for entry in inventory.entries if entry.role == "test"),
             pack_format=2,
+        )
+    elif inventory.pack_format == 3:
+        test_inventory = PackInventory(
+            entries=tuple(entry for entry in inventory.entries if entry.role != "effects"),
+            pack_format=1,
         )
     return digest_of(
         ArtifactKind.ACCEPTANCE_PACK,
@@ -428,7 +467,10 @@ def bind_pack(
     digest = digest_of(ArtifactKind.ACCEPTANCE_PACK, data)
     decision = decide(
         snapshot,
-        BindPack(name, digest, pack_test_set_digest(inventory)),
+        BindPack(
+            name, digest, pack_test_set_digest(inventory),
+            effects_declared=inventory.effects is not None,
+        ),
     )
     if not isinstance(decision, Accepted):
         codes = tuple(violation.code for violation in decision.violations)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from vouch_mk2.core import (
     Accepted,
@@ -15,7 +16,8 @@ from vouch_mk2.core import (
     apply,
     decide,
 )
-from vouch_mk2.formal.universe import Universe
+if TYPE_CHECKING:
+    from vouch_mk2.formal.universe import Universe
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import StateMachine
 
@@ -165,6 +167,7 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             ("evidence_heads", heads),
             ("anchor_mode", snapshot.anchor_mode.value),
             ("tier", snapshot.tier.value),
+            ("effects_required", snapshot.effects_required),
             ("ci_policy", snapshot.ci_policy.value),
             (
                 "ci_exceptions",

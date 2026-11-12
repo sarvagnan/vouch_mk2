@@ -268,6 +268,7 @@ def test_artifact_checks_pass_for_complete_anchored_chain(tmp_path: Path) -> Non
             mk2.CHECK_MAP_FRESHNESS: Verdict.NOT_APPLICABLE,
             mk2.CHECK_PACK_BOUND: Verdict.NOT_APPLICABLE,
             mk2.CHECK_PACK_FILES_MATCH: Verdict.NOT_APPLICABLE,
+            mk2.CHECK_EFFECTS_DECLARED: Verdict.PASS,
         }
 
 

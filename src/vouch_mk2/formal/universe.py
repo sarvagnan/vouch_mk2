@@ -39,6 +39,7 @@ from vouch_mk2.core import (
     EvidenceKind,
     EvidenceOutcome,
     FreezeAcceptance,
+    RequireEffects,
     LaunchCriteria,
     MarkDone,
     MarkOpenInCi,
@@ -70,6 +71,8 @@ from vouch_mk2.core import (
     UnitRef,
     UnitStatus,
 )
+
+from vouch_mk2.formal.invariants import INVARIANTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,4 +348,23 @@ TIER_V1 = Universe(
     invariant_ids=("M11.tier-never-lowers-after-commitment",),
 )
 
-UNIVERSES: tuple[Universe, ...] = (CORE_V1, HISTORY_V1, TIER_V1)
+# This focused universe deliberately stops at acceptance-frozen. M6 would
+# diagnose a deadlock manufactured by its command boundary, so exclude only M6.
+EFFECTS_V1 = Universe(
+    name="effects-v1",
+    commands=(
+        RequireEffects(),
+        SpecifyUnit(name="u", version="1"),
+        FreezeAcceptance(name="u", pack_version="p"),
+        BindPack(name="u", pack_digest="e" * 64),
+        BindPack(name="u", pack_digest="e" * 64, effects_declared=True),
+    ),
+    initial=Snapshot(),
+    invariant_ids=tuple(
+        invariant.invariant_id
+        for invariant in INVARIANTS
+        if invariant.invariant_id != "M6.no-nonterminal-deadlock"
+    ),
+)
+
+UNIVERSES: tuple[Universe, ...] = (CORE_V1, HISTORY_V1, TIER_V1, EFFECTS_V1)

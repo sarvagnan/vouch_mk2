@@ -14,7 +14,8 @@ from vouch_mk2.cli import main
 from vouch_mk2 import init as init_module
 from vouch_mk2.init import InitError, InitStatus, generated_workflow, init_project
 from vouch_mk2.lock import build_lock
-from vouch_mk2.store import ArtifactKind, digest_of
+from vouch_mk2.store import ArtifactKind, Store, decode_event_record, digest_of
+from vouch_mk2.core import EffectsRequired
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +45,11 @@ def test_init_fresh_project_writes_only_closed_set_and_valid_config(tmp_path: Pa
         ".github/workflows/vouch.yml",
     )
     assert all(result.status is InitStatus.WRITTEN for result in report)
+    with Store.open(str(project / ".vouch"), read_only=True) as store:
+        snapshot = store.read_snapshot()
+        assert snapshot.effects_required
+        event = decode_event_record(store.get_object(ArtifactKind.EVENT, snapshot.event_head))
+        assert isinstance(event.folded_event, EffectsRequired)
     assert _all_relative_paths(project) == {
         ".github",
         ".github/workflows",
@@ -53,6 +59,7 @@ def test_init_fresh_project_writes_only_closed_set_and_valid_config(tmp_path: Pa
         ".vouch/config.json",
         ".vouch/objects",
         ".vouch/objects/sha256",
+        f".vouch/objects/sha256/{snapshot.event_head}",
         ".vouch/state.json",
         ".vouch/state-format.json",
         "vouch.lock",

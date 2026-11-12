@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/ci-anchor-1.spec.md","role":"spec","sha256":"ddc1b8add642ad294710e84e64d8ecdc2cb84650cf9fa2a3d1cb07d29dd57131","size":3026},{"path":"tests/test_ci_anchor.py","role":"test","sha256":"1e77f7979fcf9e86f52f43b50b2472d8071a13de1513fd1d84fcac33bbe29e26","size":6946}],"pack_format":2}

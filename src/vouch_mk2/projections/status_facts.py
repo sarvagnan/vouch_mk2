@@ -27,6 +27,7 @@ class StatusFacts:
     late_bound_pack_units: tuple[str, ...]
     rebound_pack_units: tuple[str, ...]
     pack_rebounds: tuple[str, ...]
+    effects_required: bool = False
 
 
 def _evidence_head_ref_key(head: EvidenceHead) -> tuple[str, str]:
@@ -72,6 +73,7 @@ def status_facts(
         anchor_mode=snapshot.anchor_mode.value,
         tier=snapshot.tier.value,
         ci_policy=snapshot.ci_policy.value,
+        effects_required=snapshot.effects_required,
         ci_exceptions=tuple(
             (item.unit_name, item.reason)
             for item in sorted(

@@ -34,11 +34,18 @@ frozen before implementation starts. Freezing records a pack-version label you c
 fails from then on if any of them change. Vouch cannot prove that the freeze came before the
 implementation, because that work is not recorded; keeping the order is up to your process.
 
+New stores require an effect declaration for bound packs. An empty list declares a transform
+with no effects; observations disclose a source and capture, and actions disclose a system and
+declared outcome. `show-effects --root .vouch` reports these declarations.
+
 Here the pack is one failing test:
 
 ```sh
 python3 vouch.lock specify --root .vouch --name greeter --version v1
-mkdir -p tests
+mkdir -p tests packs
+cat > packs/greeter-1.effects.json <<'JSON'
+{"effects_format": 1, "effects": []}
+JSON
 cat > tests/test_greeter.py <<'PY'
 from greeter import greet
 
@@ -54,7 +61,8 @@ the binding is what Vouch checks. At `standard` and above every frozen unit must
 ```sh
 python3 vouch.lock freeze --root .vouch --name greeter \
   --pack-version "greeter-pack/1@$(shasum -a 256 tests/test_greeter.py | cut -c1-16)" \
-  --pack-file tests/test_greeter.py
+  --pack-file tests/test_greeter.py \
+  --pack-effects-file packs/greeter-1.effects.json
 python3 vouch.lock mark-ready --root .vouch --name greeter
 python3 vouch.lock start --root .vouch --name greeter
 ```
@@ -160,7 +168,8 @@ python3 vouch.lock close-deviation --root .vouch --deviation-id DEV-1
 python3 vouch.lock respecify --root .vouch --name greeter
 python3 vouch.lock freeze --root .vouch --name greeter \
   --pack-version "greeter-pack/2@$(shasum -a 256 tests/test_greeter.py | cut -c1-16)" \
-  --pack-file tests/test_greeter.py
+  --pack-file tests/test_greeter.py \
+  --pack-effects-file packs/greeter-1.effects.json
 python3 vouch.lock mark-ready --root .vouch --name greeter
 python3 vouch.lock start --root .vouch --name greeter
 ```

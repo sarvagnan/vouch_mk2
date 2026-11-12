@@ -178,6 +178,7 @@ def test_fast_forward_copies_pack_objects_referenced_by_the_adopted_snapshot(
     ours, theirs = _branch(tmp_path)
     pack_file = tmp_path / "theirs" / "acceptance.txt"
     pack_file.write_text("frozen\n", encoding="utf-8")
+    (pack_file.parent / "effects.json").write_text('{"effects_format":1,"effects":[]}\n')
     assert _run(
         "freeze",
         "--root",
@@ -190,6 +191,7 @@ def test_fast_forward_copies_pack_objects_referenced_by_the_adopted_snapshot(
         str(pack_file.parent),
         "--pack-file",
         pack_file.name,
+        "--pack-effects-file", "effects.json",
     )[0] == 0
 
     assert _run("merge", "--root", str(ours), "--other", str(theirs))[0] == 0
@@ -230,6 +232,7 @@ def test_caught_merge_placement_error_removes_every_new_canonical_object(
     )[0] == 0
     pack_file = tmp_path / "theirs" / "acceptance.txt"
     pack_file.write_text("frozen\n", encoding="utf-8")
+    (pack_file.parent / "effects.json").write_text('{"effects_format":1,"effects":[]}\n')
     assert _run(
         "freeze",
         "--root",
@@ -242,6 +245,7 @@ def test_caught_merge_placement_error_removes_every_new_canonical_object(
         str(pack_file.parent),
         "--pack-file",
         pack_file.name,
+        "--pack-effects-file", "effects.json",
     )[0] == 0
     assert _run(
         "specify", "--root", str(theirs), "--name", "yours", "--version", "v1"
@@ -300,6 +304,7 @@ def test_writable_open_recovers_an_interrupted_merge_transaction(
     )[0] == 0
     pack_file = tmp_path / "theirs" / "acceptance.txt"
     pack_file.write_text("frozen\n", encoding="utf-8")
+    (pack_file.parent / "effects.json").write_text('{"effects_format":1,"effects":[]}\n')
     assert _run(
         "freeze",
         "--root",
@@ -312,6 +317,7 @@ def test_writable_open_recovers_an_interrupted_merge_transaction(
         str(pack_file.parent),
         "--pack-file",
         pack_file.name,
+        "--pack-effects-file", "effects.json",
     )[0] == 0
     assert _run(
         "specify", "--root", str(theirs), "--name", "yours", "--version", "v1"

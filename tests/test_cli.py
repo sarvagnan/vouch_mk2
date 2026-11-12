@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
+import shutil
+from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 
 from pytest import CaptureFixture
@@ -23,6 +27,15 @@ from vouch_mk2.core.model import (
 )
 from vouch_mk2.core import (
     Accepted,
+    BindPack,
+    EffectsRequired,
+    FreezeAcceptance,
+    PackEntry,
+    PackInventory,
+    RebindPack,
+    Refused,
+    SpecifyUnit,
+    Tier,
     AdvanceAnchor,
     PreLogHistoryRecorded,
     SetAnchorMode,
@@ -30,7 +43,11 @@ from vouch_mk2.core import (
 )
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
-from vouch_mk2.store import Store
+from vouch_mk2.projections import system_map
+from vouch_mk2.store import (
+    Store, decode_snapshot, decode_system_map, encode_snapshot, encode_system_map,
+)
+from vouch_mk2.verify import run_artifact_checks
 from vouch_mk2.verify import pending_anchor_is_only_unchecked, record_evidence
 from vouch_mk2.store.event_log import build_event_records, commit_events
 from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
@@ -212,6 +229,7 @@ def test_cli_json_matches_text_composition_and_lists_organizational_ids(
         mk2.ORG_CAUSAL_RED_HISTORY,
         mk2.ORG_PROTECTIVE_CLOSURE_TRUTHFULNESS,
         mk2.ORG_TIER_CONTROLS,
+        mk2.ORG_EFFECTS_TRUTH,
     }
 
 
@@ -225,6 +243,7 @@ def test_cli_bad_root_returns_typed_transport_error(
 
 
 def test_cli_artifact_rows_appear_in_text_and_json(tmp_path: Path, capsys: CaptureFixture[str]) -> None:
+    _regression_effect_declarations(tmp_path / "effects-regressions")
     root = tmp_path / "store"
     init_store(root)
     commit_evidence_snapshot(root, AnchorMode.CI, anchor=True)
@@ -340,6 +359,7 @@ def test_cli_formal_reports_closed_relation_and_discriminators(
     assert "states: 264462" in output
     assert "transitions: 1381350" in output
     assert "universe: tier-v1" in output
+    assert "universe: effects-v1" in output
     assert "states: 246" in output
     assert "transitions: 1640" in output
     assert "PASS  M1.no-direct-republication" in output
@@ -420,5 +440,154 @@ def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[
     _assert_clean_or_pending_ci_anchor(exit_code, out)
     org_rows = [line for line in out.splitlines() if line.startswith("NOT-CHECKED") and "org." in line]
     tier_rows = [line for line in org_rows if "org.tier-controls" in line]
-    assert len(org_rows) == 5 + len(tier_rows)
+    assert len(org_rows) == 6 + len(tier_rows)
     assert len(tier_rows) > 1
+
+
+def _effects_run(*args: str) -> tuple[int, str]:
+    out = io.StringIO()
+    with redirect_stdout(out), redirect_stderr(out):
+        code = main(list(args))
+    return code, out.getvalue()
+
+
+def _effects_must(*args: str) -> None:
+    code, text = _effects_run(*args)
+    assert code == 0, text
+
+
+def _effects_project(tmp_path: Path) -> tuple[Path, str]:
+    project = tmp_path / "project"
+    project.mkdir(parents=True)
+    root = str(project / ".vouch")
+    with Store.init(root):
+        pass
+    (project / "test.py").write_text("assert True\n")
+    (project / "effects.json").write_text('{"effects_format":1,"effects":[]}\n')
+    _effects_must("specify", "--root", root, "--name", "u", "--version", "1")
+    return project, root
+
+
+def _effects_tree(root: str) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in Path(root).rglob("*") if path.is_file()
+    }
+
+
+def _regression_effects_requirement_round_trips_in_state_and_both_map_layers() -> None:
+    legacy = Snapshot(revision=1)
+    required = replace(legacy, effects_required=True)
+    for snapshot in (legacy, required):
+        assert decode_snapshot(encode_snapshot(snapshot)) == snapshot
+        projection = system_map(snapshot)
+        data = encode_system_map(projection, "1" * 64)
+        assert decode_system_map(data)[0] == projection
+        assert projection.effects_required is snapshot.effects_required
+        assert projection.status_facts.effects_required is snapshot.effects_required
+        assert data.count(b'"effects_required":true') == (2 if snapshot.effects_required else 0)
+    assert b'"effects_required"' not in encode_snapshot(legacy)
+
+
+def _regression_format_three_file_checks_bind_raw_effects_bytes_without_parsing_them(
+    tmp_path: Path, tests: bool,
+) -> None:
+    project, root = _effects_project(tmp_path)
+    _effects_must("freeze", "--root", root, "--name", "u", "--pack-version", "p",
+          "--project", str(project), "--pack-test-file" if tests else "--pack-file",
+          "test.py", "--pack-effects-file", "effects.json")
+    with Store.open(root) as store:
+        snapshot = replace(store.read_snapshot(), tier=Tier.STANDARD)
+
+        def result() -> Verdict:
+            return next(
+                row.verdict for row in run_artifact_checks(store, snapshot, project=str(project))
+                if row.check_id == mk2.CHECK_PACK_FILES_MATCH
+            )
+
+        assert result() is Verdict.PASS
+        # Equivalent declarations with different whitespace still change bound bytes.
+        (project / "effects.json").write_text('{"effects_format": 1, "effects": []}\n')
+        assert result() is Verdict.FAIL
+        (project / "effects.json").write_text("invalid JSON\n")
+        assert result() is Verdict.FAIL
+        (project / "effects.json").unlink()
+        assert result() is Verdict.FAIL
+
+
+def _regression_rebind_effect_change_refusal_precedes_removed_paths() -> None:
+    old = PackInventory((PackEntry("old.py", "1" * 64, 1),))
+    new = PackInventory((PackEntry("new.py", "2" * 64, 1),), pack_format=3, effects=())
+    snapshot = Snapshot(units=(Unit(
+        "u", "1", UnitStatus.PUBLISHED, acceptance_pack_version="p",
+        acceptance_pack_digest="1" * 64, acceptance_test_set_digest="1" * 64,
+        published_once=True,
+    ),))
+    decision = decide(snapshot, RebindPack(
+        "u", "2" * 64, "adapt interface", old_inventory=old, new_inventory=new,
+    ))
+    assert isinstance(decision, Refused)
+    assert tuple(v.code for v in decision.violations) == ("rebind.effects-changed",)
+
+
+def _regression_rebind_invalid_effects_arguments_leave_every_store_file_unchanged(tmp_path: Path) -> None:
+    project, root = _effects_project(tmp_path)
+    before = _effects_tree(root)
+    (project / "bad.json").write_text('{"effects_format":1}')
+    for args in (
+        ("--pack-effects-file", "effects.json"),
+        ("--pack-test-file", "test.py", "--pack-effects-file", "bad.json"),
+    ):
+        code, text = _effects_run("rebind-pack", "--root", root, "--name", "u",
+                          "--reason", "adapt interface", "--project", str(project), *args)
+        assert code == 2, text
+        assert _effects_tree(root) == before
+
+
+def _regression_merge_replays_the_requirement_and_recovers_a_late_bound_declaration(tmp_path: Path) -> None:
+    project, root = _effects_project(tmp_path)
+    theirs = tmp_path / "theirs"
+    shutil.copytree(project, theirs)
+    their_root = str(theirs / ".vouch")
+    _effects_must("require-effects", "--root", their_root)
+    _effects_must("freeze", "--root", their_root, "--name", "u", "--pack-version", "p")
+    _effects_must("bind-pack", "--root", their_root, "--name", "u", "--project", str(theirs),
+          "--pack-test-file", "test.py", "--pack-effects-file", "effects.json")
+    _effects_must("specify", "--root", root, "--name", "other", "--version", "1")
+    _effects_must("merge", "--root", root, "--other", their_root)
+    with Store.open(root, read_only=True) as store:
+        snapshot = store.read_snapshot()
+        assert snapshot.effects_required
+        unit = snapshot.unit("u")
+        assert unit is not None and unit.acceptance_pack_digest
+    code, text = _effects_run("show-effects", "--root", root, "--json")
+    assert code == 0
+    assert json.loads(text)["units"][1]["effects"] == []
+
+
+def _regression_replayed_requirement_survives_subsequent_events(tmp_path: Path) -> None:
+    tmp_path.mkdir(parents=True)
+    root = str(tmp_path / "store")
+    with Store.init(root) as store, store.write_locked():
+        initial = store.read_snapshot()
+        snapshot = commit_events(store, initial, (EffectsRequired(),), actor="test", run_id="")
+        decision = decide(snapshot, SpecifyUnit("u", "1"))
+        assert isinstance(decision, Accepted)
+        snapshot = commit_events(store, snapshot, decision.events, actor="test", run_id="")
+        decision = decide(snapshot, FreezeAcceptance("u", "p"))
+        assert isinstance(decision, Accepted)
+        snapshot = commit_events(store, snapshot, decision.events, actor="test", run_id="")
+        assert store.read_snapshot().effects_required
+        assert isinstance(decide(snapshot, BindPack("u", "1" * 64)), Refused)
+
+
+def _regression_effect_declarations(tmp_path: Path) -> None:
+    _regression_effects_requirement_round_trips_in_state_and_both_map_layers()
+    for tests in (False, True):
+        _regression_format_three_file_checks_bind_raw_effects_bytes_without_parsing_them(
+            tmp_path / f"files-{tests}", tests,
+        )
+    _regression_rebind_effect_change_refusal_precedes_removed_paths()
+    _regression_rebind_invalid_effects_arguments_leave_every_store_file_unchanged(tmp_path / "rebind")
+    _regression_merge_replays_the_requirement_and_recovers_a_late_bound_declaration(tmp_path / "merge")
+    _regression_replayed_requirement_survives_subsequent_events(tmp_path / "replay")

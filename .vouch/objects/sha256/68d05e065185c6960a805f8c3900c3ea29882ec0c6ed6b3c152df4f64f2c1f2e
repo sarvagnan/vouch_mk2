@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"effect-declarations@1","reason":"pack/4 frozen and RED recorded; the pack/4 fix lands in the next implementation pass (D-31)"},"prev":"f9d86c818794cc46cc4d95c66e6646f58dc1ce9e8d6bff0bbfe69da0f6522ffe","recorded_at":"2026-11-12T13:29:22+00:00","revision":913,"run_id":""}

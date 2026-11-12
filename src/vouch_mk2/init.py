@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import datetime
 import errno
 import json
 import os
@@ -14,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from vouch_mk2.core import AnchorMode, AnchorModeSet, Snapshot, Tier, TierSet
+from vouch_mk2.core import AnchorMode, AnchorModeSet, EffectsRequired, Snapshot, Tier, TierSet
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.lock import lock_digest
 from vouch_mk2.store import Store, StoreError
@@ -618,6 +619,7 @@ def init_project(
                 initial_snapshot=Snapshot(),
             ) as store:
                 initial_events = (
+                    EffectsRequired(),
                     *((TierSet(tier),) if tier is not Tier.LIGHTWEIGHT else ()),
                     *(
                         (AnchorModeSet(anchor_mode),)
@@ -634,6 +636,11 @@ def init_project(
                             initial_events,
                             actor=default_actor() if actor is None else actor,
                             run_id=ci_run_id(),
+                            # The shared initial fact must not give independent
+                            # stores a common history root within one second.
+                            recorded_at=datetime.datetime.now(datetime.UTC).isoformat(
+                                timespec="microseconds"
+                            ),
                         )
             write_atomic(
                 os.path.join(staged_store, "config.json"),

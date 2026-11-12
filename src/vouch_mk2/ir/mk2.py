@@ -77,6 +77,7 @@ CMD_ADVANCE_ANCHOR = "advance-anchor"
 CMD_SET_ANCHOR_MODE = "set-anchor-mode"
 CMD_SET_TIER = "set-tier"
 CMD_SET_CI_POLICY = "set-ci-policy"
+CMD_REQUIRE_EFFECTS = "require-effects"
 CMD_MARK_OPEN_IN_CI = "mark-open-in-ci"
 CMD_CLEAR_OPEN_IN_CI = "clear-open-in-ci"
 CMD_RECORD_FORMAL_CERTIFICATE = "record-formal-certificate"
@@ -138,6 +139,8 @@ CHECK_RELEASE_BOUND_UNITS_ROSTERED = "check.release-bound-units-rostered"
 CHECK_TIER_EVIDENCE_REQUIRED = "check.tier.evidence-required"
 CHECK_TIER_HIGH_ATTESTATION = "check.tier.high-attestation"
 CHECK_PACK_BOUND = "check.pack-bound"
+CHECK_EFFECTS_DECLARED = "check.effects-declared"
+ORG_EFFECTS_TRUTH = "org.effects-truth"
 CHECK_CI_POLICY = "check.ci-policy"
 
 # Phase 5 I/O-side artifact checks.
@@ -757,6 +760,16 @@ _OBLIGATIONS = (
         ),
     ),
     Obligation(
+        obligation_id=CHECK_EFFECTS_DECLARED,
+        scope=ObligationScope.ARTIFACT_CHECK,
+        description="Report bound effect declarations for active units, without claiming truth.",
+    ),
+    Obligation(
+        obligation_id=ORG_EFFECTS_TRUTH,
+        scope=ObligationScope.ORGANIZATIONAL,
+        description="Whether effect declarations are true and complete.",
+    ),
+    Obligation(
         obligation_id=ORG_ACCEPTANCE_OWNERSHIP,
         scope=ObligationScope.ORGANIZATIONAL,
         description="Acceptance ownership is real.",
@@ -903,24 +916,24 @@ _EVIDENCE_RESIDUAL = (
 _TIER_REQUIREMENTS = (
     TierRequirement(
         control_id="typed-contracts",
-        description="Typed contracts, declared classes, purity checks",
+        description="Declared effects (transform, observation, action)",
         lightweight=_required(
-            mechanical_checks=(CHECK_REGISTRY_COMPLETE,),
-            mechanical_evidence=("pyrefly strict", "import-linter"),
+            mechanical_checks=(CHECK_EFFECTS_DECLARED,),
+            mechanical_evidence=(),
             coverage=Coverage.PARTIAL,
-            residual="declared classes are human reviewed",
+            residual="whether declarations are true and complete is human reviewed; a project's own effect checker is not yet bindable",
         ),
         standard=_required(
-            mechanical_checks=(CHECK_REGISTRY_COMPLETE,),
-            mechanical_evidence=("pyrefly strict", "import-linter"),
+            mechanical_checks=(CHECK_EFFECTS_DECLARED,),
+            mechanical_evidence=(),
             coverage=Coverage.PARTIAL,
-            residual="declared classes are human reviewed",
+            residual="whether declarations are true and complete is human reviewed; a project's own effect checker is not yet bindable",
         ),
         high=_required(
-            mechanical_checks=(CHECK_REGISTRY_COMPLETE,),
-            mechanical_evidence=("pyrefly strict", "import-linter"),
+            mechanical_checks=(CHECK_EFFECTS_DECLARED,),
+            mechanical_evidence=(),
             coverage=Coverage.PARTIAL,
-            residual="declared classes are human reviewed",
+            residual="whether declarations are true and complete is human reviewed; a project's own effect checker is not yet bindable",
         ),
     ),
     TierRequirement(

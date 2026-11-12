@@ -105,6 +105,7 @@ def _spec_and_test(project: Path, body: str) -> None:
     (project / "packs").mkdir(exist_ok=True)
     (project / "tests").mkdir(exist_ok=True)
     (project / "packs" / "u.spec.md").write_text("# u acceptance pack\n")
+    (project / "packs" / "u.effects.json").write_text('{"effects_format": 1, "effects": []}')  # D-31: init requires effects
     (project / "tests" / "t.py").write_text(f"def test_x():\n    {body}\n")
 
 
@@ -128,7 +129,7 @@ def _frozen_with_evidence(project: Path, root: str, version: str, pack: str) -> 
     _must(
         "freeze", "--root", root, "--name", "u", "--pack-version", pack,
         "--project", str(project), "--pack-file", "packs/u.spec.md",
-        "--pack-test-file", "tests/t.py",
+        "--pack-test-file", "tests/t.py", "--pack-effects-file", "packs/u.effects.json",
     )
     _must("mark-ready", "--root", root, "--name", "u")
     _must("start", "--root", root, "--name", "u")
@@ -156,6 +157,7 @@ def _pilot(tmp_path: Path) -> tuple[Path, str]:
     _must(
         "rebind-pack", "--root", root, "--name", "u", "--project", str(project),
         "--pack-file", "packs/u.spec.md", "--pack-test-file", "tests/t.py",
+        "--pack-effects-file", "packs/u.effects.json",
         "--reason", "adapt to a changed shared interface",
     )
     _evidence(root, "u@v1", "green", OK)

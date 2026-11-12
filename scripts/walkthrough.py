@@ -76,6 +76,9 @@ def _drive_lifecycle(lock: str, project: str) -> None:
     root = ".vouch"
     tests = os.path.join(project, "tests")
     os.makedirs(tests, exist_ok=True)
+    effects_path = os.path.join(project, "unit.effects.json")
+    with open(effects_path, "w", encoding="utf-8") as stream:
+        stream.write('{"effects_format": 1, "effects": []}\n')
     for name in ("core", "api"):
         with open(
             os.path.join(tests, f"test_{name}.py"), "w", encoding="utf-8"
@@ -96,6 +99,8 @@ def _drive_lifecycle(lock: str, project: str) -> None:
             f"pack-{name}",
             "--pack-file",
             f"tests/test_{name}.py",
+            "--pack-effects-file",
+            "unit.effects.json",
         )
         verb("mark-ready", "--name", name)
         verb("start", "--name", name)

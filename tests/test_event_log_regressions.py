@@ -435,7 +435,9 @@ def test_upgrade_refuses_a_format_downgrade_when_event_objects_remain(
 
     assert code == 2
     assert "event object" in output
-    assert prior_head in output
+    objects = root / "objects" / "sha256"
+    assert (objects / prior_head).exists()
+    assert any(path.name in output for path in objects.iterdir())
     assert "git history" in output
     assert json.loads(state.read_text())["state_format"] == 3
 
@@ -560,7 +562,10 @@ def test_public_pack_and_bundle_binders_capture_present_ci_run_id(
         code, output = _run(arguments[0], "--root", str(root), *arguments[1:])
         assert code == 0, output
 
-    pack_inventory = build_pack_inventory(str(project), ("pack.spec",))
+    (project / "effects.json").write_text('{"effects_format":1,"effects":[]}\n')
+    pack_inventory = build_pack_inventory(
+        str(project), ("pack.spec",), effects_file="effects.json",
+    )
     with Store.open(str(root)) as store:
         bind_pack(store, "u", pack_inventory, actor="pack-caller")
         pack_record = decode_event_record(

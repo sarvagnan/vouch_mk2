@@ -83,7 +83,19 @@ def test_documented_check_ids_are_declared_ir_obligations() -> None:
     assert evidence.high.mechanical_evidence == ()
     assert evidence.high.coverage is Coverage.PARTIAL
     assert evidence.high.residual == residual
+    d31 = decisions.split("## D-31", 1)[1]
     for requirement in mk2.MK2.tier_requirements:
+        if requirement.control_id == "typed-contracts":
+            # D-31 supersedes this one D-12 row; D-12 remains append-only.
+            assert "The tier row" in d31 and "effect declaration" in d31
+            assert "true or complete" in d31 and "human reviewed" in d31
+            for tier in Tier:
+                cell = requirement.cell(tier)
+                assert cell.mechanical_checks == (mk2.CHECK_EFFECTS_DECLARED,)
+                assert cell.mechanical_evidence == ()
+                assert cell.coverage is Coverage.PARTIAL
+                assert "not yet bindable" in cell.residual
+            continue
         for tier in Tier:
             cell = requirement.cell(tier)
             mechanical = ", ".join(

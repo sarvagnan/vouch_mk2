@@ -43,10 +43,12 @@ def _workflow(project: Path) -> str:
 def _unit_with_evidence(project: Path, root: str, name: str = "u") -> None:
     (project / "tests").mkdir(exist_ok=True)
     (project / "tests" / "t.py").write_text("def test_x():\n    assert True\n")
+    (project / "tests" / "t.effects.json").write_text('{"effects_format": 1, "effects": []}')  # D-31: init requires effects
     assert _run("set-anchor-mode", "--root", root, "--mode", "ci")[0] == 0
     assert _run("specify", "--root", root, "--name", name, "--version", "v1")[0] == 0
     assert _run("freeze", "--root", root, "--name", name, "--pack-version", f"{name}-pack/1",
-                "--project", str(project), "--pack-test-file", "tests/t.py")[0] == 0
+                "--project", str(project), "--pack-test-file", "tests/t.py",
+                "--pack-effects-file", "tests/t.effects.json")[0] == 0
     assert _run("mark-ready", "--root", root, "--name", name)[0] == 0
     assert _run("start", "--root", root, "--name", name)[0] == 0
     assert _run("record-evidence", "--root", root, "--unit", f"{name}@v1", "--kind", "red",

@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 
 from vouch_mk2.checks.organizational import (
     check_acceptance_ownership,
+    check_effects_truth,
     check_causal_red_history,
     check_independence,
     check_intent_validation,
@@ -151,6 +152,7 @@ MECHANICAL_CHECKS: Mapping[str, CheckEvaluator] = {
 }
 
 ORGANIZATIONAL_CHECKS: Mapping[str, CheckEvaluator] = {
+    mk2.ORG_EFFECTS_TRUTH: check_effects_truth,
     mk2.ORG_ACCEPTANCE_OWNERSHIP: check_acceptance_ownership,
     mk2.ORG_INTENT_VALIDATION: check_intent_validation,
     mk2.ORG_INDEPENDENCE: check_independence,

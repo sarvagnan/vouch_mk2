@@ -63,6 +63,17 @@ options:
   --json       emit structured invocations instead of text
 ```
 
+## show-effects
+
+```text
+usage: vouch-mk2 show-effects [-h] [--root ROOT] [--json]
+
+options:
+  -h, --help   show this help message and exit
+  --root ROOT  store root directory (default: current directory)
+  --json       emit structured invocations instead of text
+```
+
 ## bundle-inventory
 
 ```text
@@ -289,6 +300,7 @@ options:
 usage: vouch-mk2 bind-pack [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
                            [--project PROJECT] [--pack-file PACK_FILE]
                            [--pack-test-file PACK_TEST_FILE]
+                           [--pack-effects-file PACK_EFFECTS_FILE]
 
 options:
   -h, --help            show this help message and exit
@@ -301,6 +313,8 @@ options:
                         project-relative acceptance spec file (repeatable)
   --pack-test-file PACK_TEST_FILE
                         project-relative executable acceptance test file (repeatable)
+  --pack-effects-file PACK_EFFECTS_FILE
+                        project-relative effects declaration JSON
 ```
 
 ## clear-open-in-ci
@@ -348,7 +362,7 @@ options:
 ```text
 usage: vouch-mk2 freeze [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
                         --pack-version PACK_VERSION [--project PROJECT] [--pack-file PACK_FILE]
-                        [--pack-test-file PACK_TEST_FILE]
+                        [--pack-test-file PACK_TEST_FILE] [--pack-effects-file PACK_EFFECTS_FILE]
 
 options:
   -h, --help            show this help message and exit
@@ -362,6 +376,8 @@ options:
                         project-relative acceptance spec file (repeatable)
   --pack-test-file PACK_TEST_FILE
                         project-relative executable acceptance test file (repeatable)
+  --pack-effects-file PACK_EFFECTS_FILE
+                        project-relative effects declaration JSON
 ```
 
 ## mark-done
@@ -474,6 +490,7 @@ options:
 usage: vouch-mk2 rebind-pack [-h] --root ROOT [--json] [--actor ACTOR] --name NAME --reason REASON
                              [--project PROJECT] [--pack-file PACK_FILE]
                              [--pack-test-file PACK_TEST_FILE]
+                             [--pack-effects-file PACK_EFFECTS_FILE]
 
 options:
   -h, --help            show this help message and exit
@@ -487,6 +504,8 @@ options:
                         project-relative acceptance spec file (repeatable)
   --pack-test-file PACK_TEST_FILE
                         project-relative executable acceptance test file (repeatable)
+  --pack-effects-file PACK_EFFECTS_FILE
+                        project-relative effects declaration JSON
 ```
 
 ## record-evidence
@@ -511,6 +530,18 @@ the recorded outcome is the exit status of a process this verb spawned.
 
 ```text
 usage: vouch-mk2 record-formal-certificate [-h] --root ROOT [--json] [--actor ACTOR]
+
+options:
+  -h, --help     show this help message and exit
+  --root ROOT    store root directory
+  --json         emit one JSON result instead of text
+  --actor ACTOR  recorded actor claim (default: OS user)
+```
+
+## require-effects
+
+```text
+usage: vouch-mk2 require-effects [-h] --root ROOT [--json] [--actor ACTOR]
 
 options:
   -h, --help     show this help message and exit

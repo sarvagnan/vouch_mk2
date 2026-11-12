@@ -144,12 +144,16 @@ def _command_for_event(
             test_set_digest=test_set_digest,
         ):
             return commands.FreezeAcceptance(
-                name, pack_version, pack_digest, test_set_digest
+                name, pack_version, pack_digest, test_set_digest,
+                effects_declared=bool(pack_digest) and _pack_inventory(store, pack_digest).effects is not None,
             )
         case events.AcceptancePackBound(
             name=name, pack_digest=pack_digest, test_set_digest=test_set_digest
         ):
-            return commands.BindPack(name, pack_digest, test_set_digest)
+            return commands.BindPack(
+                name, pack_digest, test_set_digest,
+                effects_declared=_pack_inventory(store, pack_digest).effects is not None,
+            )
         case events.AcceptancePackRebound(
             name=name,
             old_pack_digest=old_digest,
@@ -164,6 +168,7 @@ def _command_for_event(
                 reason=reason,
                 old_inventory=_pack_inventory(store, old_digest),
                 new_inventory=_pack_inventory(store, new_digest),
+                old_pack_digest=old_digest,
             )
         case events.UnitMarkedReady(name=name):
             return commands.MarkReady(name)
@@ -207,6 +212,8 @@ def _command_for_event(
             return commands.SetAnchorMode(mode)
         case events.TierSet(tier=tier):
             return commands.SetTier(tier)
+        case events.EffectsRequired():
+            return commands.RequireEffects()
         case events.CiPolicySet(policy=policy):
             return commands.SetCiPolicy(policy)
         case events.OpenInCiMarked(name=name, reason=reason):

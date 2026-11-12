@@ -300,7 +300,11 @@ def test_every_invariant_has_one_private_discriminating_witness(
         expected = (
             {"M11.tier-never-lowers-after-commitment"}
             if universe.universe_name == TIER_V1.name
-            else {invariant.invariant_id for invariant in INVARIANTS}
+            else {
+                invariant.invariant_id for invariant in INVARIANTS
+                if universe.universe_name != "effects-v1"
+                or invariant.invariant_id != "M6.no-nonterminal-deadlock"
+            }
         )
         assert {verdict.invariant_id for verdict in universe.invariants} == expected
     assert {verdict.invariant_id for verdict in formal_run.witnesses} == {
@@ -340,6 +344,7 @@ def test_formal_artifact_encodings_are_stable_and_certificate_is_strict(
         CORE_V1.name,
         HISTORY_V1.name,
         TIER_V1.name,
+        "effects-v1",
     }
     assert {
         row[0]: row[2:] for row in certificate.universes

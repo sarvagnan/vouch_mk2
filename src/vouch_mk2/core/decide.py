@@ -28,6 +28,7 @@ from vouch_mk2.core.commands import (
     Command,
     CompleteRelease,
     FreezeAcceptance,
+    RequireEffects,
     MarkFailedUnrecovered,
     MarkDone,
     MarkOpenInCi,
@@ -62,6 +63,7 @@ from vouch_mk2.core.events import (
     AnchorModeSet,
     BundleBound,
     CiPolicySet,
+    EffectsRequired,
     DeploymentStarted,
     DeviationAmended,
     DeviationClosed,
@@ -751,6 +753,15 @@ def _decide_unit_transition(
             "pack.test-set-without-pack",
             "an acceptance test-set digest requires a bound pack digest",
         )
+    if (
+        isinstance(command, FreezeAcceptance)
+        and snapshot.effects_required
+        and command.pack_digest
+        and not command.effects_declared
+    ):
+        return _refuse(
+            "pack.effects-required", "bound acceptance packs must declare effects"
+        )
     pack_version = (
         command.pack_version
         if isinstance(command, FreezeAcceptance)
@@ -795,6 +806,10 @@ def _decide_bind_pack(snapshot: Snapshot, command: BindPack) -> Decision:
             "pack.test-set-digest-invalid",
             "acceptance test-set digest must be 64 lowercase hexadecimal characters",
         )
+    if snapshot.effects_required and not command.effects_declared:
+        return _refuse(
+            "pack.effects-required", "bound acceptance packs must declare effects"
+        )
     return Accepted(
         events=(
             AcceptancePackBound(
@@ -810,6 +825,11 @@ def _decide_rebind_pack(snapshot: Snapshot, command: RebindPack) -> Decision:
     unit = snapshot.unit(command.name)
     if unit is None:
         return _refuse("unit.unknown", f"unit {command.name!r} does not exist")
+    if command.old_pack_digest and command.old_pack_digest != unit.acceptance_pack_digest:
+        return _refuse(
+            "rebind.stale-pack",
+            f"unit {unit.ref().label()!r}: rebind names a different old acceptance pack",
+        )
     if unit.status not in {UnitStatus.PUBLISHED, UnitStatus.RELEASE_BOUND}:
         return _refuse(
             "rebind.not-published",
@@ -845,6 +865,11 @@ def _decide_rebind_pack(snapshot: Snapshot, command: RebindPack) -> Decision:
         return _refuse(
             "rebind.inventory-required",
             "rebind-pack requires both old and new acceptance pack inventories",
+        )
+    if command.old_inventory.effects != command.new_inventory.effects:
+        return _refuse(
+            "rebind.effects-changed",
+            "rebind-pack cannot add, remove or change an effect declaration",
         )
     old_paths = {entry.path for entry in command.old_inventory.entries}
     new_paths = {entry.path for entry in command.new_inventory.entries}
@@ -1539,6 +1564,8 @@ def decide(snapshot: Snapshot, command: Command | RecordMerge) -> Decision:
             return _decide_set_tier(snapshot, command)
         case SetCiPolicy():
             return _decide_set_ci_policy(command)
+        case RequireEffects():
+            return Accepted(events=(EffectsRequired(),))
         case MarkOpenInCi():
             return _decide_mark_open_in_ci(snapshot, command)
         case ClearOpenInCi():
@@ -1629,6 +1656,7 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
     evidence_heads = snapshot.evidence_heads
     anchor_mode = snapshot.anchor_mode
     tier = snapshot.tier
+    effects_required = snapshot.effects_required
     ci_policy = snapshot.ci_policy
     ci_exceptions = snapshot.ci_exceptions
     formal_certificate_digest = snapshot.formal_certificate_digest
@@ -1853,6 +1881,8 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
             anchor_mode = mode
         case TierSet(tier=next_tier):
             tier = next_tier
+        case EffectsRequired():
+            effects_required = True
         case CiPolicySet(policy=policy):
             ci_policy = policy
         case OpenInCiMarked(name=name, reason=reason):
@@ -1950,6 +1980,7 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
         anchor_mode=anchor_mode,
         tier=tier,
         formal_certificate_digest=formal_certificate_digest,
+        effects_required=effects_required,
         ci_policy=ci_policy,
         ci_exceptions=ci_exceptions,
     )

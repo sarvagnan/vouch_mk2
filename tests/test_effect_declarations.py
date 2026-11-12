@@ -8,14 +8,16 @@ finding that it is wrong is a deviation adjudicated by the owner.
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
+import sys
 import re
 import shutil
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import pytest
 
@@ -46,9 +48,11 @@ from vouch_mk2.store import (
     Store,
     StoreError,
     decode_pack_inventory,
+    digest_of,
     encode_pack_inventory,
     encode_snapshot,
 )
+from vouch_mk2.store.event_log import commit_events
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -173,12 +177,14 @@ def test_an_effects_file_parses_to_typed_effects_sorted_by_name() -> None:
         _effects({**ACT, "kind": "transform"}),
         _effects({**ACT, "name": "Portal_Delivery"}),
         _effects(ACT, {**OBSERVE, "name": "portal-delivery"}),
+        b'{"effects_format": 1, "effects": [{"name": "a", "kind": "action", "system": "\\ud800", "outcome": "confirmed"}]}',
+        b'{"effects_format": 1, "effects": [{"name": "a", "kind": "observation", "source": "s", "capture": "c", "detail": "\\udfff"}]}',
     ],
     ids=[
         "not-utf8", "not-object", "no-format", "format-2", "format-bool", "unknown-key",
         "duplicate-key", "observation-with-system", "observation-without-capture",
         "blank-source", "bad-outcome", "action-without-outcome", "unknown-kind",
-        "bad-name", "duplicate-name",
+        "bad-name", "duplicate-name", "lone-surrogate", "lone-surrogate-detail",
     ],
 )
 def test_an_invalid_effects_file_is_refused(data: bytes) -> None:
@@ -218,15 +224,21 @@ def test_a_format_3_inventory_round_trips_and_legacy_formats_do_not_change() -> 
     ):
         with pytest.raises(StoreError):
             encode_pack_inventory(bad)
-    mutations: tuple[Callable[[dict[str, Any]], object], ...] = (
+    def effects_of(d: dict[str, object]) -> list[dict[str, str]]:
+        return cast(list[dict[str, str]], d["effects"])
+
+    def entries_of(d: dict[str, object]) -> list[dict[str, object]]:
+        return cast(list[dict[str, object]], d["entries"])
+
+    mutations: tuple[Callable[[dict[str, object]], object], ...] = (
         lambda d: d.pop("effects"),  # format 3 without effects
         lambda d: d.update(pack_format=2),  # effects key below format 3
-        lambda d: d.update(entries=[e for e in d["entries"] if e["role"] != "effects"]),
-        lambda d: d["effects"].append({"kind": "action", "name": "portal-delivery", "outcome": "irreversible", "system": "x"}),
-        lambda d: d["effects"][0].update(kind="transform"),
+        lambda d: d.update(entries=[e for e in entries_of(d) if e["role"] != "effects"]),
+        lambda d: effects_of(d).append({"kind": "action", "name": "portal-delivery", "outcome": "irreversible", "system": "x"}),
+        lambda d: effects_of(d)[0].update(kind="transform"),
     )
     for mutate in mutations:
-        document = json.loads(data)
+        document = cast(dict[str, object], json.loads(data))
         mutate(document)
         with pytest.raises(Exception):
             decode_pack_inventory(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")
@@ -595,6 +607,7 @@ def test_the_docs_show_effect_declarations() -> None:
     boundary = (ROOT / "docs" / "claim-boundary.md").read_text()
     assert "records what was declared, not that the code has only those effects" in boundary
     assert "require-effects" in boundary
+    assert "reaches the effects requirement but does not verify its gate" in boundary  # pack/3, DEV-ed-07
     commands = (ROOT / "docs" / "commands.md").read_text()
     assert "## require-effects" in commands and "## show-effects" in commands
     assert "--pack-effects-file" in (ROOT / "scripts" / "walkthrough.py").read_text()
@@ -603,3 +616,115 @@ def test_the_docs_show_effect_declarations() -> None:
 def test_d31_records_the_decision() -> None:  # guard:
     log = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
     assert re.search(r"(?m)^## D-31 — Every frozen pack declares its unit's effects", log)
+
+
+# ---- pack/3: Astra's review (DEV-ed-04..07) ----
+
+FAIL_CMD = [sys.executable, "-c", "raise SystemExit(1)"]
+OK_CMD = [sys.executable, "-c", "raise SystemExit(0)"]
+
+
+def _published_unit(project: Path, root: str, name: str) -> None:
+    code, output = _freeze(root, project, name, "--pack-test-file", "tests/test_a.py")
+    assert code == 0, output
+    for verb in ("mark-ready", "start"):
+        _must(verb, "--root", root, "--name", name)
+    _must("record-evidence", "--root", root, "--unit", f"{name}@1", "--kind", "red", "--", *FAIL_CMD)
+    _must("record-evidence", "--root", root, "--unit", f"{name}@1", "--kind", "green", "--", *OK_CMD)
+    for verb in ("mark-done", "publish"):
+        _must(verb, "--root", root, "--name", name)
+
+
+def test_a_rebind_must_name_the_pack_it_replaces(tmp_path: Path) -> None:
+    """R10b (DEV-ed-04): a replayed rebind recorded against another pack is refused."""
+    published = Unit("u", "1", UnitStatus.PUBLISHED, (), "u-pack/1", True,
+                     acceptance_pack_digest="1" * 64, acceptance_test_set_digest="1" * 64)
+    legacy_old = PackInventory(entries=(PackEntry("tests/test_a.py", "a" * 64, 5, "test"),), pack_format=2)
+    legacy_new = PackInventory(entries=(PackEntry("tests/test_a.py", "b" * 64, 6, "test"),), pack_format=2)
+
+    def rebind(old_pack_digest: str) -> Accepted | Refused:
+        return decide(
+            Snapshot(revision=1, units=(published,)),
+            RebindPack(name="u", pack_digest="2" * 64, test_set_digest="2" * 64, reason="adapt",
+                       old_inventory=legacy_old, new_inventory=legacy_new, old_pack_digest=old_pack_digest),
+        )
+
+    stale = rebind("9" * 64)
+    assert isinstance(stale, Refused) and [v.code for v in stale.violations] == ["rebind.stale-pack"]
+    assert isinstance(rebind("1" * 64), Accepted)
+    assert isinstance(rebind(""), Accepted)  # not asserted by the caller
+
+    project, root = _project(tmp_path)
+    _published_unit(project, root, "u")
+    theirs = tmp_path / "theirs"
+    shutil.copytree(project, theirs)
+    their_root = str(theirs / ".vouch")
+    (theirs / "tests" / "test_a.py").write_text("def test_a():\n    assert 1\n")
+    _must("rebind-pack", "--root", their_root, "--name", "u", "--project", str(theirs),
+          "--pack-test-file", "tests/test_a.py", "--reason", "theirs adapts")
+    (project / "tests" / "test_a.py").write_text("def test_a():\n    assert 2\n")
+    _must("rebind-pack", "--root", root, "--name", "u", "--project", str(project),
+          "--pack-test-file", "tests/test_a.py", "--reason", "ours adapts")
+    before = _tree(root)
+    code, output = _run("merge", "--root", root, "--other", their_root)
+    assert code != 0 and "rebind.stale-pack" in output, output
+    assert _tree(root) == before
+
+
+def test_check_fails_an_undeclared_pack_bound_after_effects_were_required(tmp_path: Path) -> None:
+    """R13c (DEV-ed-05): the event log, not the adapter's flag, decides; legacy binds stay grandfathered."""
+    project, root = _project(tmp_path)
+    code, output = _freeze(root, project, "legacy", "--pack-test-file", "tests/test_a.py")
+    assert code == 0, output
+    _must("require-effects", "--root", root)
+    code, output = _run("check", "--root", root, "--project", str(project))
+    assert re.search(r"(?m)^PASS\s+check\.effects-declared\s", output), output
+    _must("specify", "--root", root, "--name", "forged", "--version", "1")
+    undeclared = build_pack_inventory(str(project), (), ("tests/test_a.py",))
+    data = encode_pack_inventory(undeclared)
+    with Store.open(root) as store, store.write_locked():
+        snapshot = store.read_snapshot()
+        decision = decide(snapshot, FreezeAcceptance(
+            name="forged", pack_version="forged-pack/1",
+            pack_digest=digest_of(ArtifactKind.ACCEPTANCE_PACK, data),
+            test_set_digest=pack_test_set_digest(undeclared),
+            effects_declared=True,  # an adapter that lies
+        ))
+        assert isinstance(decision, Accepted)
+        commit_events(store, snapshot, decision.events, actor="forger", run_id="",
+                      objects=((ArtifactKind.ACCEPTANCE_PACK, data),))
+    code, output = _run("check", "--root", root, "--project", str(project))
+    row = next(line for line in output.splitlines() if re.match(r"FAIL\s+check\.effects-declared\s", line))
+    assert "forged@1" in row and "bound after effects were required" in row
+    assert "legacy@1: bound after" not in row
+
+
+def test_check_fails_a_declaration_detached_from_its_effects_file(tmp_path: Path) -> None:
+    """R13d (DEV-ed-06): where pack files are checked, the embedded declaration must equal the file's parse."""
+    project, root = _project(tmp_path)
+    _must("set-tier", "--root", root, "--tier", "standard")
+    _must("set-anchor-mode", "--root", root, "--mode", "ci")
+    _must("specify", "--root", root, "--name", "u", "--version", "1")
+    _must("freeze", "--root", root, "--name", "u", "--pack-version", "u-pack/1")
+    honest = build_pack_inventory(str(project), (), ("tests/test_a.py",), "packs/act.effects.json")
+    with Store.open(root) as store, store.write_locked():
+        bind_pack(store, "u", dataclasses.replace(honest, effects=()))  # declares nothing; the file declares an action
+    _code, output = _run("check", "--root", root, "--project", str(project))
+    assert re.search(r"(?m)^FAIL\s+check\.effects-declared\s.*u@1.*does not match", output), output
+
+
+def test_a_legacy_rebind_after_the_requirement_stays_grandfathered(tmp_path: Path) -> None:
+    """R13e (pack/4, DEV-ed-08): a declaration-preserving rebind inherits its original binding's status."""
+    project, root = _project(tmp_path)
+    _published_unit(project, root, "u")
+    _must("require-effects", "--root", root)
+    (project / "tests" / "test_a.py").write_text("def test_a():\n    assert 3\n")
+    _must("rebind-pack", "--root", root, "--name", "u", "--project", str(project),
+          "--pack-test-file", "tests/test_a.py", "--reason", "adapt to a changed shared interface")
+    code, output = _run("check", "--root", root, "--project", str(project))
+    assert re.search(r"(?m)^PASS\s+check\.effects-declared\s.*not declared: u@1", output), output
+    _must("specify", "--root", root, "--name", "late", "--version", "1")
+    _must("freeze", "--root", root, "--name", "late", "--pack-version", "late-pack/1")
+    code, output = _run("bind-pack", "--root", root, "--name", "late", "--project", str(project),
+                        "--pack-test-file", "tests/test_a.py")
+    assert code == 2 and "pack.effects-required" in output, output  # a fresh undeclared bind is still refused

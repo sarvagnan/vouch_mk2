@@ -242,3 +242,29 @@ Reports list these as organizational `NOT_CHECKED` rows. They are deliberate exc
 - Moving a claim from the organizational table to the mechanical one needs a decision in
   `DECISIONS.md` naming the new artifact that makes it provable.
 - `check` output lists the `NOT_CHECKED` rows verbatim.
+
+## Effect declarations
+
+A declaration records what was declared, not that the code has only those effects.
+Vouch checks declaration structure and binds its raw file bytes into the pack inventory.
+`check.effects-declared` reports declarations for active units; missing or undecodable bound
+inventories fail, while legacy undeclared units are reported without failing CI. `org.effects-truth`
+is always NOT_CHECKED: truth, completeness and working compensation require human review.
+An empty declaration claims a transform; observations disclose a source and capture, and
+actions disclose an external system and a declared confirmed, compensated or irreversible outcome.
+
+`init` records the one-way `require-effects` switch for new stores. Existing stores can opt in
+with `require-effects --root .vouch`; no command clears it. Future bound freezes and binds must
+declare effects. Label-only freezes remain allowed and are reported as undeclared. No upgrade
+invents declarations for old units, and rebind cannot add, remove or change a declaration.
+`show-effects --root .vouch [--json]` reads declarations from bound inventory objects.
+
+The CLI and library derive `effects_declared` from the inventory. The pure `decide()` core trusts
+that adapter-supplied flag, just as it trusts `test_set_digest`; it does not read artifact objects.
+The `effects-v1` formal universe reaches the effects requirement but does not verify its gate:
+declarations live in pack objects, not the snapshot. Tests and `check.effects-declared` verify
+the gate, including undeclared packs bound after the recorded requirement. At `standard` and
+`high` with a project root, that check also compares a hash-matching effects file's parsed
+declaration with the embedded declaration.
+Pack-file verification checks raw bytes according to tier, not declaration truth. A project's
+own effect checker is not yet bindable as a dedicated control.

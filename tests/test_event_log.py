@@ -54,11 +54,14 @@ def test_event_records_are_content_addressed_with_the_declared_fields(tmp_path: 
         head = snapshot.event_head
         assert head, "a specified unit must have produced an event record"
         raw = store.get_object(ArtifactKind.EVENT, head)
-    document = json.loads(raw)
+        document = json.loads(raw)
+        # D-31: init now records EffectsRequired first, so the specify record follows it.
+        first = json.loads(store.get_object(ArtifactKind.EVENT, document["prev"]))
     for field in ("event", "payload", "recorded_at", "prev", "revision", "actor", "run_id"):
         assert field in document, f"event record is missing {field!r}: {sorted(document)}"
-    assert document["prev"] == "GENESIS"
-    assert document["revision"] == 1
+    assert first["prev"] == "GENESIS" and first["revision"] == 1
+    assert document["prev"] != "GENESIS"
+    assert document["revision"] == 2
 
 
 # ---- R2 state format 4 ----

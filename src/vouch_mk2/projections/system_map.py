@@ -72,6 +72,7 @@ class SystemMap:
     formal_certificate_digest: str
     next_actions: tuple[NextAction, ...]
     status_facts: StatusFacts
+    effects_required: bool = False
 
 
 def _system_map_unit_name(row: SystemMapUnit) -> str:
@@ -177,6 +178,7 @@ def system_map(snapshot: Snapshot) -> SystemMap:
         anchor_mode=snapshot.anchor_mode.value,
         tier=snapshot.tier.value,
         ci_policy=snapshot.ci_policy.value,
+        effects_required=snapshot.effects_required,
         ci_exceptions=tuple(
             (item.unit_name, item.reason)
             for item in sorted(

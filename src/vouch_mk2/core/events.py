@@ -232,6 +232,11 @@ class TierSet:
 
 
 @dataclass(frozen=True, slots=True)
+class EffectsRequired:
+    """Future bound packs must declare effects; replay never clears this flag."""
+
+
+@dataclass(frozen=True, slots=True)
 class CiPolicySet:
     policy: CiPolicy
 
@@ -332,6 +337,7 @@ type Event = (
     | AnchorModeSet
     | TierSet
     | CiPolicySet
+    | EffectsRequired
     | OpenInCiMarked
     | OpenInCiCleared
     | FormalCertificateRecorded

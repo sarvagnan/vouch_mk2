@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-ed-03","deviation_type":"plan-gap","unit":{"name":"effect-declarations","version":"1"}},"prev":"d44b303224e62db3b394403bfb5f0749fd263b428ded90e3e06589ef39c79230","recorded_at":"2026-11-12T12:32:37+00:00","revision":853,"run_id":""}

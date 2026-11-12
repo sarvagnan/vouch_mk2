@@ -77,6 +77,7 @@ def agent_context(snapshot: Snapshot) -> str:
                 f"{len(snapshot.ci_exceptions)} recorded open-unit exceptions.",
             )
         ),
+        *(("Effect declarations are required for bound acceptance packs.",) if snapshot.effects_required else ()),
         (
             "Acceptance packs: "
             f"{sum(bool(unit.acceptance_pack_digest) for unit in snapshot.units)} bound; "
