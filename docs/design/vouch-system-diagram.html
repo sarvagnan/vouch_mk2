@@ -1,0 +1,1469 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Optimal Vouch system diagram: assurance kernel, adoption operating system, greenfield and brownfield paths, sound incremental verification, enforcement, and roadmap.">
+  <title>Vouch — Optimal System Diagram</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f2f5f3;
+      --surface: #fbfcfa;
+      --surface-2: #e9efec;
+      --ink: #132321;
+      --muted: #586b67;
+      --line: #c6d2ce;
+      --line-strong: #80958f;
+      --night: #102825;
+      --night-2: #16403a;
+      --mint: #0b7d68;
+      --mint-soft: #ddf3ec;
+      --cyan: #176e8c;
+      --cyan-soft: #e2f1f6;
+      --amber: #a95d0b;
+      --amber-soft: #fff0d8;
+      --coral: #aa463c;
+      --coral-soft: #fae8e5;
+      --violet: #6651a8;
+      --violet-soft: #eee9fa;
+      --green: #2a7148;
+      --green-soft: #e3f1e8;
+      --slate: #52647b;
+      --slate-soft: #e8edf3;
+      --shadow: 0 18px 55px rgba(20, 50, 45, 0.10);
+      --shadow-small: 0 7px 24px rgba(20, 50, 45, 0.08);
+      --radius: 18px;
+    }
+
+    html[data-theme="dark"] {
+      --bg: #0c1716;
+      --surface: #142321;
+      --surface-2: #1a2d2a;
+      --ink: #eaf4f0;
+      --muted: #a6b9b4;
+      --line: #314a45;
+      --line-strong: #718b84;
+      --night: #d7f3ea;
+      --night-2: #9ee2d0;
+      --mint: #69d8bc;
+      --mint-soft: #173e35;
+      --cyan: #78c9e6;
+      --cyan-soft: #173743;
+      --amber: #f1b665;
+      --amber-soft: #46321c;
+      --coral: #f09a91;
+      --coral-soft: #472725;
+      --violet: #c4b0fa;
+      --violet-soft: #342c50;
+      --green: #80d3a2;
+      --green-soft: #183a27;
+      --slate: #aebed3;
+      --slate-soft: #283544;
+      --shadow: 0 22px 60px rgba(0, 0, 0, 0.30);
+      --shadow-small: 0 8px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      html:not([data-theme="light"]) {
+        --bg: #0c1716;
+        --surface: #142321;
+        --surface-2: #1a2d2a;
+        --ink: #eaf4f0;
+        --muted: #a6b9b4;
+        --line: #314a45;
+        --line-strong: #718b84;
+        --night: #d7f3ea;
+        --night-2: #9ee2d0;
+        --mint: #69d8bc;
+        --mint-soft: #173e35;
+        --cyan: #78c9e6;
+        --cyan-soft: #173743;
+        --amber: #f1b665;
+        --amber-soft: #46321c;
+        --coral: #f09a91;
+        --coral-soft: #472725;
+        --violet: #c4b0fa;
+        --violet-soft: #342c50;
+        --green: #80d3a2;
+        --green-soft: #183a27;
+        --slate: #aebed3;
+        --slate-soft: #283544;
+        --shadow: 0 22px 60px rgba(0, 0, 0, 0.30);
+        --shadow-small: 0 8px 28px rgba(0, 0, 0, 0.22);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 7%, color-mix(in srgb, var(--mint-soft) 58%, transparent), transparent 23rem),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a { color: var(--cyan); text-underline-offset: 3px; }
+    a:hover { text-decoration-thickness: 2px; }
+    button, input { font: inherit; }
+    code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    code {
+      padding: 0.08rem 0.31rem;
+      border-radius: 5px;
+      background: var(--surface-2);
+      font-size: 0.91em;
+    }
+
+    .shell {
+      width: min(1240px, calc(100% - 36px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 64px 0 48px;
+      color: #f5fbf8;
+      background:
+        radial-gradient(circle at 79% 19%, rgba(53, 190, 159, 0.32), transparent 25rem),
+        radial-gradient(circle at 2% 100%, rgba(45, 126, 157, 0.26), transparent 25rem),
+        linear-gradient(128deg, #0d211f 0%, #123b35 52%, #13584c 100%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -145px;
+      bottom: -330px;
+      width: 650px;
+      height: 650px;
+      border: 1px solid rgba(255,255,255,0.13);
+      border-radius: 50%;
+      box-shadow: 0 0 0 84px rgba(255,255,255,0.03), 0 0 0 168px rgba(255,255,255,0.02);
+      pointer-events: none;
+    }
+    .hero-layout {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: start;
+    }
+    .eyebrow {
+      margin: 0 0 12px;
+      color: #7fe1c9;
+      font-size: 0.76rem;
+      font-weight: 820;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    h1 {
+      max-width: 900px;
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(2.7rem, 7vw, 5.8rem);
+      font-weight: 500;
+      letter-spacing: -0.058em;
+      line-height: 0.96;
+    }
+    .hero .lede {
+      max-width: 830px;
+      margin: 25px 0 0;
+      color: #d3e7e1;
+      font-size: clamp(1.03rem, 2vw, 1.26rem);
+    }
+    .hero strong { color: #ffffff; }
+
+    .theme-toggle {
+      padding: 9px 14px;
+      border: 1px solid rgba(255,255,255,0.34);
+      border-radius: 999px;
+      color: #ffffff;
+      background: rgba(255,255,255,0.08);
+      cursor: pointer;
+    }
+    .theme-toggle:hover { background: rgba(255,255,255,0.15); }
+    .theme-toggle:focus-visible, .focus-button:focus-visible {
+      outline: 3px solid #8ce8d2;
+      outline-offset: 3px;
+    }
+
+    .hero-summary {
+      display: grid;
+      grid-column: 1 / -1;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 34px;
+    }
+    .hero-stat {
+      min-height: 118px;
+      padding: 17px 18px;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 14px;
+      background: rgba(4, 21, 18, 0.29);
+      backdrop-filter: blur(8px);
+    }
+    .hero-stat b { display: block; margin-bottom: 5px; color: #ffffff; }
+    .hero-stat span { color: #cde2dc; font-size: 0.88rem; }
+
+    .control-bar {
+      position: sticky;
+      z-index: 30;
+      top: 0;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--bg) 89%, transparent);
+      backdrop-filter: blur(16px);
+    }
+    .control-inner {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+    }
+    .toc {
+      display: flex;
+      min-width: 0;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+    .toc a {
+      flex: 0 0 auto;
+      padding: 7px 10px;
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 720;
+      text-decoration: none;
+    }
+    .toc a:hover { color: var(--ink); background: var(--surface-2); }
+    .focus-control {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+    .focus-button {
+      padding: 5px 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 0.73rem;
+      font-weight: 750;
+      cursor: pointer;
+    }
+    .focus-button[aria-pressed="true"] { color: #ffffff; background: var(--mint); }
+
+    main { padding: 12px 0 86px; }
+    section { scroll-margin-top: 84px; padding-top: 62px; }
+    .section-head {
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      margin-bottom: 25px;
+    }
+    .section-number {
+      display: grid;
+      width: 46px;
+      height: 46px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      color: var(--mint);
+      background: var(--surface);
+      box-shadow: var(--shadow-small);
+      font-size: 0.82rem;
+      font-weight: 850;
+    }
+    h2 {
+      margin: 0;
+      color: var(--night);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(1.9rem, 4vw, 3rem);
+      font-weight: 500;
+      letter-spacing: -0.04em;
+      line-height: 1.06;
+    }
+    .section-intro {
+      max-width: 900px;
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: 1.01rem;
+    }
+    h3 { color: var(--night); }
+
+    .status-legend {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 9px;
+      margin-top: 24px;
+    }
+    .legend-item {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface);
+      box-shadow: var(--shadow-small);
+    }
+    .legend-item p { margin: 7px 0 0; color: var(--muted); font-size: 0.75rem; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 3px 8px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 0.64rem;
+      font-weight: 850;
+      letter-spacing: 0.06em;
+      line-height: 1.25;
+      text-transform: uppercase;
+    }
+    .implemented { color: var(--green); background: var(--green-soft); }
+    .dogfooded { color: var(--cyan); background: var(--cyan-soft); }
+    .target { color: var(--violet); background: var(--violet-soft); }
+    .adopter { color: var(--amber); background: var(--amber-soft); }
+    .external { color: var(--slate); background: var(--slate-soft); }
+    .pending { color: var(--coral); background: var(--coral-soft); }
+
+    .panel {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .panel + .panel { margin-top: 18px; }
+    .panel-title {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 18px;
+    }
+    .panel-title h3 { margin: 0; font-size: 1.04rem; }
+    .panel-note { color: var(--muted); font-size: 0.82rem; }
+
+    [data-domain] { transition: opacity 160ms ease, filter 160ms ease, transform 160ms ease; }
+    body[data-focus="adoption"] [data-domain]:not([data-domain~="adoption"]),
+    body[data-focus="assurance"] [data-domain]:not([data-domain~="assurance"]),
+    body[data-focus="verification"] [data-domain]:not([data-domain~="verification"]),
+    body[data-focus="rollout"] [data-domain]:not([data-domain~="rollout"]) {
+      opacity: 0.28;
+      filter: saturate(0.35);
+    }
+    body[data-focus]:not([data-focus="all"]) [data-domain]:hover {
+      opacity: 1;
+      filter: none;
+    }
+
+    .architecture {
+      display: grid;
+      gap: 12px;
+    }
+    .arch-row {
+      display: grid;
+      grid-template-columns: 130px minmax(0, 1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+    .arch-label {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 850;
+      letter-spacing: 0.09em;
+      text-align: right;
+      text-transform: uppercase;
+    }
+    .arch-content { display: grid; gap: 11px; }
+    .cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .arch-node {
+      min-width: 0;
+      padding: 15px 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+    .arch-node b { display: block; margin: 7px 0 4px; }
+    .arch-node small { display: block; color: var(--muted); line-height: 1.43; }
+    .arch-node.adoption-node { border-color: color-mix(in srgb, var(--amber) 44%, var(--line)); background: var(--amber-soft); }
+    .arch-node.assurance-node { border-color: color-mix(in srgb, var(--cyan) 46%, var(--line)); background: var(--cyan-soft); }
+    .arch-node.record-node { border-color: color-mix(in srgb, var(--mint) 46%, var(--line)); background: var(--mint-soft); }
+    .arch-node.gate-node { border-color: color-mix(in srgb, var(--green) 46%, var(--line)); background: var(--green-soft); }
+    .arch-arrow {
+      width: calc(100% - 146px);
+      margin-left: 146px;
+      color: var(--line-strong);
+      text-align: center;
+      font-size: 1.25rem;
+      line-height: 0.9;
+    }
+
+    .module-pair {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .module-card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow-small);
+    }
+    .module-card h3 { margin: 10px 0 6px; font-size: 1.08rem; }
+    .module-card p { margin: 0; color: var(--muted); font-size: 0.89rem; }
+    .interface {
+      margin-top: 13px;
+      padding: 11px 12px;
+      border-radius: 9px;
+      color: var(--night);
+      background: var(--surface-2);
+      font-size: 0.77rem;
+      overflow-wrap: anywhere;
+    }
+
+    .callout {
+      padding: 18px 20px;
+      border-left: 4px solid var(--mint);
+      border-radius: 0 12px 12px 0;
+      background: var(--mint-soft);
+    }
+    .callout strong { color: var(--night); }
+    .callout p { margin: 5px 0 0; color: var(--muted); }
+    .callout.warning { border-left-color: var(--coral); background: var(--coral-soft); }
+
+    .lifecycle-wrap { overflow-x: auto; padding: 4px 2px 11px; }
+    .lifecycle {
+      display: flex;
+      min-width: 1080px;
+      align-items: stretch;
+    }
+    .stage {
+      position: relative;
+      display: flex;
+      flex: 1 1 0;
+      min-width: 128px;
+      flex-direction: column;
+      justify-content: center;
+      padding: 15px 13px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+      text-align: center;
+    }
+    .stage b { font-size: 0.87rem; }
+    .stage small { margin-top: 4px; color: var(--muted); font-size: 0.73rem; line-height: 1.35; }
+    .stage-arrow {
+      display: grid;
+      flex: 0 0 28px;
+      place-items: center;
+      color: var(--line-strong);
+      font-weight: 900;
+    }
+    .stage.proof { background: var(--green-soft); border-color: color-mix(in srgb, var(--green) 45%, var(--line)); }
+    .stage.use { background: var(--cyan-soft); border-color: color-mix(in srgb, var(--cyan) 45%, var(--line)); }
+    .stage.start { background: var(--amber-soft); border-color: color-mix(in srgb, var(--amber) 42%, var(--line)); }
+
+    .orthogonal-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 17px;
+    }
+    .axis-card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .axis-card b { display: block; margin-bottom: 5px; color: var(--night); }
+    .axis-card span { color: var(--muted); font-size: 0.82rem; }
+
+    .role-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .role-card {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface-2);
+    }
+    .role-card b { display: block; margin-bottom: 5px; font-size: 0.83rem; }
+    .role-card span { color: var(--muted); font-size: 0.76rem; }
+
+    .split-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .path-card {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+      box-shadow: var(--shadow-small);
+    }
+    .path-card.greenfield { border-top: 5px solid var(--mint); }
+    .path-card.brownfield { border-top: 5px solid var(--amber); }
+    .path-card h3 { margin: 10px 0 8px; }
+    .path-card > p { margin: 0 0 14px; color: var(--muted); }
+    .path-card ol { margin: 0; padding-left: 1.2rem; }
+    .path-card li { padding: 5px 0 5px 4px; font-size: 0.88rem; }
+    .convergence {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 11px;
+      margin-top: 17px;
+    }
+    .converge-card {
+      padding: 15px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 11px;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--surface-2) 64%, transparent);
+      font-size: 0.82rem;
+    }
+    .converge-card b { color: var(--night); }
+
+    .scope-grid {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 18px;
+      align-items: start;
+    }
+    .scope-list {
+      display: grid;
+      gap: 9px;
+    }
+    .scope-item {
+      display: grid;
+      grid-template-columns: 16px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 12px 13px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-2);
+    }
+    .scope-dot {
+      width: 10px;
+      height: 10px;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--mint);
+    }
+    .scope-item b { display: block; font-size: 0.84rem; }
+    .scope-item span { display: block; color: var(--muted); font-size: 0.77rem; }
+
+    .principle-card {
+      padding: 21px;
+      border: 1px solid color-mix(in srgb, var(--violet) 46%, var(--line));
+      border-radius: 14px;
+      background: var(--violet-soft);
+    }
+    .principle-card .big-rule {
+      margin: 8px 0 11px;
+      color: var(--night);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(1.35rem, 3vw, 2rem);
+      letter-spacing: -0.025em;
+      line-height: 1.12;
+    }
+    .principle-card p { margin: 0; color: var(--muted); }
+
+    .pipeline-scroll { overflow-x: auto; padding: 3px 2px 12px; }
+    .pipeline {
+      display: flex;
+      min-width: 1040px;
+      align-items: stretch;
+    }
+    .pipe-node {
+      position: relative;
+      display: flex;
+      flex: 1 1 0;
+      min-width: 110px;
+      flex-direction: column;
+      justify-content: center;
+      padding: 14px 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface-2);
+      text-align: center;
+    }
+    .pipe-node b { font-size: 0.8rem; }
+    .pipe-node small { margin-top: 4px; color: var(--muted); font-size: 0.69rem; line-height: 1.34; }
+    .pipe-node.input { background: var(--amber-soft); }
+    .pipe-node.decide { background: var(--violet-soft); }
+    .pipe-node.execute { background: var(--cyan-soft); }
+    .pipe-node.output { background: var(--green-soft); }
+    .pipe-arrow {
+      display: grid;
+      flex: 0 0 20px;
+      place-items: center;
+      color: var(--line-strong);
+      font-weight: 900;
+    }
+
+    .capsule-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 17px;
+    }
+    .binding {
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+    .binding b { display: block; margin-bottom: 3px; font-size: 0.78rem; }
+    .binding span { display: block; color: var(--muted); font-size: 0.72rem; }
+
+    .mode-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .mode-card {
+      position: relative;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow-small);
+    }
+    .mode-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      left: 0;
+      height: 5px;
+      border-radius: 14px 14px 0 0;
+      background: var(--mint);
+    }
+    .mode-card.full::before { background: var(--cyan); }
+    .mode-card.history::before { background: var(--violet); }
+    .mode-card h3 { margin: 10px 0 6px; }
+    .mode-card p { margin: 0; color: var(--muted); font-size: 0.86rem; }
+    .mode-card ul { margin: 12px 0 0; padding-left: 1.05rem; color: var(--muted); font-size: 0.8rem; }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow-small);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th {
+      color: var(--night);
+      background: var(--surface-2);
+      font-size: 0.69rem;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { font-weight: 750; color: var(--night); }
+
+    .integrity-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .integrity-card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+    .integrity-card b { display: block; margin-bottom: 4px; font-size: 0.84rem; }
+    .integrity-card p { margin: 0; color: var(--muted); font-size: 0.78rem; }
+
+    .ci-flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .ci-card {
+      position: relative;
+      min-height: 171px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface-2);
+    }
+    .ci-card:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      z-index: 2;
+      top: 26px;
+      right: -17px;
+      width: 22px;
+      color: var(--line-strong);
+      background: var(--surface);
+      text-align: center;
+    }
+    .ci-card b { display: block; margin: 8px 0 5px; font-size: 0.8rem; }
+    .ci-card p { margin: 0; color: var(--muted); font-size: 0.72rem; line-height: 1.4; }
+    .permission {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 999px;
+      color: var(--cyan);
+      background: var(--cyan-soft);
+      font-size: 0.61rem;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+    .ci-card.write .permission { color: var(--amber); background: var(--amber-soft); }
+
+    .authority-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .authority-card {
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .authority-card h3 { margin: 9px 0 5px; font-size: 0.94rem; }
+    .authority-card p { margin: 0; color: var(--muted); font-size: 0.8rem; }
+
+    .local-banner {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 18px;
+      align-items: center;
+      padding: 24px;
+      border: 1px solid color-mix(in srgb, var(--mint) 45%, var(--line));
+      border-radius: 16px;
+      background: var(--mint-soft);
+    }
+    .local-mark {
+      display: grid;
+      width: 62px;
+      height: 62px;
+      place-items: center;
+      border: 2px solid var(--mint);
+      border-radius: 50%;
+      color: var(--mint);
+      font-size: 1.4rem;
+      font-weight: 900;
+    }
+    .local-banner h3 { margin: 0 0 4px; }
+    .local-banner p { margin: 0; color: var(--muted); }
+    .ops-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 11px;
+      margin-top: 17px;
+    }
+    .ops-card {
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface);
+    }
+    .ops-card b { display: block; margin-bottom: 4px; font-size: 0.82rem; }
+    .ops-card span { color: var(--muted); font-size: 0.76rem; }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .wave {
+      position: relative;
+      min-height: 220px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+    .wave-no {
+      display: grid;
+      width: 31px;
+      height: 31px;
+      place-items: center;
+      border-radius: 9px;
+      color: #ffffff;
+      background: var(--mint);
+      font-size: 0.72rem;
+      font-weight: 850;
+    }
+    .wave h3 { margin: 12px 0 6px; font-size: 0.89rem; }
+    .wave p { margin: 0; color: var(--muted); font-size: 0.73rem; }
+    .wave .status { margin-top: 12px; }
+
+    .boundary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .boundary-card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .boundary-card h3 { margin: 9px 0 5px; font-size: 0.94rem; }
+    .boundary-card p { margin: 0; color: var(--muted); font-size: 0.82rem; }
+
+    details {
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    summary {
+      padding: 15px 17px;
+      color: var(--night);
+      font-weight: 780;
+      cursor: pointer;
+    }
+    .source-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 9px;
+      padding: 0 17px 17px;
+    }
+    .source-grid a {
+      display: block;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-2);
+      text-decoration: none;
+    }
+    .source-grid b { display: block; margin-bottom: 2px; color: var(--night); font-size: 0.79rem; }
+    .source-grid span { display: block; color: var(--muted); font-size: 0.7rem; }
+
+    footer {
+      padding: 28px 0 40px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    .footer-inner { display: flex; gap: 20px; justify-content: space-between; }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 1100px) {
+      .hero-summary { grid-template-columns: repeat(2, 1fr); }
+      .status-legend { grid-template-columns: repeat(3, 1fr); }
+      .role-grid { grid-template-columns: repeat(3, 1fr); }
+      .capsule-grid { grid-template-columns: repeat(2, 1fr); }
+      .ci-flow { grid-template-columns: repeat(3, 1fr); }
+      .ci-card:not(:last-child)::after { display: none; }
+      .roadmap { grid-template-columns: repeat(3, 1fr); }
+      .ops-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 820px) {
+      section { scroll-margin-top: 104px; }
+      .control-inner { display: block; }
+      .focus-control { width: max-content; margin-top: 7px; }
+      .hero-layout { grid-template-columns: 1fr; }
+      .theme-toggle { grid-row: 1; justify-self: start; }
+      .arch-row { grid-template-columns: 1fr; gap: 7px; }
+      .arch-label { justify-content: flex-start; text-align: left; }
+      .arch-arrow { width: 100%; margin-left: 0; }
+      .cols-3, .cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .module-pair, .split-grid, .scope-grid { grid-template-columns: 1fr; }
+      .orthogonal-grid, .mode-grid, .authority-grid, .integrity-grid { grid-template-columns: 1fr; }
+      .role-grid { grid-template-columns: repeat(2, 1fr); }
+      .convergence { grid-template-columns: 1fr; }
+      .roadmap { grid-template-columns: repeat(2, 1fr); }
+      .source-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 560px) {
+      .shell { width: min(100% - 22px, 1240px); }
+      .hero { padding: 40px 0 33px; }
+      h1 { font-size: 3rem; }
+      .hero-summary, .status-legend, .cols-2, .cols-3, .cols-4,
+      .role-grid, .capsule-grid, .ci-flow, .roadmap, .ops-grid,
+      .boundary-grid, .source-grid { grid-template-columns: 1fr; }
+      .hero-stat { min-height: 0; }
+      section { padding-top: 48px; }
+      .section-head { grid-template-columns: 40px minmax(0, 1fr); gap: 11px; }
+      .section-number { width: 38px; height: 38px; }
+      .panel { padding: 16px; }
+      .focus-control { max-width: 100%; overflow-x: auto; }
+      .ci-card { min-height: 0; }
+      .local-banner { grid-template-columns: 1fr; }
+      .footer-inner { display: block; }
+      .footer-inner span { display: block; margin-top: 7px; }
+      th, td { padding: 11px; }
+    }
+
+    @media print {
+      :root {
+        --bg: #ffffff;
+        --surface: #ffffff;
+        --surface-2: #f1f4f2;
+        --ink: #142321;
+        --muted: #52625f;
+        --line: #c6d2ce;
+        --night: #102825;
+        --shadow: none;
+        --shadow-small: none;
+      }
+      .theme-toggle, .control-bar, .focus-control { display: none; }
+      .hero { padding: 30px 0; print-color-adjust: exact; }
+      section { break-inside: avoid; }
+      .panel, .module-card, .mode-card { box-shadow: none; }
+      [data-domain] { opacity: 1 !important; filter: none !important; }
+    }
+  </style>
+</head>
+<body data-focus="all">
+  <header class="hero">
+    <div class="shell hero-layout">
+      <div>
+        <p class="eyebrow">Optimal target · assurance + adoption</p>
+        <h1>Vouch is a delivery system, not just a verifier.</h1>
+        <p class="lede">
+          Mk2 proved the internals could be strong. The optimal Vouch preserves that
+          <strong>assurance kernel</strong> and makes adoption, implementation, sustained use,
+          and sound large-project verification first-class parts of the product.
+        </p>
+      </div>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="Change color theme">Theme: auto</button>
+
+      <div class="hero-summary">
+        <div class="hero-stat" data-domain="assurance"><b>Proof kernel</b><span>Typed gates, append-only evidence, bounded claims, and formal policy identity remain authoritative.</span></div>
+        <div class="hero-stat" data-domain="adoption"><b>Adoption operating system</b><span>Fit, integration, pilot, proof, expansion, support, pause, recovery, and exit are product-owned.</span></div>
+        <div class="hero-stat" data-domain="verification"><b>Incremental by proof</b><span>Affected scopes rerun; unchanged scopes compose only through exact valid capsules.</span></div>
+        <div class="hero-stat" data-domain="adoption assurance verification rollout"><b>Local only</b><span>No telemetry, hosted control plane, daemon, or Vouch-initiated network transmission.</span></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="control-bar">
+    <div class="shell control-inner">
+      <nav class="toc" aria-label="Page sections">
+        <a href="#status">Reading rule</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#adoption">Adoption</a>
+        <a href="#paths">Green / brown</a>
+        <a href="#incremental">Incremental</a>
+        <a href="#modes">Verification modes</a>
+        <a href="#enforcement">Enforcement</a>
+        <a href="#operations">Local operations</a>
+        <a href="#roadmap">Status &amp; roadmap</a>
+        <a href="#boundaries">Boundaries</a>
+      </nav>
+      <div class="focus-control" role="group" aria-label="Highlight diagram domain">
+        <button class="focus-button" type="button" data-focus="all" aria-pressed="true">All</button>
+        <button class="focus-button" type="button" data-focus="adoption" aria-pressed="false">Adoption</button>
+        <button class="focus-button" type="button" data-focus="assurance" aria-pressed="false">Assurance</button>
+        <button class="focus-button" type="button" data-focus="verification" aria-pressed="false">Incremental</button>
+        <button class="focus-button" type="button" data-focus="rollout" aria-pressed="false">Rollout</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="shell">
+    <section id="status">
+      <div class="section-head">
+        <div class="section-number">00</div>
+        <div>
+          <h2>Read every claim with its status.</h2>
+          <p class="section-intro">This is an accepted target architecture, not a claim that every box exists today. The preserved mk2 diagram remains the current-state reference.</p>
+        </div>
+      </div>
+
+      <div class="status-legend" aria-label="Capability status legend">
+        <div class="legend-item"><span class="status implemented">Implemented</span><p>Present in current mk2 code or generated artifacts.</p></div>
+        <div class="legend-item"><span class="status dogfooded">Dogfooded</span><p>Used by mk2 itself; one controlled project is not general adoption.</p></div>
+        <div class="legend-item"><span class="status target">Target</span><p>Accepted optimal design, not yet current behavior.</p></div>
+        <div class="legend-item"><span class="status adopter">Adopter-owned</span><p>Configured or governed by the adopting project or organization.</p></div>
+        <div class="legend-item"><span class="status external">External</span><p>Depends on authority or truth Vouch cannot establish mechanically.</p></div>
+        <div class="legend-item"><span class="status pending">Proof pending</span><p>Requires an independent real adopter or delivery environment.</p></div>
+      </div>
+
+      <div class="callout warning" style="margin-top: 20px">
+        <strong>The adoption correction</strong>
+        <p>Successful initialization and strong internals produce an integrated project—not an adopted one. Adoption requires real governed delivery, demonstrated value, a later independent change, and sustained use.</p>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="section-head">
+        <div class="section-number">01</div>
+        <div>
+          <h2>Two deep modules. One composed delivery decision.</h2>
+          <p class="section-intro">Assurance and adoption have separate authority and history. They meet only through immutable references and a fail-closed composed project gate.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title"><h3>Authority flow</h3><span class="panel-note">Arrows show dependency, not authority transfer.</span></div>
+        <div class="architecture" role="img" aria-label="Optimal Vouch architecture with separate adoption and assurance modules, records, composed gate, and delivery authority">
+          <div class="arch-row">
+            <div class="arch-label">Actors &amp; environment</div>
+            <div class="arch-content cols-3">
+              <div class="arch-node" data-domain="adoption assurance"><span class="status adopter">Adopter-owned</span><b>Maintainer, agent, roles</b><small>Adoption, acceptance, implementation, delivery, and support accountabilities.</small></div>
+              <div class="arch-node" data-domain="assurance verification"><span class="status adopter">Adopter-owned</span><b>Project &amp; runners</b><small>Source, packs, dependency facts, local commands, toolchains, and effect inputs.</small></div>
+              <div class="arch-node" data-domain="assurance verification"><span class="status implemented">Implemented</span> <span class="status dogfooded">Dogfooded</span><b>GitHub delivery adapter</b><small>First concrete forge adapter. Translates environment facts without owning policy.</small></div>
+            </div>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">↓</div>
+          <div class="arch-row">
+            <div class="arch-label">Product modules</div>
+            <div class="arch-content cols-2">
+              <div class="arch-node adoption-node" data-domain="adoption"><span class="status target">Target</span><b>Adoption module</b><small>Assess, begin, next, advance, status, pause, resume, recover, and exit.</small></div>
+              <div class="arch-node assurance-node" data-domain="assurance verification"><span class="status implemented">Implemented base</span> <span class="status target">Target evolution</span><b>Assurance kernel</b><small>Current decide, apply, and global check; target adds impact plans, capsule composition, full verification, and historical scrub.</small></div>
+            </div>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">↓</div>
+          <div class="arch-row">
+            <div class="arch-label">Repository records</div>
+            <div class="arch-content cols-2">
+              <div class="arch-node record-node" data-domain="adoption"><span class="status target">Target</span><b>Adoption record</b><small>Stage, health, roles, scope, scorecards, outcomes, exceptions, interruptions, recovery, exit.</small></div>
+              <div class="arch-node record-node" data-domain="assurance verification"><span class="status implemented">Implemented base</span> <span class="status target">Target additions</span><b>Assurance record</b><small>Current events, evidence, packs, releases, certificates; target capsules and checkpoints.</small></div>
+            </div>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">↓</div>
+          <div class="arch-row">
+            <div class="arch-label">Decision</div>
+            <div class="arch-content">
+              <div class="arch-node gate-node" data-domain="adoption assurance verification"><span class="status target">Target composition</span><b>Composed project gate</b><small>Kernel verdict + required adoption health + named project checks. Adoption can block; it can never strengthen a kernel verdict.</small></div>
+            </div>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">↓</div>
+          <div class="arch-row">
+            <div class="arch-label">Real authority</div>
+            <div class="arch-content cols-3">
+              <div class="arch-node" data-domain="assurance rollout"><span class="status adopter">Adopter-owned</span><b>Protected merge gate</b><small>Required checks, workflow integrity, branch rules, and bypass policy.</small></div>
+              <div class="arch-node" data-domain="assurance rollout"><span class="status external">External</span><b>Release / deployment</b><small>The real delivery system must make the composed Vouch result a prerequisite.</small></div>
+              <div class="arch-node" data-domain="adoption rollout"><span class="status pending">Proof pending</span><b>Independent adoption</b><small>One pilot, a later governed change, and an observation window in a real project.</small></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="module-pair">
+        <article class="module-card" data-domain="adoption">
+          <span class="status target">Target deep module</span>
+          <h3>Adoption module interface</h3>
+          <p>Hides assessment, rollout, support, exception, recovery, and exit complexity from users and adapters.</p>
+          <div class="interface mono">assess · begin · next · advance · status · pause · resume · exit</div>
+        </article>
+        <article class="module-card" data-domain="assurance verification">
+          <span class="status implemented">Evolves mk2</span>
+          <h3>Assurance-kernel interface</h3>
+          <p>Keeps policy, impact planning, verification reuse, history, and claim composition behind one testable seam.</p>
+          <div class="interface mono">decide · apply · plan · record · compose · full · scrub · report</div>
+        </article>
+      </div>
+    </section>
+
+    <section id="adoption">
+      <div class="section-head">
+        <div class="section-number">02</div>
+        <div>
+          <h2>Adoption is an observable lifecycle.</h2>
+          <p class="section-intro">The product helps a project decide whether to continue, expand, pause, or exit. It does not equate files installed with behavior sustained.</p>
+        </div>
+      </div>
+
+      <div class="panel" data-domain="adoption">
+        <div class="panel-title"><h3>Primary adoption path</h3><span class="status target">Target</span></div>
+        <div class="lifecycle-wrap">
+          <div class="lifecycle" role="img" aria-label="Adoption lifecycle from candidate through expanding">
+            <div class="stage start"><b>Candidate</b><small>Bounded fit assessment</small></div><div class="stage-arrow">→</div>
+            <div class="stage start"><b>Ready</b><small>Roles, pilot, authority, exits settled</small></div><div class="stage-arrow">→</div>
+            <div class="stage use"><b>Integrating</b><small>Repository, runners, delivery probes</small></div><div class="stage-arrow">→</div>
+            <div class="stage use"><b>Piloting</b><small>One bounded real change</small></div><div class="stage-arrow">→</div>
+            <div class="stage proof"><b>Proven</b><small>Pilot met its scorecard</small></div><div class="stage-arrow">→</div>
+            <div class="stage proof"><b>Adopted</b><small>Later change + observation window</small></div><div class="stage-arrow">→</div>
+            <div class="stage proof"><b>Expanding</b><small>Governed-scope ratchet or cohort rollout</small></div>
+          </div>
+        </div>
+        <div class="convergence">
+          <div class="converge-card"><b>Pause:</b> progression stops; current health and next reconciliation remain visible.</div>
+          <div class="converge-card"><b>Exit:</b> governance ends deliberately; history and bounded surviving claims remain.</div>
+          <div class="converge-card"><b>Return:</b> begin a linked new adoption episode rather than rewriting the old one.</div>
+        </div>
+      </div>
+
+      <div class="orthogonal-grid" data-domain="adoption assurance">
+        <div class="axis-card"><b>Adoption stage</b><span>candidate · ready · integrating · piloting · proven · adopted · expanding</span></div>
+        <div class="axis-card"><b>Assurance tier</b><span>Strength of evidence and independence—not duration or adoption maturity.</span></div>
+        <div class="axis-card"><b>Adoption health</b><span>healthy · attention · blocked · interrupted, independent of historical stage.</span></div>
+      </div>
+
+      <div class="role-grid" data-domain="adoption">
+        <div class="role-card"><b>Adoption owner</b><span>Fit, burden, scorecard, pause, and exit.</span></div>
+        <div class="role-card"><b>Acceptance owner</b><span>Required behavior, evidence, and amendments.</span></div>
+        <div class="role-card"><b>Implementer</b><span>Person or agent changing governed product behavior.</span></div>
+        <div class="role-card"><b>Delivery authority</b><span>Enforcement and release authority in the real workflow.</span></div>
+        <div class="role-card"><b>Support owner</b><span>Friction and defects without silent policy changes.</span></div>
+      </div>
+    </section>
+
+    <section id="paths">
+      <div class="section-head">
+        <div class="section-number">03</div>
+        <div>
+          <h2>Brownfield-first, with a real greenfield fast lane.</h2>
+          <p class="section-intro">The paths differ in how they establish trustworthy scope. They converge on the same hard-gated pilot, scorecard, and sustained-use standard.</p>
+        </div>
+      </div>
+
+      <div class="split-grid" data-domain="adoption rollout">
+        <article class="path-card greenfield">
+          <span class="status target">Greenfield target</span>
+          <h3>Governance before product behavior</h3>
+          <p>Repository age is irrelevant. The path is greenfield only when product behavior starts after governance is established.</p>
+          <ol>
+            <li>Set governance root, roles, tier, delivery authority, and scope manifest.</li>
+            <li>Verify minimal bootstrap infrastructure under a separate bootstrap claim.</li>
+            <li>Keep disposable discovery in an explicit exploration area.</li>
+            <li>Establish the verified baseline.</li>
+            <li>Deliver the first real behavior through the normal governed path.</li>
+          </ol>
+        </article>
+        <article class="path-card brownfield">
+          <span class="status target">Brownfield target</span>
+          <h3>Bound, characterize, pilot, ratchet</h3>
+          <p>Pre-Vouch behavior remains visibly characterized rather than acquiring retroactive causal assurance.</p>
+          <ol>
+            <li>Bound the legacy baseline and visible ungoverned scope.</li>
+            <li>Generate a budget-limited candidate map.</li>
+            <li>Confirm meaning, exclusions, dependencies, and authorities.</li>
+            <li>Characterize existing behavior without built-under-Vouch claims.</li>
+            <li>Run one hard-gated pilot, then expand through an explicit ratchet.</li>
+          </ol>
+        </article>
+      </div>
+
+      <div class="convergence" data-domain="adoption rollout">
+        <div class="converge-card"><b>Prototype rule:</b> retained pre-governance behavior becomes brownfield even in a new repository.</div>
+        <div class="converge-card"><b>Proof rule:</b> a pilot is proven after one real hard-gated change meets predeclared criteria.</div>
+        <div class="converge-card"><b>Adoption rule:</b> adopted requires a later governed change plus the declared observation window.</div>
+      </div>
+    </section>
+
+    <section id="incremental">
+      <div class="section-head">
+        <div class="section-number">04</div>
+        <div>
+          <h2>Incremental verification is exclusion by proof.</h2>
+          <p class="section-intro">Large projects rerun the affected closure. Unchanged scopes are reused only when every bound condition remains identical.</p>
+        </div>
+      </div>
+
+      <div class="scope-grid">
+        <div class="panel" data-domain="verification assurance">
+          <div class="panel-title"><h3>One path, one primary scope</h3><span class="status target">Target</span></div>
+          <div class="scope-list">
+            <div class="scope-item"><span class="scope-dot"></span><div><b>Governed leaf scope</b><span>Owns cohesive product behavior and its primary paths.</span></div></div>
+            <div class="scope-item"><span class="scope-dot"></span><div><b>Shared scope</b><span>Owns common behavior; dependents reference it through contracts.</span></div></div>
+            <div class="scope-item"><span class="scope-dot"></span><div><b>Integration scope</b><span>Owns cross-scope or effect-seam behavior and its acceptance evidence.</span></div></div>
+            <div class="scope-item"><span class="scope-dot"></span><div><b>Generated / exploration / excluded</b><span>Explicit classifications with generators, inputs, or non-influence constraints.</span></div></div>
+          </div>
+        </div>
+        <div class="principle-card" data-domain="verification assurance">
+          <span class="status target">Soundness invariant</span>
+          <div class="big-rule">Incremental composition must never pass when full verification of the same supported state and change would fail.</div>
+          <p>Pure versus effectful code influences dependency contracts and volatility—not ownership. An unchanged mechanically bound contract can stop downstream propagation; an opaque dependency cannot.</p>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top: 18px" data-domain="verification assurance">
+        <div class="panel-title"><h3>Ordinary change flow</h3><span class="status target">Target · fail closed</span></div>
+        <div class="pipeline-scroll">
+          <div class="pipeline" role="img" aria-label="Incremental verification flow from baseline and change manifest through affected closure and composed verdict">
+            <div class="pipe-node input"><b>Verified baseline</b><small>Exact roots, state, verifier, hard-gated revision</small></div><div class="pipe-arrow">+</div>
+            <div class="pipe-node input"><b>Change manifest</b><small>Exact base/head, paths, modes, renames, deletions</small></div><div class="pipe-arrow">→</div>
+            <div class="pipe-node decide"><b>Scope &amp; contracts</b><small>Human-confirmed ownership and dependency identity</small></div><div class="pipe-arrow">→</div>
+            <div class="pipe-node decide"><b>Affected closure</b><small>Changed + reverse dependencies + integrations</small></div><div class="pipe-arrow">→</div>
+            <div class="pipe-node execute"><b>Verification plan</b><small>Immutable entries; independent work may run in parallel</small></div><div class="pipe-arrow">→</div>
+            <div class="pipe-node execute"><b>Execution receipts</b><small>Local observation or forge attestation kept distinct</small></div><div class="pipe-arrow">→</div>
+            <div class="pipe-node output"><b>Capsules + global checks</b><small>Fresh affected scopes + exact reusable scopes</small></div><div class="pipe-arrow">→</div>
+            <div class="pipe-node output"><b>Composed verdict</b><small>Mode, base, head, affected/reused scopes visible</small></div>
+          </div>
+        </div>
+
+        <div class="capsule-grid" aria-label="Verification capsule bindings">
+          <div class="binding"><b>Behavior inputs</b><span>Owned source, generated inputs, packs, test set, evidence head.</span></div>
+          <div class="binding"><b>Dependency inputs</b><span>Contracts, integrations, cross-root pins, opaque and volatile facts.</span></div>
+          <div class="binding"><b>Execution identity</b><span>Plan, command, runner, toolchain, environment, provenance.</span></div>
+          <div class="binding"><b>Policy identity</b><span>Tier, schema, policy, checker, formal model, pinned Vouch artifact.</span></div>
+        </div>
+      </div>
+
+      <div class="callout warning" style="margin-top: 18px" data-domain="verification">
+        <strong>Current mk2 is not unit-incremental.</strong>
+        <p><code>record-evidence --unit</code> is targeted, but <code>check</code> remains store-wide: it runs all evaluators, walks evidence, replays history, and checks every applicable bound pack. Diff scoping was explicitly deferred. The pipeline above is target behavior.</p>
+      </div>
+    </section>
+
+    <section id="modes">
+      <div class="section-head">
+        <div class="section-number">05</div>
+        <div>
+          <h2>Three modes preserve speed without hiding assurance depth.</h2>
+          <p class="section-intro">A release can make a complete project claim through sound composition without pretending every active scope or every historical event was re-executed.</p>
+        </div>
+      </div>
+
+      <div class="mode-grid" data-domain="verification assurance">
+        <article class="mode-card">
+          <span class="status target">Ordinary target</span>
+          <h3>Incremental composition</h3>
+          <p>Freshly verify the affected closure, reuse only exact valid capsules, and check global composition.</p>
+          <ul><li>Ordinary changes</li><li>Eligible release rosters</li><li>Volatile scopes always rerun</li></ul>
+        </article>
+        <article class="mode-card full">
+          <span class="status target">Current-scope depth</span>
+          <h3>Full verification</h3>
+          <p>Execute every active governed scope and every current-state global obligation without change exclusion.</p>
+          <ul><li>Missing baseline</li><li>Global invalidator</li><li>Policy cadence or force-full</li></ul>
+        </article>
+        <article class="mode-card history">
+          <span class="status target">History depth</span>
+          <h3>Historical scrub</h3>
+          <p>Replay and validate authoritative events and evidence from genesis to the current head.</p>
+          <ul><li>Recovery or corruption</li><li>Incompatible upgrade</li><li>History audit or longer cadence</li></ul>
+        </article>
+      </div>
+
+      <div class="table-wrap" data-domain="verification assurance">
+        <table>
+          <thead><tr><th>Situation</th><th>Required response</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Owned implementation change; contract unchanged</td><td>Affected owning scope plus applicable integration scopes</td><td>Dependents bind the still-identical contract.</td></tr>
+            <tr><td>Dependency contract changes</td><td>Transitive reverse-dependency closure</td><td>Consumer capsule inputs changed.</td></tr>
+            <tr><td>Unknown path, dynamic dependency, missing base</td><td>Widen to all potentially affected scopes or full verification</td><td>Safe exclusion cannot be established.</td></tr>
+            <tr><td>Scope manifest changes</td><td>Union impact under old and proposed mappings</td><td>Ownership movement must not create a blind spot.</td></tr>
+            <tr><td>Release</td><td>Complete composition over exact roster</td><td>Whole-roster assurance does not require automatic re-execution of unchanged exact inputs.</td></tr>
+            <tr><td>Verifier/schema incompatibility or corrupt checkpoint</td><td>Historical scrub, then baseline establishment</td><td>The trusted prefix cannot be reused under changed semantics.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="integrity-grid" data-domain="verification assurance">
+        <div class="integrity-card"><b>Branches and merges</b><p>Use the exact common verified ancestor, combine manifests, evaluate the merged tree, and never union green outcomes blindly.</p></div>
+        <div class="integrity-card"><b>Parallel plans and retries</b><p>Receipts append. Same-plan passes can survive a partial run; any relevant input change creates a new plan. Retries are explicit and bounded.</p></div>
+        <div class="integrity-card"><b>Bootstrap and migration</b><p>Greenfield establishes a baseline before governed behavior. Existing mk2 stays full-only until human scope confirmation, full verification, and scrub.</p></div>
+      </div>
+    </section>
+
+    <section id="enforcement">
+      <div class="section-head">
+        <div class="section-number">06</div>
+        <div>
+          <h2>Enforcement remains a protected external seam.</h2>
+          <p class="section-intro">Vouch plans and verifies. The adopter's delivery authority makes the composed verdict a real prerequisite for merge, release, or deployment.</p>
+        </div>
+      </div>
+
+      <div class="panel" data-domain="assurance verification rollout">
+        <div class="panel-title"><h3>GitHub-first delivery flow</h3><span><span class="status dogfooded">Dogfooded base</span> <span class="status target">Target plan</span></span></div>
+        <div class="ci-flow">
+          <div class="ci-card"><span class="permission">Project CI</span><b>1 · Exact candidate</b><p>Tests and the adapter identify the exact base, head, repository tree, and project-owned checks.</p></div>
+          <div class="ci-card"><span class="permission">Kernel</span><b>2 · Plan</b><p>Validate the change manifest, compute affected closure, and emit immutable entries.</p></div>
+          <div class="ci-card"><span class="permission">Parallel runners</span><b>3 · Execute</b><p>Local or forge runners return plan-bound receipts with honest provenance.</p></div>
+          <div class="ci-card"><span class="permission">Kernel</span><b>4 · Compose</b><p>Validate receipts, capsules, checkpoint suffix, adoption health, and project checks.</p></div>
+          <div class="ci-card"><span class="permission">Read / plan</span><b>5 · Prepare state</b><p>Create a constrained candidate containing only validated repository-local Vouch changes.</p></div>
+          <div class="ci-card write"><span class="permission">Write only</span><b>6 · Publish</b><p>Run no checked-out project code; verify parent, paths, modes, and live head before publication.</p></div>
+        </div>
+      </div>
+
+      <div class="authority-grid">
+        <article class="authority-card" data-domain="assurance"><span class="status implemented">Implemented base</span> <span class="status target">Target additions</span><h3>Mechanical verdict</h3><p>The kernel owns lifecycle policy and evidence integrity today; target capsules, checkpoints, and explicit <code>FAIL</code> / <code>NOT_CHECKED</code> composition extend that authority.</p></article>
+        <article class="authority-card" data-domain="adoption rollout"><span class="status adopter">Adopter authority</span><h3>Governance and delivery</h3><p>Roles, acceptance quality, protected workflow dependencies, forge rules, deployment, and exception authorization.</p></article>
+        <article class="authority-card" data-domain="adoption assurance"><span class="status external">External facts</span><h3>Identity and reality</h3><p>Authenticated actors, real chronology, runner honesty, operational outcomes, and organizational judgments.</p></article>
+      </div>
+
+      <div class="callout warning" style="margin-top: 18px" data-domain="adoption assurance rollout">
+        <strong>No silent advisory fallback.</strong>
+        <p>During a forge or enforcement outage, local work and evidence may continue, but hard-gated progression blocks unless a complete, expiring governance exception records scope, authority, and reconciliation.</p>
+      </div>
+    </section>
+
+    <section id="operations">
+      <div class="section-head">
+        <div class="section-number">07</div>
+        <div>
+          <h2>Local operation is an architectural constraint.</h2>
+          <p class="section-intro">Adoption support and fleet visibility do not require telemetry, a daemon, or a central control plane.</p>
+        </div>
+      </div>
+
+      <div class="local-banner" data-domain="adoption assurance verification rollout">
+        <div class="local-mark" aria-hidden="true">∅</div>
+        <div><h3>No telemetry of any kind</h3><p>Vouch never sends project or adoption data—not anonymously, not by default, and not through an opt-in telemetry channel. The adopter's chosen forge remains an external delivery environment, not a Vouch data service.</p></div>
+      </div>
+
+      <div class="ops-grid" data-domain="adoption rollout">
+        <div class="ops-card"><b>Local notification report</b><span>Deterministic blockers, drift, expiring exceptions, and next actions for local scripts or CI annotations.</span></div>
+        <div class="ops-card"><b>Support bundle</b><span>Secret-safe, user-generated diagnostics that never become authority over project state.</span></div>
+        <div class="ops-card"><b>Feedback report</b><span>User-reviewed adoption experience that Vouch never transmits.</span></div>
+        <div class="ops-card"><b>Portfolio export &amp; view</b><span>Explicit digest-bound summaries imported into a read-only user-operated local view.</span></div>
+      </div>
+
+      <div class="module-pair">
+        <article class="module-card" data-domain="adoption"><span class="status target">Separate record</span><h3>Adoption history</h3><p>Stage, health, roles, scope, scorecards, exceptions, interruptions, recovery, support, pause, and exit.</p><div class="interface">References exact kernel revisions; cannot strengthen them.</div></article>
+        <article class="module-card" data-domain="assurance verification"><span class="status implemented">Implemented base</span> <span class="status target">Target additions</span><h3>Assurance history</h3><p>Events, evidence, packs, releases, policy identities, and formal certificates exist today; capsules and checkpoints are target additions.</p><div class="interface">Independently verifiable when the adoption module is unavailable.</div></article>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head">
+        <div class="section-number">08</div>
+        <div>
+          <h2>Promotion is earned in waves.</h2>
+          <p class="section-intro">Target becomes implemented through code and failure-path proof; implemented becomes dogfooded through real use; external proof requires an independent adopter.</p>
+        </div>
+      </div>
+
+      <div class="roadmap" data-domain="rollout">
+        <article class="wave"><span class="wave-no">0</span><h3>Truthful design baseline</h3><p>Preserve mk2 current state. Publish target system, statuses, glossary, ADRs, and diagram.</p><span class="status implemented">This artifact</span></article>
+        <article class="wave"><span class="wave-no">1</span><h3>Adoption foundations</h3><p>Separate record, assessment, scope, roles, plans, health, probes, support, pause, recovery, and exit on reliable full verification.</p><span class="status target">Target</span></article>
+        <article class="wave"><span class="wave-no">2</span><h3>Incremental dogfood</h3><p>Scope manifests, contracts, plans, receipts, capsules, checkpoints, full/scrub modes, formal and differential proof.</p><span class="status target">Opt-in first</span></article>
+        <article class="wave"><span class="wave-no">3</span><h3>Independent pilots</h3><p>Real brownfield and greenfield use, recovery, scaling, burden, support, and adoption evidence—kept local.</p><span class="status pending">Proof pending</span></article>
+        <article class="wave"><span class="wave-no">4</span><h3>Default and scale</h3><p>Incremental default only after soundness and performance gates; permanent force-full; local portfolio and cohorts.</p><span class="status target">Later target</span></article>
+      </div>
+
+      <div class="table-wrap" data-domain="rollout adoption assurance verification">
+        <table>
+          <thead><tr><th>Capability</th><th>Status</th><th>Honest reading</th></tr></thead>
+          <tbody>
+            <tr><td>Mk2 assurance kernel, append-only history, packs, evidence, tiers, release gates</td><td><span class="status implemented">Implemented</span> <span class="status dogfooded">Dogfooded</span></td><td>Strong current foundation; not proof of independent adoption.</td></tr>
+            <tr><td>Pinned lock and GitHub read-plan/write-publish adapter</td><td><span class="status implemented">Implemented</span> <span class="status dogfooded">Dogfooded</span></td><td>GitHub is the first real adapter; forge configuration remains adopter-owned.</td></tr>
+            <tr><td>Full adoption module and record</td><td><span class="status target">Target</span></td><td>Accepted design; not current mk2 behavior.</td></tr>
+            <tr><td>Greenfield fast lane and brownfield ratchet</td><td><span class="status target">Target</span></td><td>Requires implementation and real pilots.</td></tr>
+            <tr><td>Sound incremental verification</td><td><span class="status target">Target</span></td><td>Current check remains global; opt-in dogfood precedes default.</td></tr>
+            <tr><td>Real-project sustained adoption</td><td><span class="status pending">Proof pending</span></td><td>One pilot is not enough; later governed delivery and observation are required.</td></tr>
+            <tr><td>Forge, deployment, authenticated identity</td><td><span class="status adopter">Adopter-owned</span> <span class="status external">External</span></td><td>Vouch can probe, bind claims, and report limits; it cannot own these authorities.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="boundaries">
+      <div class="section-head">
+        <div class="section-number">09</div>
+        <div>
+          <h2>The strongest system is explicit about what it cannot know.</h2>
+          <p class="section-intro">Repository-local integrity supports bounded claims. It does not manufacture independent authority or organizational truth.</p>
+        </div>
+      </div>
+
+      <div class="boundary-grid">
+        <article class="boundary-card" data-domain="assurance"><span class="status external">External</span><h3>Test adequacy and runner honesty</h3><p>A recorded exit status does not prove the selected tests were adequate or the runner was honest.</p></article>
+        <article class="boundary-card" data-domain="adoption assurance"><span class="status external">External</span><h3>Identity, independence, and intent</h3><p>Roles and actor values are claims unless authenticated and governed by an external authority.</p></article>
+        <article class="boundary-card" data-domain="adoption"><span class="status external">External</span><h3>Chronology and value</h3><p>Wall-clock values alone do not prove chronology; scorecard meaning and exception reasons remain accountable human judgments.</p></article>
+        <article class="boundary-card" data-domain="assurance rollout"><span class="status adopter">Adopter-owned</span><h3>Forge and deployment protection</h3><p>The real workflow must protect the dependency from project tests and Vouch composition to release authority.</p></article>
+        <article class="boundary-card" data-domain="verification"><span class="status target">Target constraint</span><h3>Baseline-relative reuse</h3><p>Capsules and checkpoints are trustworthy only relative to their exact baseline, inputs, verifier, and hard-gated revision.</p></article>
+        <article class="boundary-card" data-domain="adoption assurance rollout"><span class="status external">Trust root</span><h3>Coordinated authority compromise</h3><p>Vouch cannot defeat an actor controlling the repository, pinned executable, workflow policy, runner, and credentials together.</p></article>
+      </div>
+
+      <details open>
+        <summary>Design document, ADRs, and current implementation sources</summary>
+        <div class="source-grid">
+          <a href="vouch-optimal-system.md"><b>Optimal system specification</b><span>Complete accepted target design and roadmap.</span></a>
+          <a href="vouch-mk2-system-diagram.html"><b>Preserved mk2 diagram</b><span>Current implementation and release-gating reference.</span></a>
+          <a href="../../CONTEXT.md"><b>Domain language</b><span>Canonical adoption, assurance, and incrementality vocabulary.</span></a>
+          <a href="../../docs/adr/0001-separate-adoption-module-and-record.md"><b>ADR 0001</b><span>Separate adoption authority and record.</span></a>
+          <a href="../../docs/adr/0002-repository-local-no-telemetry.md"><b>ADR 0002</b><span>Repository-local operation with no telemetry.</span></a>
+          <a href="../../docs/adr/0003-greenfield-and-brownfield-adoption.md"><b>ADR 0003</b><span>Distinct adoption paths.</span></a>
+          <a href="../../docs/adr/0004-sound-fail-closed-incremental-verification.md"><b>ADR 0004</b><span>Sound fail-closed incremental verification.</span></a>
+          <a href="../../DECISIONS.md"><b>Mk2 decision log</b><span>Current architecture, adoption reviews, and deferred diff scoping.</span></a>
+          <a href="../../docs/claim-boundary.md"><b>Current claim boundary</b><span>Mechanical claims and residual limitations.</span></a>
+          <a href="../../docs/threat-model.md"><b>Threat model</b><span>Repository, process, and delivery trust assumptions.</span></a>
+          <a href="../../docs/performance.md"><b>Performance baseline</b><span>Current store/check cost shape and revisit trigger.</span></a>
+          <a href="../../src/vouch_mk2/verify.py"><b>Current verifier</b><span>Global artifact checks, evidence walks, and event replay.</span></a>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <div>Vouch optimal system diagram · accepted target design · 21 August 2026</div>
+      <span>Self-contained · local-only · no telemetry</span>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      const themeButton = document.getElementById("themeToggle");
+      const themes = ["auto", "light", "dark"];
+      let themeIndex = 0;
+
+      try {
+        const saved = localStorage.getItem("vouch-optimal-theme");
+        if (saved && themes.includes(saved)) themeIndex = themes.indexOf(saved);
+      } catch (_) {}
+
+      function applyTheme() {
+        const theme = themes[themeIndex];
+        if (theme === "auto") document.documentElement.removeAttribute("data-theme");
+        else document.documentElement.setAttribute("data-theme", theme);
+        themeButton.textContent = "Theme: " + theme;
+      }
+
+      themeButton.addEventListener("click", function () {
+        themeIndex = (themeIndex + 1) % themes.length;
+        applyTheme();
+        try { localStorage.setItem("vouch-optimal-theme", themes[themeIndex]); } catch (_) {}
+      });
+
+      const focusButtons = Array.from(document.querySelectorAll("[data-focus].focus-button"));
+      focusButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          const focus = button.getAttribute("data-focus") || "all";
+          document.body.setAttribute("data-focus", focus);
+          focusButtons.forEach(function (candidate) {
+            candidate.setAttribute("aria-pressed", String(candidate === button));
+          });
+        });
+      });
+
+      applyTheme();
+    }());
+  </script>
+</body>
+</html>

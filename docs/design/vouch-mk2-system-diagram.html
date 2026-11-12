@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Vouch Mk2 system internals, project adoption, CI trust boundary, and release-gating model.">
+  <title>Vouch Mk2 — System and Release-Gating Diagram</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-2: #edf3f8;
+      --ink: #122033;
+      --muted: #5d6c7f;
+      --line: #c8d4e0;
+      --line-strong: #7f96ac;
+      --navy: #163a5f;
+      --blue: #1769aa;
+      --blue-soft: #e8f3fb;
+      --teal: #087f76;
+      --teal-soft: #e5f7f4;
+      --amber: #a45b08;
+      --amber-soft: #fff2dc;
+      --red: #a13a38;
+      --red-soft: #fdeceb;
+      --purple: #6d4bb8;
+      --purple-soft: #f1ecfb;
+      --green: #257348;
+      --green-soft: #e9f6ee;
+      --shadow: 0 16px 45px rgba(24, 52, 78, 0.10);
+      --radius: 16px;
+    }
+
+    html[data-theme="dark"] {
+      --bg: #0d1621;
+      --surface: #142131;
+      --surface-2: #1a2a3c;
+      --ink: #e8f0f7;
+      --muted: #a9b7c6;
+      --line: #33485d;
+      --line-strong: #6f89a2;
+      --navy: #9fcdf4;
+      --blue: #72b8ec;
+      --blue-soft: #17344c;
+      --teal: #62d1c4;
+      --teal-soft: #163a39;
+      --amber: #f3b55f;
+      --amber-soft: #422f18;
+      --red: #f09a96;
+      --red-soft: #442526;
+      --purple: #bea5f2;
+      --purple-soft: #31284b;
+      --green: #78d49f;
+      --green-soft: #173829;
+      --shadow: 0 18px 55px rgba(0, 0, 0, 0.26);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      html:not([data-theme="light"]) {
+        --bg: #0d1621;
+        --surface: #142131;
+        --surface-2: #1a2a3c;
+        --ink: #e8f0f7;
+        --muted: #a9b7c6;
+        --line: #33485d;
+        --line-strong: #6f89a2;
+        --navy: #9fcdf4;
+        --blue: #72b8ec;
+        --blue-soft: #17344c;
+        --teal: #62d1c4;
+        --teal-soft: #163a39;
+        --amber: #f3b55f;
+        --amber-soft: #422f18;
+        --red: #f09a96;
+        --red-soft: #442526;
+        --purple: #bea5f2;
+        --purple-soft: #31284b;
+        --green: #78d49f;
+        --green-soft: #173829;
+        --shadow: 0 18px 55px rgba(0, 0, 0, 0.26);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:hover { text-decoration-thickness: 2px; }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    code {
+      padding: 0.08rem 0.3rem;
+      border-radius: 5px;
+      background: var(--surface-2);
+      font-size: 0.92em;
+    }
+
+    .page-shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 58px 0 46px;
+      color: #f4f8fb;
+      background:
+        radial-gradient(circle at 82% 12%, rgba(76, 181, 199, 0.33), transparent 28%),
+        linear-gradient(135deg, #102b47 0%, #164b69 57%, #126b73 100%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -140px;
+      bottom: -220px;
+      width: 520px;
+      height: 520px;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 50%;
+      box-shadow: 0 0 0 70px rgba(255,255,255,0.035), 0 0 0 140px rgba(255,255,255,0.025);
+      pointer-events: none;
+    }
+    .hero-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: start;
+    }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: #8ce1d9;
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    h1 {
+      max-width: 850px;
+      margin: 0;
+      font-size: clamp(2.25rem, 6vw, 4.45rem);
+      line-height: 1.02;
+      letter-spacing: -0.055em;
+    }
+    .hero .lede {
+      max-width: 760px;
+      margin: 22px 0 0;
+      color: #d8e7f0;
+      font-size: clamp(1.03rem, 2vw, 1.22rem);
+    }
+    .hero strong { color: #ffffff; }
+    .theme-toggle {
+      padding: 9px 13px;
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 999px;
+      color: #ffffff;
+      background: rgba(255,255,255,0.09);
+      font: inherit;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+    .theme-toggle:hover { background: rgba(255,255,255,0.16); }
+
+    .summary-strip {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 34px;
+    }
+    .summary-item {
+      padding: 16px 18px;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 12px;
+      background: rgba(7, 26, 41, 0.27);
+      backdrop-filter: blur(8px);
+    }
+    .summary-item b { display: block; margin-bottom: 3px; color: #ffffff; }
+    .summary-item span { color: #ccdde8; font-size: 0.9rem; }
+
+    .toc-wrap {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: blur(14px);
+    }
+    .toc {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 10px 0;
+      scrollbar-width: thin;
+    }
+    .toc a {
+      flex: 0 0 auto;
+      padding: 7px 11px;
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    .toc a:hover { color: var(--ink); background: var(--surface-2); }
+
+    main { padding: 12px 0 80px; }
+    section {
+      scroll-margin-top: 78px;
+      padding: 58px 0 0;
+    }
+    .section-head {
+      display: grid;
+      grid-template-columns: 50px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      margin-bottom: 25px;
+    }
+    .section-number {
+      display: grid;
+      width: 44px;
+      height: 44px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--blue);
+      background: var(--surface);
+      font-size: 0.86rem;
+      font-weight: 800;
+      box-shadow: var(--shadow);
+    }
+    h2 {
+      margin: 0;
+      color: var(--navy);
+      font-size: clamp(1.7rem, 3vw, 2.35rem);
+      line-height: 1.13;
+      letter-spacing: -0.035em;
+    }
+    .section-intro {
+      max-width: 850px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 1.02rem;
+    }
+
+    .callout {
+      padding: 18px 20px;
+      border-left: 4px solid var(--blue);
+      border-radius: 0 12px 12px 0;
+      background: var(--blue-soft);
+    }
+    .callout strong { color: var(--navy); }
+
+    figure { margin: 0; }
+    figcaption {
+      margin-top: 13px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .diagram {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .diagram-title {
+      margin: 0 0 18px;
+      color: var(--navy);
+      font-size: 1rem;
+      font-weight: 780;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 122px minmax(0, 1fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+    .lane + .lane { margin-top: 12px; }
+    .lane-label {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-align: right;
+      text-transform: uppercase;
+    }
+    .lane-content {
+      position: relative;
+      display: grid;
+      gap: 12px;
+    }
+    .lane-content.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .lane-content.cols-2 { grid-template-columns: repeat(2, 1fr); }
+    .lane-content.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+    .node {
+      min-width: 0;
+      padding: 15px 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+    .node b { display: block; margin-bottom: 4px; color: var(--ink); }
+    .node small { display: block; color: var(--muted); line-height: 1.45; }
+    .node.entry { border-color: color-mix(in srgb, var(--blue) 50%, var(--line)); background: var(--blue-soft); }
+    .node.policy { border-color: color-mix(in srgb, var(--purple) 55%, var(--line)); background: var(--purple-soft); }
+    .node.state { border-color: color-mix(in srgb, var(--teal) 55%, var(--line)); background: var(--teal-soft); }
+    .node.check { border-color: color-mix(in srgb, var(--amber) 55%, var(--line)); background: var(--amber-soft); }
+    .node.good { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); background: var(--green-soft); }
+    .node.danger { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); background: var(--red-soft); }
+    .node .tag {
+      display: inline-block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.7rem;
+      font-weight: 750;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .down-arrow {
+      width: calc(100% - 140px);
+      margin: 4px 0 4px 140px;
+      color: var(--line-strong);
+      text-align: center;
+      font-size: 1.3rem;
+      line-height: 1;
+    }
+
+    .mutation-flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 22px;
+    }
+    .mutation-step {
+      position: relative;
+      min-height: 136px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    .mutation-step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      z-index: 2;
+      top: 50%;
+      right: -16px;
+      width: 20px;
+      color: var(--line-strong);
+      background: var(--bg);
+      text-align: center;
+      transform: translateY(-50%);
+    }
+    .step-no {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      margin-bottom: 10px;
+      place-items: center;
+      border-radius: 8px;
+      color: var(--surface);
+      background: var(--blue);
+      font-size: 0.75rem;
+      font-weight: 800;
+    }
+    .mutation-step b { display: block; margin-bottom: 5px; font-size: 0.9rem; }
+    .mutation-step span { display: block; color: var(--muted); font-size: 0.8rem; }
+
+    .adoption-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.78fr);
+      gap: 22px;
+      align-items: start;
+    }
+    .steps-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: adoption;
+    }
+    .steps-list li {
+      position: relative;
+      padding: 0 0 23px 50px;
+      counter-increment: adoption;
+    }
+    .steps-list li:not(:last-child)::before {
+      content: "";
+      position: absolute;
+      top: 33px;
+      bottom: 2px;
+      left: 17px;
+      border-left: 1px solid var(--line-strong);
+    }
+    .steps-list li::after {
+      content: counter(adoption);
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: 10px;
+      color: #ffffff;
+      background: var(--teal);
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+    .steps-list b { display: block; margin-bottom: 3px; color: var(--navy); }
+    .steps-list p { margin: 0; color: var(--muted); }
+
+    pre {
+      overflow: auto;
+      margin: 0;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      font-size: 0.83rem;
+      line-height: 1.62;
+    }
+    pre code { padding: 0; background: transparent; }
+
+    .install-set {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 22px;
+    }
+    .install-item {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface);
+    }
+    .install-item code { display: inline-block; margin-bottom: 6px; color: var(--blue); }
+    .install-item span { display: block; color: var(--muted); font-size: 0.82rem; }
+
+    .flow-scroll { overflow-x: auto; padding: 2px 2px 9px; }
+    .flow-row {
+      display: flex;
+      min-width: 960px;
+      align-items: stretch;
+    }
+    .flow-node {
+      position: relative;
+      display: flex;
+      flex: 1 1 0;
+      min-width: 130px;
+      flex-direction: column;
+      justify-content: center;
+      padding: 14px 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface-2);
+      text-align: center;
+    }
+    .flow-node b { font-size: 0.86rem; }
+    .flow-node small { margin-top: 4px; color: var(--muted); font-size: 0.73rem; line-height: 1.35; }
+    .flow-arrow {
+      display: grid;
+      flex: 0 0 30px;
+      place-items: center;
+      color: var(--line-strong);
+      font-weight: 800;
+    }
+    .flow-node.phase-unit { background: var(--blue-soft); border-color: color-mix(in srgb, var(--blue) 46%, var(--line)); }
+    .flow-node.phase-release { background: var(--teal-soft); border-color: color-mix(in srgb, var(--teal) 46%, var(--line)); }
+    .flow-node.phase-success { background: var(--green-soft); border-color: color-mix(in srgb, var(--green) 50%, var(--line)); }
+    .flow-node.phase-risk { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 50%, var(--line)); }
+
+    .branch-row {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .branch {
+      padding: 14px 15px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 11px;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+      font-size: 0.82rem;
+    }
+    .branch b { color: var(--ink); }
+
+    .gate-table-wrap {
+      overflow-x: auto;
+      margin-top: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    th, td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--navy);
+      background: var(--surface-2);
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { width: 19%; font-weight: 750; color: var(--navy); }
+
+    .ci-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .ci-step {
+      position: relative;
+      min-height: 175px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+    .ci-step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      z-index: 3;
+      top: 26px;
+      right: -17px;
+      width: 22px;
+      color: var(--line-strong);
+      background: var(--surface);
+      text-align: center;
+    }
+    .ci-step .permission {
+      display: inline-block;
+      margin-bottom: 12px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      font-size: 0.65rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .ci-step.write .permission { color: var(--amber); background: var(--amber-soft); }
+    .ci-step b { display: block; margin-bottom: 7px; font-size: 0.84rem; }
+    .ci-step p { margin: 0; color: var(--muted); font-size: 0.75rem; line-height: 1.42; }
+
+    .boundary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+    .boundary-card {
+      padding: 19px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--surface);
+    }
+    .boundary-card h3 { margin: 0 0 7px; color: var(--navy); font-size: 1rem; }
+    .boundary-card p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+    .boundary-card.priority { border-left: 4px solid var(--amber); }
+
+    .source-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .source-list a {
+      display: block;
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      text-decoration: none;
+    }
+    .source-list a:hover { border-color: var(--blue); }
+    .source-list b { display: block; margin-bottom: 2px; color: var(--navy); }
+    .source-list span { color: var(--muted); font-size: 0.8rem; }
+
+    footer {
+      padding: 30px 0 42px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 980px) {
+      .mutation-flow { grid-template-columns: repeat(2, 1fr); }
+      .mutation-step:not(:last-child)::after { display: none; }
+      .adoption-grid { grid-template-columns: 1fr; }
+      .install-set { grid-template-columns: repeat(2, 1fr); }
+      .ci-grid { grid-template-columns: repeat(3, 1fr); }
+      .ci-step:not(:last-child)::after { display: none; }
+    }
+
+    @media (max-width: 760px) {
+      .hero { padding-top: 38px; }
+      .hero-grid { grid-template-columns: 1fr; }
+      .theme-toggle { justify-self: start; grid-row: 1; }
+      .summary-strip { grid-template-columns: 1fr; }
+      .section-head { grid-template-columns: 42px minmax(0, 1fr); gap: 12px; }
+      .section-number { width: 38px; height: 38px; }
+      .diagram { padding: 16px; }
+      .lane { grid-template-columns: 1fr; gap: 7px; }
+      .lane-label { justify-content: flex-start; text-align: left; }
+      .lane-content.cols-2,
+      .lane-content.cols-3,
+      .lane-content.cols-4 { grid-template-columns: 1fr; }
+      .down-arrow { width: 100%; margin-left: 0; }
+      .branch-row, .boundary-grid, .source-list { grid-template-columns: 1fr; }
+      .ci-grid { grid-template-columns: repeat(2, 1fr); }
+      td:first-child { width: auto; }
+    }
+
+    @media (max-width: 520px) {
+      .page-shell { width: min(100% - 22px, 1180px); }
+      .hero { padding-bottom: 32px; }
+      h1 { font-size: 2.28rem; }
+      section { padding-top: 44px; }
+      .mutation-flow, .install-set, .ci-grid { grid-template-columns: 1fr; }
+      .mutation-step { min-height: 0; }
+      .ci-step { min-height: 0; }
+      th, td { padding: 12px; }
+    }
+
+    @media print {
+      :root {
+        --bg: #ffffff;
+        --surface: #ffffff;
+        --surface-2: #f2f5f7;
+        --ink: #111827;
+        --muted: #4b5563;
+        --line: #cbd5e1;
+        --navy: #173b5f;
+        --shadow: none;
+      }
+      .theme-toggle, .toc-wrap { display: none; }
+      .hero { padding: 32px 0; print-color-adjust: exact; }
+      section { break-inside: avoid; }
+      .diagram, .gate-table-wrap, pre { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="page-shell hero-grid">
+      <div>
+        <p class="eyebrow">Architecture · Adoption · Release control</p>
+        <h1>Vouch Mk2 system diagram</h1>
+        <p class="lede">
+          Vouch Mk2 is a repository-local <strong>policy engine and evidence ledger</strong>.
+          It does not deploy software itself; it becomes a hard release gate when a project's
+          CI/CD workflow makes Vouch's verdict a prerequisite for merge and deployment.
+        </p>
+      </div>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="Change color theme">Theme: auto</button>
+      <div class="summary-strip" style="grid-column: 1 / -1">
+        <div class="summary-item">
+          <b>One policy authority</b>
+          <span>The Policy IR owns state machines, transition gates, obligations, and assurance tiers.</span>
+        </div>
+        <div class="summary-item">
+          <b>One recorded history</b>
+          <span>A content-addressed event log is authoritative; <code>state.json</code> is its derived cache.</span>
+        </div>
+        <div class="summary-item">
+          <b>One enforcement seam</b>
+          <span>Project jobs → Vouch check/formal → deployment, with forge governance around the whole chain.</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="toc-wrap">
+    <nav class="page-shell toc" aria-label="Page sections">
+      <a href="#internals">System internals</a>
+      <a href="#mutation">Mutation path</a>
+      <a href="#adoption">Project adoption</a>
+      <a href="#release">Release gates</a>
+      <a href="#ci">CI trust boundary</a>
+      <a href="#boundaries">Current boundaries</a>
+      <a href="#sources">Source map</a>
+    </nav>
+  </div>
+
+  <main class="page-shell">
+    <section id="internals">
+      <div class="section-head">
+        <div class="section-number">01</div>
+        <div>
+          <h2>System internals</h2>
+          <p class="section-intro">Policy decisions are pure; filesystem and process effects stay in thin adapters and the store boundary.</p>
+        </div>
+      </div>
+
+      <figure>
+        <div class="diagram" role="img" aria-label="Vouch system architecture from inputs through policy core, store, checks, and outputs">
+          <p class="diagram-title">Runtime architecture and authority flow</p>
+          <div class="lane">
+            <div class="lane-label">Inputs</div>
+            <div class="lane-content cols-3">
+              <div class="node entry"><b>Maintainer or agent</b><small>Runs lifecycle verbs through the vendored lock.</small></div>
+              <div class="node entry"><b>Project and test runner</b><small>Supplies pack files and commands whose exit status becomes evidence.</small></div>
+              <div class="node entry"><b>GitHub Actions</b><small>Calls the same lock as the CI enforcement adapter.</small></div>
+            </div>
+          </div>
+          <div class="down-arrow" aria-hidden="true">↓</div>
+          <div class="lane">
+            <div class="lane-label">Policy engine</div>
+            <div class="lane-content cols-2">
+              <div class="node policy"><b>Policy IR</b><small>State machines, named gates, obligation registry, tier matrix, and closed vocabularies.</small><span class="tag">declarative authority</span></div>
+              <div class="node policy"><b>Typed domain core</b><small><code>decide(snapshot, command)</code> returns accepted events or structured violations; <code>apply()</code> folds accepted events.</small><span class="tag">pure · no I/O</span></div>
+            </div>
+          </div>
+          <div class="down-arrow" aria-hidden="true">↓</div>
+          <div class="lane">
+            <div class="lane-label">Persistence</div>
+            <div class="lane-content cols-3">
+              <div class="node state"><b>Authoritative event log</b><small>Immutable, content-addressed event records linked through <code>event_head</code>.</small></div>
+              <div class="node state"><b>Derived snapshot cache</b><small><code>.vouch/state.json</code> gives O(1) reads and is replay-checked against the log.</small></div>
+              <div class="node state"><b>CAS objects</b><small>Packs, evidence, bundle inventories, formal tables, and certificates under <code>objects/sha256</code>.</small></div>
+            </div>
+          </div>
+          <div class="down-arrow" aria-hidden="true">↓</div>
+          <div class="lane">
+            <div class="lane-label">Verification</div>
+            <div class="lane-content cols-4">
+              <div class="node check"><b><code>check --ci</code></b><small>Standing and artifact checks compose into one mechanical verdict.</small></div>
+              <div class="node check"><b><code>formal</code></b><small>Explores the runtime relation and executes M1–M11 plus mutation witnesses.</small></div>
+              <div class="node good"><b>Pure projections</b><small><code>map.json</code>, agent context, status facts, and next actions.</small></div>
+              <div class="node entry"><b>Read surfaces</b><small>MCP is read/verify-only; editor hooks are warn-only.</small></div>
+            </div>
+          </div>
+        </div>
+        <figcaption>Every lifecycle rule lives in the Policy IR and pure core. CLI, CI, MCP, and hooks do not reimplement policy.</figcaption>
+      </figure>
+
+      <div class="callout" style="margin-top: 22px">
+        <strong>The central guarantee:</strong> gate evaluation and state transition are the same code path.
+        A transition cannot be accepted first and checked later by an unrelated handler.
+      </div>
+    </section>
+
+    <section id="mutation">
+      <div class="section-head">
+        <div class="section-number">02</div>
+        <div>
+          <h2>The only mutation path</h2>
+          <p class="section-intro">Writers serialize the complete read–decide–apply–commit operation and publish immutable objects before the snapshot that references them.</p>
+        </div>
+      </div>
+
+      <div class="mutation-flow" aria-label="Vouch mutation sequence">
+        <div class="mutation-step"><span class="step-no">1</span><b>Acquire writer lock</b><span>One exclusive lock covers the whole logical mutation.</span></div>
+        <div class="mutation-step"><span class="step-no">2</span><b>Read one snapshot</b><span>Strict decode; unknown fields and unsafe coercions are refused.</span></div>
+        <div class="mutation-step"><span class="step-no">3</span><b>Decide and apply</b><span>Return violations, or fold the accepted typed events.</span></div>
+        <div class="mutation-step"><span class="step-no">4</span><b>Write immutable objects</b><span>Supporting artifacts and event records become durable first.</span></div>
+        <div class="mutation-step"><span class="step-no">5</span><b>CAS snapshot swap</b><span>Atomically replace <code>state.json</code> at the expected revision.</span></div>
+      </div>
+
+      <div class="branch-row">
+        <div class="branch"><b>Refused decision:</b> structured violations are returned and Vouch state remains unchanged.</div>
+        <div class="branch"><b>Crash before snapshot swap:</b> at worst, inert unreferenced objects remain for later cleanup.</div>
+        <div class="branch"><b>Crash after snapshot swap:</b> the visible snapshot already names durable objects and event records.</div>
+      </div>
+    </section>
+
+    <section id="adoption">
+      <div class="section-head">
+        <div class="section-number">03</div>
+        <div>
+          <h2>How a project starts using Vouch</h2>
+          <p class="section-intro">Initialization installs a closed set of repository files, but the adopter deliberately owns the final CI and forge wiring.</p>
+        </div>
+      </div>
+
+      <div class="adoption-grid">
+        <ol class="steps-list">
+          <li><b>Obtain the released lock</b><p>Use the offline <code>vouch.lock</code> artifact built for Python 3.14 or newer.</p></li>
+          <li><b>Initialize the repository</b><p>Choose an assurance tier and name the project test jobs that must gate Vouch.</p></li>
+          <li><b>Add the printed caller job</b><p>Copy it into the existing workflow that owns those tests. The same-workflow <code>needs:</code> edge is the real project-test gate.</p></li>
+          <li><b>Protect the enforcement seam</b><p>Configure required checks, branch protection or a ruleset, and the chosen bot-commit policy at the forge.</p></li>
+          <li><b>Start governing units</b><p>Specify work, freeze its acceptance pack, record evidence, publish the unit, and roster it into releases.</p></li>
+        </ol>
+
+        <pre aria-label="Example Vouch initialization command"><code>python3 vouch.lock init \
+  --project . \
+  --lock vouch.lock \
+  --tier standard \
+  --test-job unit-tests \
+  --test-job lint</code></pre>
+      </div>
+
+      <div class="install-set" aria-label="Files installed by Vouch init">
+        <div class="install-item"><code>.vouch/</code><span>Store, state cache, event history, objects, configuration, and projections.</span></div>
+        <div class="install-item"><code>vouch.lock</code><span>Vendored, digest-recorded offline executable.</span></div>
+        <div class="install-item"><code>.github/workflows/vouch.yml</code><span>Reusable validation and anchoring workflow.</span></div>
+        <div class="install-item"><code>printed caller job</code><span>Manual integration for the adopter's existing test-owning workflow.</span></div>
+      </div>
+
+      <div class="callout" style="margin-top: 22px">
+        <strong>Tier rule:</strong> <code>standard</code> and <code>high</code> initialization require at least one
+        <code>--test-job</code> and start in CI anchor mode. <code>lightweight</code> can be validation-only.
+      </div>
+    </section>
+
+    <section id="release">
+      <div class="section-head">
+        <div class="section-number">04</div>
+        <div>
+          <h2>Unit lifecycle and release gates</h2>
+          <p class="section-intro">Vouch gates both completion of individual work units and progression of the operational release record.</p>
+        </div>
+      </div>
+
+      <figure class="diagram">
+        <p class="diagram-title">Primary success path</p>
+        <div class="flow-scroll" aria-label="Vouch unit and release lifecycle">
+          <div class="flow-row">
+            <div class="flow-node phase-unit"><b>specified</b><small>Unit and dependencies recorded</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node phase-unit"><b>G1 · freeze</b><small>DoR gates</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node phase-unit"><b>ready</b><small>Pack frozen</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node phase-unit"><b>in progress</b><small>RED / GREEN evidence</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node phase-unit"><b>G2 · publish</b><small>DoD gates</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node phase-release"><b>G3 · prepare release</b><small>Roster and eligibility</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node phase-release"><b>G4 · start deploy</b><small>Criteria recorded</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node phase-release"><b>verifying</b><small>Real system observed</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node phase-success"><b>G5 · succeeded</b><small>Roster rechecked</small></div>
+          </div>
+        </div>
+        <div class="branch-row">
+          <div class="branch"><b>Deviation path:</b> an open deviation moves an active unit to <code>blocked</code>. Closing it does not auto-unblock; respecification or re-verification is explicit.</div>
+          <div class="branch"><b>Protective release path:</b> deploy or verification can move to <code>rolled-back</code>; active releases can retire with a recorded trigger.</div>
+          <div class="branch"><b>External hard gate:</b> the deployment job must depend on successful project tests, <code>check --ci</code>, and <code>formal</code>.</div>
+        </div>
+      </figure>
+
+      <div class="gate-table-wrap">
+        <table>
+          <thead><tr><th>Gate</th><th>Mechanically enforced conditions</th></tr></thead>
+          <tbody>
+            <tr><td>G1 · Freeze</td><td>Pack version recorded; declared dependencies exist; no blocking deviation.</td></tr>
+            <tr><td>G2 · Publish</td><td>Pack frozen; dependencies are published or release-bound; no blockers; tier evidence satisfied. Standard/high require current-pack RED → GREEN with no later RED. High additionally requires an anchor beyond genesis and a formal certificate.</td></tr>
+            <tr><td>CI readiness</td><td>Event-log replay, object and pack integrity, bound pack files unchanged, evidence chains and anchors, projection freshness, standing invariants, strict CI policy, followed by exhaustive <code>formal</code>.</td></tr>
+            <tr><td>G3 · Prepare release</td><td>Non-empty dependency-closed roster; every member is published or release-bound, has a pack, and has no blocking deviation. Included published units become release-bound.</td></tr>
+            <tr><td>G4 · Start deploy</td><td>Ledger-native launch criteria are present before the release leaves <code>prepared</code>.</td></tr>
+            <tr><td>G5 · Complete</td><td>Every exact roster binding still resolves; every member remains release-bound with a pack and no blocker; launch criteria are still recorded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="ci">
+      <div class="section-head">
+        <div class="section-number">05</div>
+        <div>
+          <h2>CI trust boundary</h2>
+          <p class="section-intro">Checked-out repository code never runs in the sole write-capable publisher job.</p>
+        </div>
+      </div>
+
+      <figure>
+        <div class="diagram">
+          <p class="diagram-title">Project tests → validated anchor publication</p>
+          <div class="ci-grid" role="img" aria-label="Six stage CI workflow from project tests to publishing a Vouch anchor commit">
+            <div class="ci-step"><span class="permission">Project CI</span><b>1 · Test jobs</b><p>Unit tests, lint, and other adopter-owned jobs run in their existing workflow.</p></div>
+            <div class="ci-step"><span class="permission">Same workflow</span><b>2 · Caller gate</b><p>A real <code>needs: [tests, lint]</code> edge calls Vouch with anchoring enabled.</p></div>
+            <div class="ci-step"><span class="permission">Contents: read</span><b>3 · Validation</b><p>Lock self-check, <code>check --ci --pending-anchor-ok</code>, then <code>formal</code>.</p></div>
+            <div class="ci-step"><span class="permission">Contents: read</span><b>4 · Anchor plan</b><p>Advance eligible anchors, regenerate projections, and run post-anchor check/formal.</p></div>
+            <div class="ci-step"><span class="permission">Transport</span><b>5 · Candidate</b><p>Create a one-parent bot commit changing only <code>.vouch/**</code> and bundle it for the same run.</p></div>
+            <div class="ci-step write"><span class="permission">Contents: write</span><b>6 · Publisher</b><p>Execute no repository code; verify parent, paths, modes, and live remote head before push.</p></div>
+          </div>
+        </div>
+        <figcaption>Direct push and pull-request invocations validate only. They cannot set the call-only anchoring capability.</figcaption>
+      </figure>
+    </section>
+
+    <section id="boundaries">
+      <div class="section-head">
+        <div class="section-number">06</div>
+        <div>
+          <h2>Important current boundaries</h2>
+          <p class="section-intro">These are material limits to account for when claiming that every deployment is “gated by Vouch.”</p>
+        </div>
+      </div>
+
+      <div class="boundary-grid">
+        <article class="boundary-card priority">
+          <h3>Bundle binding is not yet mandatory</h3>
+          <p><code>bind-bundle</code> is recommended and verified when present, but neither <code>start-deploy</code> nor <code>complete</code> currently requires a bundle inventory.</p>
+        </article>
+        <article class="boundary-card priority">
+          <h3>Deployment wiring belongs to the adopter</h3>
+          <p>The generated workflow validates and anchors evidence. It does not call <code>prepare-release</code>, operate a deployment platform, or automatically make a deployment job depend on Vouch.</p>
+        </article>
+        <article class="boundary-card">
+          <h3>Forge enforcement is external</h3>
+          <p>Required checks, branch protection, workflow integrity, ruleset bypasses, GitHub App credentials, and fork permissions are organizational controls.</p>
+        </article>
+        <article class="boundary-card">
+          <h3>Identity is recorded, not authenticated</h3>
+          <p>Actor, run ID, and go/no-go authority values are caller-supplied claims. Vouch checks their structure and history, not the real identity behind them.</p>
+        </article>
+        <article class="boundary-card">
+          <h3>Evidence has a narrow claim</h3>
+          <p>Vouch proves the exit status of the process it spawned. It does not prove test adequacy, test-runner honesty, or causal chronology relative to implementation.</p>
+        </article>
+        <article class="boundary-card">
+          <h3>Trust-root rewrite remains out of scope</h3>
+          <p>An actor able to coordinate changes to <code>vouch.lock</code>, the workflow, and forge rules can defeat any repository-local mechanism.</p>
+        </article>
+      </div>
+
+      <div class="callout" style="margin-top: 22px">
+        <strong>Practical release rule:</strong> make the real deployment job depend on adopter tests plus a Vouch gate that runs
+        <code>check --ci</code>, <code>formal</code>, and the appropriate release lifecycle commands. Protect that dependency at the forge.
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="section-head">
+        <div class="section-number">07</div>
+        <div>
+          <h2>Implementation source map</h2>
+          <p class="section-intro">The operational model above is derived from the current implementation and claim boundary.</p>
+        </div>
+      </div>
+
+      <ul class="source-list">
+        <li><a href="../../src/vouch_mk2/ir/mk2.py"><b>Policy IR</b><span>Unit, deviation, release machines; gates; obligations; tiers.</span></a></li>
+        <li><a href="../../src/vouch_mk2/core/decide.py"><b>Decision core</b><span>Gate evaluators and accepted/refused transition logic.</span></a></li>
+        <li><a href="../../src/vouch_mk2/store/store.py"><b>Store</b><span>Capability-rooted reads, writer lock, immutable objects, and CAS commit.</span></a></li>
+        <li><a href="../../src/vouch_mk2/store/event_log.py"><b>Event log</b><span>Event envelope construction, digest linking, fold, and commit.</span></a></li>
+        <li><a href="../../src/vouch_mk2/verify.py"><b>Verification</b><span>Event replay, evidence, anchors, bundles, projections, and certificates.</span></a></li>
+        <li><a href="../../src/vouch_mk2/init.py"><b>Generated CI</b><span>Initialization and read-plan/write-publish GitHub workflow.</span></a></li>
+        <li><a href="../../docs/quickstart.md"><b>Executable quickstart</b><span>End-to-end unit, evidence, anchoring, release, and check walkthrough.</span></a></li>
+        <li><a href="../../docs/claim-boundary.md"><b>Claim boundary</b><span>What Vouch proves mechanically and what remains NOT_CHECKED.</span></a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="page-shell">
+      Vouch Mk2 system and release-gating diagram · generated from the current repository implementation · 20 August 2026
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      const button = document.getElementById("themeToggle");
+      const themes = ["auto", "light", "dark"];
+      let index = 0;
+      try {
+        const saved = localStorage.getItem("vouch-system-theme");
+        if (saved && themes.includes(saved)) index = themes.indexOf(saved);
+      } catch (_) {}
+
+      function applyTheme() {
+        const theme = themes[index];
+        if (theme === "auto") document.documentElement.removeAttribute("data-theme");
+        else document.documentElement.setAttribute("data-theme", theme);
+        button.textContent = "Theme: " + theme;
+      }
+
+      button.addEventListener("click", function () {
+        index = (index + 1) % themes.length;
+        applyTheme();
+        try { localStorage.setItem("vouch-system-theme", themes[index]); } catch (_) {}
+      });
+      applyTheme();
+    }());
+  </script>
+</body>
+</html>
