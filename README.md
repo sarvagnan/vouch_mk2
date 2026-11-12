@@ -84,6 +84,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check     # strict types (D-1)
 uv run lint-imports      # policy IR purity contract (D-1)
-uv run pytest            # 1105 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest            # 1140 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run vouch-mk2 formal  # invariants over core-v1 and history-v1
 ```
