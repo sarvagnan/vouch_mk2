@@ -12,10 +12,14 @@ is scarce.
 | Acceptance owner / planner | Claude (Opus 5.5, the main session) | plan, beads, decision records, **the pack**, adjudication of deviations, the final pass, publish, commit |
 | Implementer | GPT 6.1 Sol (T3 `delegate_task`: provider `codex`, model `gpt-6.1-sol`, `reasoningEffort: high`) | implementation against a frozen pack; raises deviations; owns and closes its implementation bead |
 | Reviewer | GPT 6 Astra (T3 `delegate_task`: provider `codex`, model `gpt-6-astra`) | reproduces defects in the uncommitted diff, ranked, with minimal fixes; novel attacks on the riskiest surface |
-| Decider | the user | contract-conflict deviations, D-numbered decisions, `git push`, `bd sync` |
+| Decider | the user | contract-conflict deviations, D-numbered decisions, `git push`, merging pull requests, `bd sync` |
 
 The planner never implements a unit it wrote the pack for, the implementer never edits a pack,
 and the reviewer is neither. Every deviation so far was caught by someone other than its author.
+
+Each unit runs on its own branch, `unit/<unit>-<v>`, cut from the latest `main` after CI's anchor
+commit for the previous unit, and reaches `main` only through a pull request (D-32). Keep one
+unit in flight at a time, so a branch rarely needs `main` merged into it.
 
 ## 0. Plan and beads
 
@@ -41,7 +45,14 @@ Beads is the task list and `docs/usage-log.md` the cost ledger; nothing lives on
    version `"<unit>-pack/<n>@" + sha256(b"vouch-mk2/pack\0"+spec+b"\0"+tests)[:16]`.
 5. Record RED #1 through the harness: `record-evidence … --kind red -- pytest
    tests/test_<unit>.py -q`. Then `advance-anchor`, `generate`, and `check --ci` exits 0.
-6. Commit "`<unit>@<v>`: pack frozen, RED recorded, in progress". CI stays red until GREEN.
+6. Commit "`<unit>@<v>`: pack frozen, RED recorded, in progress" on the unit branch. The user
+   pushes the branch and opens the pull request. Its CI stays red until GREEN, and the red run
+   shows less than it seems: the gates job stops at its first failing step, usually the type
+   check on names the frozen tests use, so the later gates never run on that commit and an
+   unrelated regression looks the same as the expected RED. CI anchors nothing from a branch or
+   a red run; RED and GREEN are anchored together after the merge, when `main` goes green.
+   Pull-request CI runs only the gates job. The dogfood check and the walkthrough run after the
+   merge, which is why §6 step 3 runs them locally.
 
 ## 2. Implementation (Sol, T3 delegated task)
 
@@ -109,9 +120,17 @@ against the fixed tree. Astra re-checks in a new task, given its findings and th
 4. `mark-done` from in-progress, or `publish` from re-verifying, through the real DoD gates. The
    stop rule ([self-hosting-tradeoff.md](self-hosting-tradeoff.md)): if a gate must be bent to
    publish mk2's own unit, adoption stops and that is recorded.
-5. `generate`, certificate, `check --ci` exits 0. Commit with the lifecycle as recorded facts
-   (pack versions, deviations, RED/GREEN numbers, gates), close the unit beads, append
-   `docs/usage-log.md`, and `bd remember` the lessons. The user runs `git push` and `bd sync`.
+5. `generate`, certificate, `check --ci` exits 0. Commit "`<unit>@<v>`: … GREEN recorded, done
+   pending acceptance" on the unit branch. The user pushes it and merges the pull request with a
+   merge commit, not a squash, so the frozen-pack commit stays in `main`'s history ahead of the
+   implementation. If `main` moved meanwhile, merge it into the branch locally first: GitHub
+   cannot merge `.vouch/`, and a conflict there is recovered with `merge-git-stages`
+   ([quickstart.md](quickstart.md), "Recovering from a Git merge or rebase conflict").
+6. CI on `main` anchors RED and GREEN and pushes "vouch: advance evidence anchors". Pull it, cut
+   `publish/<unit>-<v>`, run `publish`, `generate` and `check --ci` (exits 0), and commit with the
+   lifecycle as recorded facts (pack versions, deviations, RED/GREEN numbers, gates). Close the
+   unit beads, append `docs/usage-log.md`, and `bd remember` the lessons. The user pushes the
+   branch, merges its pull request, and runs `bd sync`.
 
 ## Cost rules
 
