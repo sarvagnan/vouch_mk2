@@ -117,17 +117,19 @@ against the fixed tree. Astra re-checks in a new task, given its findings and th
 1. Read the risky surface yourself (decide paths, checks, codec).
 2. Add the regression tests the review's scenarios lack.
 3. `build-lock`, the dogfood `check --ci` run from the lock, and `scripts/walkthrough.py --lock`.
-4. `mark-done` from in-progress, or `publish` from re-verifying, through the real DoD gates. The
+4. `mark-done` from in-progress, through the real DoD gates. A unit returning through
+   re-verifying after a deviation stays there; it is published in step 6, like any other. The
    stop rule ([self-hosting-tradeoff.md](self-hosting-tradeoff.md)): if a gate must be bent to
    publish mk2's own unit, adoption stops and that is recorded.
 5. `generate`, certificate, `check --ci` exits 0. Commit "`<unit>@<v>`: … GREEN recorded, done
-   pending acceptance" on the unit branch. The user pushes it and merges the pull request with a
+   pending acceptance" (or "… GREEN recorded, re-verifying") on the unit branch. The user pushes it and merges the pull request with a
    merge commit, not a squash, so the frozen-pack commit stays in `main`'s history ahead of the
    implementation. If `main` moved meanwhile, merge it into the branch locally first: GitHub
    cannot merge `.vouch/`, and a conflict there is recovered with `merge-git-stages`
    ([quickstart.md](quickstart.md), "Recovering from a Git merge or rebase conflict").
 6. CI on `main` anchors RED and GREEN and pushes "vouch: advance evidence anchors". Pull it, cut
-   `publish/<unit>-<v>`, run `publish`, `generate` and `check --ci` (exits 0), and commit with the
+   `publish/<unit>-<v>`, run `publish` (from done-pending-acceptance or re-verifying, the only
+   states it accepts), `generate` and `check --ci` (exits 0), and commit with the
    lifecycle as recorded facts (pack versions, deviations, RED/GREEN numbers, gates). Close the
    unit beads, append `docs/usage-log.md`, and `bd remember` the lessons. The user pushes the
    branch, merges its pull request, and runs `bd sync`.

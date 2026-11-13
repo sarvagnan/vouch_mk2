@@ -1,20 +1,53 @@
 # Vouch mk2
 
-Vouch mk2 is a typed policy engine with one authoritative snapshot, content-addressed artifacts,
-pure projections and thin adapters. It moves units of work through a fixed lifecycle, from frozen
-acceptance tests to publication, refuses any step its policy does not allow, records test
-evidence by running the command itself, and reports what it checked separately from what it
-could not check.
+- **What it is.** Vouch is a command-line tool that keeps a checkable record of a piece of work:
+  the tests frozen as its definition of done, and the exit statuses Vouch recorded when it ran them.
+- **Why it exists.** Passing tests do not show which tests the work was held to. Vouch lets
+  someone who was not there inspect the frozen tests and check whether the bound files still match.
+  It cannot prove that the tests were frozen before the code was written.
+- **How it was built.** mk2 rebuilds Vouch 0.6 from two reviews of its defects. Since August
+  2026, changes to mk2's behavior go through mk2 itself.
 
 Start with [`docs/quickstart.md`](docs/quickstart.md), a walkthrough that the test suite runs.
 [`docs/commands.md`](docs/commands.md) is the command reference, generated from `--help`.
 
+## What it is for
+
+Vouch is for work delivered by agents. It lets an agent's claim that a unit is done be checked
+against tests that were frozen for that unit, with the test results recorded by Vouch when it
+runs the tests, not typed in by the agent.
+
+Vouch is not a planning tool. Decide what to build first, however you get there, then break it
+into units. Each unit then moves through the lifecycle below. The agents call Vouch's lifecycle
+commands at each step, and Vouch records the step or refuses it.
+
+The lifecycle is built so the roles can be separate: one agent writes and freezes the tests,
+another implements against them, and a third reviews before the unit is published. Vouch
+records who claimed each step but does not verify it, so keeping the roles apart is up to your
+process. Whether the tests ask for the right thing is still a human judgment.
+
+## How it works
+
+A **unit** is a named, versioned piece of work, such as `greeter@v1`. Its **acceptance pack** is
+the tests that define done. A unit moves through a fixed lifecycle, and Vouch refuses any step
+its policy does not allow:
+
+1. **Specify** the unit and write its acceptance pack.
+2. **Freeze** the pack. With the pack files bound, Vouch stores each file's hash, and
+   `vouch-mk2 check --project .` fails from then on if one changes. New stores also require an
+   effect declaration for a bound pack; an empty list declares a transform with no effects.
+3. **Record red.** Vouch runs the test command itself and records its failing exit status. You
+   cannot type a result in.
+4. Implement the unit, then **record green** the same way.
+5. **Publish.** This succeeds only if the gates pass. At the `standard` and `high` tiers they
+   require red then green for the current pack.
+
+If a frozen test turns out to be wrong, the implementer opens a **deviation** instead of editing
+it, and the acceptance owner decides it. Vouch records both actions but does not know who holds
+which role. CI runs the checks and is the hard enforcement layer.
+
 Vouch needs Python 3.14 or newer and ships as a single file, `vouch.lock`: a reproducible,
 offline zipapp built with `vouch-mk2 build-lock`.
-
-mk2 rebuilds Vouch 0.6 (`../vouch`). Its design comes from two independent reviews of the Vouch
-0.6.2 history (2026-08-03 to 2026-08-10): 70 recorded defects and 31 behavioral hardening
-commits.
 
 ## The one rule
 
@@ -40,9 +73,23 @@ the command was a test runner, or that the runner was honest.
 | [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) | the original build plan: phases 0–9, cross-cutting disciplines, foundational decisions, reuse from 0.6, risks |
 | [`architecture.html`](architecture.html) | the original design proposal (2026-08-10), drawn before the event log (D-16): entity/authority diagram, mutation flow, verification flow, threat levels (self-contained; open in a browser, light/dark) |
 
+## Where mk2 came from
+
+mk2 rebuilds Vouch 0.6 (`../vouch`). Its design comes from two independent reviews of the Vouch
+0.6.2 history (2026-08-03 to 2026-08-10): 70 recorded defects and 31 behavioral hardening
+commits.
+
+Every change to mk2's behavior is itself a unit run through mk2's lifecycle (D-11); decision
+records, prose edits that change no claim, and housekeeping are the named exceptions. Claude plans
+and writes the frozen pack, GPT 6.1 Sol implements against it, and GPT 6 Astra reviews.
+[`docs/method.md`](docs/method.md) has the procedure.
+
+The rest of this file is for people changing mk2.
+
 ## Layout
 
-Everything is under `src/vouch_mk2/`.
+Internally, mk2 is a typed policy engine with one authoritative snapshot, content-addressed
+artifacts, pure projections and thin adapters. Everything is under `src/vouch_mk2/`.
 
 - `ir/`: the policy IR. The schema (frozen dataclasses with structural validation), a
   transcription of the 0.6.2 lifecycle, and the mk2 tables that `decide()` executes.
