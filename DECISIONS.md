@@ -1261,3 +1261,39 @@ Unit `effect-declarations@1` (bead `vouch_mk2-bd4.8`), before `release@1`.
   effects. Optional, project-level effect contracts only (Astra's recommendation): an optional
   declaration is how the principle was lost. Keeping Q90 as written: it answered inference, not
   declaration.
+- **Note (2026-11-13): mk2's own store opted in.** The user approved `require-effects` on mk2's
+  dogfood store, after a trial on a scratch copy (`check --ci` exit 0). From revision 922 a freeze or
+  late binding of pack bytes must carry a declaration. Opting in does not reach rebinds: a rebind
+  keeps the declaration status it inherits and refuses to change it (`rebind.effects-changed`), so
+  the 33 units bound before it rebind without a declaration and gain one only through an amendment
+  and re-freeze. Label-only freezes stay allowed. Fable, Sol and Astra each pointed this out after
+  the planner had described the switch as covering every rebind.
+
+## D-32 — Units land on `main` through pull requests; freezing happens on a branch (2026-11-13)
+
+**Status:** decided 2026-11-13 by the user, after opinions from Fable, Sol and Astra on the red
+run that every unit's frozen-pack commit put on `main`.
+
+- **The problem.** `docs/method.md` §1 step 6 committed the frozen pack and RED to `main`, and
+  "CI stays red until GREEN". That red shows less than it seems. The gates job stops at its first
+  failing step, usually the type check on names the frozen tests use, so the later gates never ran
+  on that commit and an unrelated regression would look the same as the expected RED (Astra, Fable).
+  It is also not evidence: `anchor_plan` needs a green `gates` job, so RED and GREEN were always
+  anchored together by the GREEN run (Fable).
+- **Decision.** Each unit runs on a branch `unit/<unit>-<v>` cut from the latest `main`, and reaches
+  `main` through a pull request that the user merges with a merge commit, not a squash, so the
+  frozen-pack commit stays in `main`'s history ahead of the implementation. After the merge, CI on
+  `main` anchors the evidence as before, and the publish commit follows on a short
+  `publish/<unit>-<v>` branch and pull request. Anchoring is unchanged: it still runs only on a green
+  push to the default branch (Sol confirmed the existing workflow needs no change for this).
+- **What a pull request's CI shows.** Only the gates job runs on a pull request; the dogfood check
+  and the lock walkthrough run after the merge, so the planner runs them locally before asking for
+  the merge (§6 step 3).
+- **Merging `.vouch/`.** GitHub cannot merge the store. If `main` moved while a branch was open, the
+  planner merges `main` into the branch locally and recovers any `.vouch/` conflict with
+  `merge-git-stages`. One unit in flight at a time keeps this rare.
+- **Rejected.** Keeping the red run on `main` with only an explanatory sentence (Fable's
+  recommendation; the sentence is in §1 step 6). Teaching CI to treat a recorded RED as an expected
+  failure (all three advisers): a recorded RED cannot show that every failure in a checkout is
+  expected. A CI-witnessed RED, where the gates require everything outside the in-progress pack to
+  pass and that pack's tests to fail, stays a possible later unit (Fable).
