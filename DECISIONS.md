@@ -1483,3 +1483,49 @@ unit, `refreeze-green@1`. Amends D-17.
 - **Rejected.** Accepting a redundant clear in `decide()`: it removes the error that catches a clear
   aimed at the wrong unit. Keeping the refusal and documenting a manual recovery: two branches that
   each closed the same exception could not merge.
+
+## D-38 — A replayed merge record names its block's start on the receiving chain (2026-11-16)
+
+**Status:** decided 2026-11-16 by the user, from Sol's design (`design-bd4.4.11`). Settles
+`vouch_mk2-bd4.4.11` in one unit, `nested-merge-boundary@1`. Extends D-33.
+
+- **The finding** (Sol and Fable, reviewing D-33; reproduced by Sol). A←B and C←A replay, then
+  B←C refuses `merge.theirs-history-invalid`. An incoming `MergeRecorded` in a replayed suffix is
+  replayed with its source `ours_head` and `theirs_head` unchanged, but replay re-envelopes the
+  records its block bounded, so its `ours_head` names a digest that is not on the receiving chain.
+  The provenance filter requires that boundary to be an earlier record of the chain it filters, and
+  refuses.
+- **Decision.** When merge replay writes an incoming `MergeRecorded`, its `ours_head` is the digest
+  on the receiving chain at which its replayed block begins: the replayed counterpart of the source
+  boundary record, or, where the provenance filter skipped that record, the staging head at that
+  boundary. `theirs_head` keeps the source value, so a reverse merge still recognises the
+  incorporated work. Claims are matched on the source fact before the translation (D-33). No event,
+  log or snapshot format change. Stores that already hold an untranslated record keep their bytes; a
+  merge that needs its boundary still refuses atomically, with a diagnostic naming the record. No
+  boundary is guessed, no event is rewritten and no interval is widened to skip it.
+- **Rejected.** A new local-boundary field beside both original heads: an event-format change for
+  what the existing field can carry. Resolving the original boundary from source provenance on read:
+  replay does not copy source event objects, so the boundary often exists in neither store.
+
+## D-39 — Rebind continuity is checked within a pack generation, from history (2026-11-16)
+
+**Status:** decided 2026-11-16 by the user, from Sol's design (`design-0tc`). Settles
+`vouch_mk2-0tc` in one unit, `rebind-generations@1`. Amends D-14's continuity invariant.
+
+- **The finding** (Astra, effect-declarations@1 final check; reproduced by Sol). publish, rebind,
+  amend, respecify, re-freeze with different bytes, publish, rebind: the second rebind is decided
+  but the commit refuses with `rebind.history-disconnected`, because the snapshot invariant requires
+  every rebind row's old inventory to equal the previous row's new inventory, across the re-freeze
+  that legitimately broke the chain.
+- **Decision.** A pack generation runs from a freeze to the next respecify. Each
+  `AcceptancePackRebound` must name, as its old inventory and old test set, that unit's current
+  values immediately before the event; that is validated when events are folded, when the event log
+  is verified, before an event extension is committed, and on merge source chains. The unconditional
+  adjacent-row comparison is removed from the snapshot invariant, except for pre-log baseline rows,
+  which keep the contiguous-chain requirement because no event witnesses a generation break there.
+  Every rebind row stays in the snapshot; D-31's effects equality, `rebind.stale-pack` and D-14's
+  fresh GREEN after each rebind are unchanged. No event, log or snapshot format change. mk2's own
+  store (34 published units, 33 rebind rows, no rebind after a respecify) keeps its verdicts.
+- **Rejected.** Generation markers in the snapshot: a D-13 state-format upgrade for information the
+  event log already holds. Clearing the rebind list at respecify: the snapshot would lose adaptations
+  that evidence verification still reads.

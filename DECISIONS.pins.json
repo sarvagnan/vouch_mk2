@@ -188,8 +188,18 @@
     },
     {
       "key": "D-37",
-      "bytes": 1399,
-      "sha256": "472ad6c9d390c45866a4c97c49ca40d5604eac86215af7c2f80cb9e9d3382a0e"
+      "bytes": 1400,
+      "sha256": "cff5783d04453470f333c1e8845e58285c26a537154b7a654b9d9bcb0f8a099b"
+    },
+    {
+      "key": "D-38",
+      "bytes": 1831,
+      "sha256": "e4c7fa0d98bb970c3eb063ec939e4500bb91efc9a479562443322f36bde8cdfe"
+    },
+    {
+      "key": "D-39",
+      "bytes": 1814,
+      "sha256": "323541b15f0b40607acca99c547374a70beb51f5157efbabe091b87d639a22e9"
     }
   ]
 }
