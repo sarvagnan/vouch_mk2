@@ -19,7 +19,7 @@ and the reviewer is neither. Every deviation so far was caught by someone other 
 
 Each unit runs on its own branch, `unit/<unit>-<v>`, cut from the latest `main` after CI's anchor
 commit for the previous unit, and reaches `main` only through a pull request (D-32). Keep one
-unit in flight at a time, so a branch rarely needs `main` merged into it.
+unit in flight at a time, so `main` rarely moves while a branch is open.
 
 ## 0. Plan and beads
 
@@ -122,11 +122,15 @@ against the fixed tree. Astra re-checks in a new task, given its findings and th
    stop rule ([self-hosting-tradeoff.md](self-hosting-tradeoff.md)): if a gate must be bent to
    publish mk2's own unit, adoption stops and that is recorded.
 5. `generate`, certificate, `check --ci` exits 0. Commit "`<unit>@<v>`: … GREEN recorded, done
-   pending acceptance" (or "… GREEN recorded, re-verifying") on the unit branch. The user pushes it and merges the pull request with a
-   merge commit, not a squash, so the frozen-pack commit stays in `main`'s history ahead of the
-   implementation. If `main` moved meanwhile, merge it into the branch locally first: GitHub
-   cannot merge `.vouch/`, and a conflict there is recovered with `merge-git-stages`
-   ([quickstart.md](quickstart.md), "Recovering from a Git merge or rebase conflict").
+   pending acceptance" (or "… GREEN recorded, re-verifying") on the unit branch. The user
+   pushes it and merges the pull request with a merge commit, not a squash, so the frozen-pack
+   commit stays in `main`'s history ahead of the implementation. If `main` moved meanwhile, cut
+   `integrate/<unit>-<v>` from the latest `main`, `git merge` the unit branch into it, recover
+   `.vouch/` with `merge-git-stages` there ([quickstart.md](quickstart.md), "Recovering from a
+   Git merge or rebase conflict"), rerun step 3's checks, and open the pull request from that
+   branch instead. GitHub cannot merge `.vouch/`, and this direction replays only the unit's
+   records, so `main`'s keep their revisions and claims (D-32 note). If the store merge is
+   refused, D-33 gives the recovery.
 6. CI on `main` anchors RED and GREEN and pushes "vouch: advance evidence anchors". Pull it, cut
    `publish/<unit>-<v>`, run `publish` (from done-pending-acceptance or re-verifying, the only
    states it accepts), `generate` and `check --ci` (exits 0), and commit with the

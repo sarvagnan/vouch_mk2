@@ -184,9 +184,11 @@ protection are organizational governance and trust-root concerns.
 `merge --root OURS --other THEIRS` reconciles two copies of a store by replay, never by
 comparing snapshots, and needs a shared event-record ancestor. An already-merged THEIRS changes
 nothing, and an ancestor OURS fast-forwards. Otherwise each divergent THEIRS command is replayed
-through `decide()` against the evolving OURS state, recording both heads and the actor claim.
-Unrelated histories are refused, and one refused replay refuses the whole merge without
-writing OURS.
+through `decide()` against the evolving OURS state, and a final merge record names both heads.
+The replayed records keep their source records' actor, run claim and recorded time, and the
+merge record carries the merge's actor claim. A replay must act on the same unit version as on
+THEIRS, and an anchor needs the evidence head THEIRS promoted. Unrelated histories are refused,
+and one refused replay refuses the whole merge without writing OURS.
 
 Success proves only that the merged log replays to the merged snapshot. It does not prove that
 the branches were compatible in any wider sense, that their intentions agreed, that their

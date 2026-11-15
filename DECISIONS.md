@@ -1269,6 +1269,17 @@ Unit `effect-declarations@1` (bead `vouch_mk2-bd4.8`), before `release@1`.
   and re-freeze. Label-only freezes stay allowed. Fable, Sol and Astra each pointed this out after
   the planner had described the switch as covering every rebind.
 
+- **Note (2026-11-15): what counts as an effect for mk2's own units.** The boundary is the one
+  mk2's import contracts already draw: `ir`, `core`, `checks`, `formal` and `projections` may not
+  import I/O or the store. A unit that changes only code inside that boundary declares an empty
+  list. A unit that adds or changes what the store layer, the CLI, git, a spawned process or the
+  network reads or writes declares each such observation or action, even when the input or output
+  already existed, since this entry covers behaviour a unit introduces or changes. A store counts
+  as an external system: the store a command writes is usually a user's, not mk2's own. The user
+  chose this convention (Fable's proposal) over treating the state Vouch manages as inside the
+  boundary (Sol's view, and Astra's on conditions), which would have let most store and CLI units
+  declare nothing. `merge-replay-provenance@1` (D-33) is the first unit it applies to.
+
 ## D-32 — Units land on `main` through pull requests; freezing happens on a branch (2026-11-13)
 
 **Status:** decided 2026-11-13 by the user, after opinions from Fable, Sol and Astra on the red
@@ -1297,3 +1308,87 @@ run that every unit's frozen-pack commit put on `main`.
   failure (all three advisers): a recorded RED cannot show that every failure in a checkout is
   expected. A CI-witnessed RED, where the gates require everything outside the in-progress pack to
   pass and that pack's tests to fail, stays a possible later unit (Fable).
+- **Note (2026-11-15): integrate on a branch cut from `main`.** Merging `main` into a unit branch
+  makes `main`'s records the replayed side of the store merge, so they are renumbered after the
+  branch's records and lose their claims, and a revision cited from `main` (such as D-31's
+  "revision 922") stops naming the same record. When `main` moved while a branch was open, the
+  planner instead cuts `integrate/<unit>-<v>` from the latest `main`, `git merge`s the unit branch
+  into it, recovers `.vouch/` with `merge-git-stages` there, and opens the pull request from that
+  branch. `main`'s chain stays a prefix and only the unit's records are replayed. This replaces
+  "merges `main` into the branch locally" above; Fable proposed it while reviewing D-33. If the
+  store merge is refused, D-33's recovery applies.
+
+## D-33 — A merge replays each command onto what its source acted on, keeping the source's claims (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user, after Fable, Sol and Astra reviewed a first draft
+(Astra: rework; Fable and Sol: approve with changes; this text takes their changes). Settles
+`vouch_mk2-bd4.4.2` (decision) and `vouch_mk2-bd4.4.6` (pilot finding 3) in one unit,
+`merge-replay-provenance@1`.
+
+- **The findings.** A divergent merge recovers each incoming command from its recorded event and
+  runs it through `decide()` against ours; a fast-forward copies the source records byte for byte and
+  is not affected. Most lifecycle events carry a bare unit name, so replay acts on whichever version
+  is current on ours. If ours superseded `X@1` with `X@2` while theirs froze, readied, finished or
+  published `X@1`, those events can land on `X@2` when it is in a state that accepts them, including
+  `X@1`'s pack and, since D-31, its effect declaration. Companion facts are recomputed on ours, so an
+  amendment that invalidated `X@1` on theirs can invalidate `X@2` (reproduced by Sol). Release
+  preparation records exact references, but the recovered command passes names. A legacy anchor
+  advance without a version resolves to ours' current version, not the one D-26 says it meant. And
+  every replayed record is re-enveloped with the merge's actor, run id and time, so a replayed CI
+  anchor loses its run claim (`bd4.4.6`) and the next CI run re-anchors it under a later run.
+- **Identity.** For each replayed command, and for each unit-bearing companion fact of its source
+  batch (`UnitBlocked`, `UnitInvalidated`, `UnitReleaseBound`), ours must resolve the same unit
+  reference the source did. The source reference is: for a fact that records only a name, the version
+  current for that name in the source's state immediately before that fact; for a fact that records
+  an exact reference, that reference; for a creation (`UnitSpecified`), the reference it creates.
+  Ours is resolved step by step during the replay, since the incoming sequence may itself supersede
+  and specify. Release preparation's regenerated exact roster must equal the recorded one. A legacy
+  anchor advance is recovered as an exact-reference command using the source-derived version. D-25's
+  refusal of bare-name legacy CI exceptions is unchanged. Identity covers the targets of operations
+  and companion facts; it does not version-pin by-name dependencies or gate lookups.
+- **Anchors.** An anchor advance also requires that ours' evidence head for its exact reference is
+  the digest the source promoted, immediately before the advance; an ancestor of it is not enough. A
+  superseded version's head can still be claimed (D-26). This refuses merging a CI anchor into a
+  branch that has since added evidence for the same reference. That is deliberate: replaying it would
+  claim the source run for evidence the run never saw.
+- **Claims.** A replayed fact that corresponds to a source fact keeps that source record's actor, run
+  claim (an empty claim stays empty) and recorded time. Correspondence is by event kind and subject,
+  never by position. A companion that `decide()` generates on ours with no source counterpart carries
+  the merge's claims; a source companion with no replayed counterpart produces no record. An incoming
+  `MergeRecorded` keeps its source claims; the record of this merge carries the merge's own. Chain
+  links, revisions and content digests are rebuilt, and `decide()` recomputes derived fields such as
+  gate records and evidence-head sequence numbers. Recorded times are therefore not monotonic along a
+  merged chain; nothing orders them (the codec requires only a non-empty string).
+- **Source context.** The source branch's full verified history, folded record by record, including
+  pre-log baselines and records that provenance filtering leaves out of the replayed suffix. Command
+  batch boundaries come from the source chain before filtering.
+- **Refusal.** `merge.conflict` names the event, its source revision and both references, and for an
+  anchor both head digests. Nothing is written and no lock is created.
+- **No format change.** The event encoding, the event log and the snapshot format are unchanged, and
+  no history is rewritten; existing stores, including the pilot's, merge as they are. This repair
+  cannot show that an earlier merge never misattributed an event.
+- **Recovery after a refusal.** The usual causes are that one branch superseded a version the other
+  kept working on, or added evidence for a unit the other anchored. Try the other direction. Under
+  D-32 the planner integrates on a branch cut from `main` (D-32 note of 2026-11-15), so the other
+  direction is to merge `main` into the unit branch with `merge-git-stages` and open the pull request
+  from the unit branch. This may give an honest order; it is not guaranteed to. A refusal in both
+  directions means this replay cannot reconcile the histories automatically, not that the work is
+  incompatible. Where the other direction leaves a claimed anchor lagging its head, anchoring it
+  waits on `bd4.4.4`.
+- **Scope.** This preserves unit-version identity, not acceptance-pack epoch identity within one
+  version: same-version divergence stays with the existing `decide()` checks, which refuse pack-version
+  reuse and stale rebinds, but another lifecycle command can still replay under a different pack of
+  the same version (reproduced by Sol). It does not repair nested `MergeRecorded` block boundaries
+  (`bd4.4.11`), so some existing merge topologies can still be refused.
+- **Effects.** Under the D-31 note of 2026-11-15, the unit changes what merge reads from the source
+  store and writes to the target store. It declares one observation, the source store's event chain,
+  captured as the verified head the merge record names (`theirs_head`), and one action on the target
+  store, confirmed by one atomic commit, with nothing written on refusal.
+- **Rejected.** Re-mapping onto a matching active version (option B): D-9 allows one current version
+  per name, so it reduces to refusal. Keeping by-name replay and documenting it (option C): contradicts
+  "refuses, never guesses". Matching companions by position or requiring identical batch lengths:
+  wrongly refuses legitimate differences, such as a redundant block another deviation already caused,
+  or an amendment whose impact on ours reaches a dependent theirs did not have. Replaying anchors
+  without their claim, as now: honest, but erases provenance and makes merge direction matter.
+  **Deferred, not rejected:** exact references in every new event, at a later format bump (D-30); this
+  derivation stays for history.

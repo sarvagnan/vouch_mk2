@@ -269,10 +269,13 @@ its exact current `UNIT@VERSION`. It clears when that record becomes terminal or
 `vouch-mk2 merge --root OURS --other THEIRS [--actor ACTOR]` reconciles two copies of a store.
 It finds the deepest shared event record and replays THEIRS' divergent commands through
 `decide()` on top of OURS. If THEIRS is already an ancestor, nothing is written; if OURS is an
-ancestor, the merge fast-forwards. Otherwise the new records are appended to OURS with both
-pre-merge heads and the actor claim. Histories with no shared record are refused
-(`merge.unrelated-histories`), and one refused replay is a `merge.conflict` that leaves OURS
-unchanged.
+ancestor, the merge fast-forwards. Otherwise the new records are appended to OURS, ending with
+a merge record that names both pre-merge heads. The replayed records keep their source records'
+actor, run claim and recorded time, and the merge record carries the merge's actor claim. A
+command that would act on another unit version than it did on THEIRS, or an anchor whose
+evidence head on OURS differs from the one THEIRS promoted, is refused. Histories with no shared
+record are refused (`merge.unrelated-histories`), and one refused replay is a `merge.conflict`
+that leaves OURS unchanged.
 
 #### Recovering from a Git merge or rebase conflict
 

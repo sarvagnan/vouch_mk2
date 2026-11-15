@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_merge_replay_provenance.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"90be5447a0a61761e94275586fcf81322d9eb0843bfdfab97cd77198061dfe42","parent":"GENESIS","recorded_at":"2026-11-15T11:49:23+00:00","sequence":1,"unit":{"name":"merge-replay-provenance","version":"1"}}

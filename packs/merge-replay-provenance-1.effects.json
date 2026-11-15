@@ -1,0 +1,4 @@
+{"effects_format": 1, "effects": [
+  {"kind": "observation", "name": "source-event-chain", "source": "the source (theirs) Vouch store's verified event chain and the objects it references", "capture": "on an accepted replay, the source chain's verified head digest, recorded as theirs_head in the MergeRecorded event; a refused merge captures nothing and names the source event and revision only in its output"},
+  {"kind": "action", "name": "target-store-merge", "system": "the target (ours) Vouch store", "outcome": "confirmed", "detail": "reads the target's verified chain and snapshot first (its pre-merge head is recorded as ours_head); a merge that writes does so in one atomic commit under the store's write lock, after every refusal check has passed; a refused or no-op merge writes nothing, and a refused merge creates no lock"}
+]}
