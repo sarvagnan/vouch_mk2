@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_anchor_currency.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"27095dc46908c0b257e31893e4315dfefa80174428cb8aa1ed487de6608d978f","parent":"GENESIS","recorded_at":"2026-11-15T18:14:49+00:00","sequence":1,"unit":{"name":"anchor-currency","version":"1"}}
