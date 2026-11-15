@@ -246,7 +246,7 @@ def _cli(*argv: str) -> tuple[int, str]:
     return code, out.getvalue() + err.getvalue()
 
 
-def test_divergent_merge_resolves_legacy_anchor_to_ours_current_version(tmp_path: Path) -> None:
+def test_divergent_merge_refuses_legacy_anchor_with_newer_ours_evidence(tmp_path: Path) -> None:
     project = tmp_path / "ours"
     project.mkdir()
     root = str(project / ".vouch")
@@ -319,16 +319,11 @@ def test_divergent_merge_resolves_legacy_anchor_to_ours_current_version(tmp_path
 
     code, output = _cli("merge", "--root", root, "--other", theirs_root)
 
-    assert code == 0, output
-    assert "replayed 1 source record(s)" in output
-    merged, after = heads(root)
-    assert after["u@v2"].anchored == after["u@v2"].head == before["u@v2"].head
-    assert after["u@v1"] == before["u@v1"]
-    with Store.open(root, read_only=True) as store:
-        merge = decode_event_record(store.get_object(ArtifactKind.EVENT, merged.event_head))
-        record = store.get_object(ArtifactKind.EVENT, merge.prev)
-    assert type(merge.folded_event).__name__ == "MergeRecorded"
-    document = json.loads(record)
-    assert document["event"] == "AnchorAdvanced"
-    assert document["payload"] == {"unit_name": "u", "unit_version": "v2"}
-    assert document["prev"] == before_snapshot.event_head
+    # D-33: a source run cannot claim evidence added only on ours.
+    assert code != 0, output
+    assert "merge.conflict" in output
+    assert "AnchorAdvanced" in output
+    assert "u@v2" in output
+    assert before["u@v2"].head in output
+    assert heads(root) == (before_snapshot, before)
+

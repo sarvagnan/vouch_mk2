@@ -75,8 +75,11 @@ def build_event_records(
     actor: str,
     run_id: str,
     recorded_at: str | None = None,
+    source_records: tuple[EventRecord | None, ...] | None = None,
 ) -> tuple[Snapshot, tuple[tuple[ArtifactKind, bytes], ...], tuple[EventRecord, ...]]:
-    """Fold and envelope events in order, returning the derived snapshot."""
+    """Fold events, optionally retaining corresponding source envelope claims."""
+    if source_records is not None and len(source_records) != len(events):
+        raise ValueError("source_records must contain one entry per event")
     timestamp = (
         datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
         if recorded_at is None
@@ -85,7 +88,8 @@ def build_event_records(
     current = snapshot
     objects: list[tuple[ArtifactKind, bytes]] = []
     records: list[EventRecord] = []
-    for event in events:
+    for index, event in enumerate(events):
+        source = None if source_records is None else source_records[index]
         revision = (
             event.baseline.revision
             if isinstance(event, PreLogHistoryRecorded)
@@ -93,11 +97,11 @@ def build_event_records(
         )
         record = EventRecord(
             folded_event=event,
-            recorded_at=timestamp,
+            recorded_at=timestamp if source is None else source.recorded_at,
             prev=current.event_head or "GENESIS",
             revision=revision,
-            actor=actor,
-            run_id=run_id,
+            actor=actor if source is None else source.actor,
+            run_id=run_id if source is None else source.run_id,
             pack_digest=event_pack_digest(event),
         )
         data = encode_event_record(record)
@@ -106,7 +110,7 @@ def build_event_records(
             current,
             (event,),
             event_digests=(digest,),
-            event_run_ids=(run_id,),
+            event_run_ids=(record.run_id,),
         )
         objects.append((ArtifactKind.EVENT, data))
         records.append(record)
