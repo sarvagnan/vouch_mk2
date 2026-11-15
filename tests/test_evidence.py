@@ -327,7 +327,8 @@ def test_anchor_applicability_stagnation_ancestor_and_dangling(tmp_path: Path) -
         _commit_decision(store, AdvanceAnchor("u", "fixture-run"))
         record_evidence(store, _event("u", 3, green, EvidenceKind.REFACTOR))
         ancestor = _result(store, store.read_snapshot(), mk2.CHECK_EVIDENCE_ANCHORS)
-        assert ancestor.verdict is Verdict.PASS
+        assert ancestor.verdict is Verdict.NOT_CHECKED
+        assert ancestor.detail == "unit 'u@v1' anchor lags its head"
 
         snapshot = store.read_snapshot()
         head = snapshot.evidence_head("u")
@@ -341,6 +342,7 @@ def test_anchor_applicability_stagnation_ancestor_and_dangling(tmp_path: Path) -
         )
         dangling = _result(store, store.read_snapshot(), mk2.CHECK_EVIDENCE_ANCHORS)
         assert dangling.verdict is Verdict.FAIL
+        assert dangling.detail == f"unit 'u@v1' has dangling anchor {'d' * 64!r}"
 
 
 def test_anchor_fail_precedes_stagnant_not_checked(tmp_path: Path) -> None:

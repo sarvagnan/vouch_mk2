@@ -505,7 +505,7 @@ def _check_evidence_anchors(
             rows.append(
                 (
                     Verdict.FAIL,
-                    f"unit {walk.head.unit_name!r}: chain unverified: {walk.error}",
+                    f"unit {walk.head.ref().label()!r}: chain unverified: {walk.error}",
                 )
             )
             continue
@@ -514,21 +514,28 @@ def _check_evidence_anchors(
             rows.append(
                 (
                     Verdict.NOT_CHECKED,
-                    f"unit {walk.head.unit_name!r} remains at GENESIS",
+                    f"unit {walk.head.ref().label()!r} remains at GENESIS",
                 )
             )
         elif walk.head.anchored != "GENESIS" and walk.head.anchored not in digests:
             rows.append(
                 (
                     Verdict.FAIL,
-                    f"unit {walk.head.unit_name!r} has dangling anchor {walk.head.anchored!r}",
+                    f"unit {walk.head.ref().label()!r} has dangling anchor {walk.head.anchored!r}",
                 )
             )
         elif not walk.head.anchor_run_id:
             rows.append(
                 (
                     Verdict.NOT_CHECKED,
-                    f"unit {walk.head.unit_name!r} anchor has no workflow run claim",
+                    f"unit {walk.head.ref().label()!r} anchor has no workflow run claim",
+                )
+            )
+        elif walk.head.anchored != walk.head.head:
+            rows.append(
+                (
+                    Verdict.NOT_CHECKED,
+                    f"unit {walk.head.ref().label()!r} anchor lags its head",
                 )
             )
         else:

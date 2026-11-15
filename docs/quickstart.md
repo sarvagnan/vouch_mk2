@@ -207,6 +207,9 @@ advances the anchor. That is expected; do not lower the anchor mode to avoid it.
 walkthrough sets an example `GITHUB_RUN_ID` to take the same path CI does. Vouch records the
 value without verifying it.
 
+For evidence recorded after a CI-claimed anchor, `check.evidence-anchors` reports
+`NOT_CHECKED` with `anchor lags its head` until the next CI run advances it.
+
 ```sh
 python3 vouch.lock set-tier --root .vouch --tier standard
 python3 vouch.lock set-anchor-mode --root .vouch --mode ci
@@ -214,8 +217,8 @@ GITHUB_RUN_ID=123456 python3 vouch.lock advance-anchor --root .vouch --unit-name
 ```
 
 `--unit-version` claims an exact unit reference; without it, the current version is used. CI
-claims every unclaimed head by name and version, including a superseded version's head after a
-rebind.
+claims every head with no run claim or whose anchor differs from its head, by name and version,
+including a superseded version's head after a rebind.
 
 The tier covers only what Vouch can check. Every other control in the tier matrix appears in
 `check` as an organizational NOT-CHECKED row naming the tier and control, so a declared tier

@@ -147,6 +147,9 @@ current evidence anchor. A local `advance-anchor` has no workflow-run claim, so
 `check.evidence-anchors` reports `no workflow run claim`; one eligible CI run resolves it.
 Lowering the anchor mode would only hide the boundary.
 
+For evidence recorded after a CI-claimed anchor, `check.evidence-anchors` reports
+`NOT_CHECKED` with `anchor lags its head` until the next CI run advances it.
+
 The generated workflow lets that first otherwise-clean run proceed with
 `check --ci --pending-anchor-ok`. The flag changes only the exit code, and only when the
 pending-anchor row is the sole mechanical `NOT_CHECKED`. The row and its detail remain in text
