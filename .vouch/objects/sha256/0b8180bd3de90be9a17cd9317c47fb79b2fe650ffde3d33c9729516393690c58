@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"merge-replay-provenance@1","reason":"in progress on unit/merge-replay-provenance-1: pack frozen and RED recorded; implementation pending (D-32, D-33)"},"prev":"db2ab6a61cd797cf34141180e5e90a67986b329126e189b4b4bdbe33e79cec4f","recorded_at":"2026-11-15T11:49:39+00:00","revision":929,"run_id":""}
