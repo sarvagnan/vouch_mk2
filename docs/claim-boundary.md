@@ -185,8 +185,10 @@ protection are organizational governance and trust-root concerns.
 comparing snapshots, and needs a shared event-record ancestor. An already-merged THEIRS changes
 nothing, and an ancestor OURS fast-forwards. Otherwise each divergent THEIRS command is replayed
 through `decide()` against the evolving OURS state, and a final merge record names both heads.
-The replayed records keep their source records' actor, run claim and recorded time, and the
-merge record carries the merge's actor claim. A replay must act on the same unit version as on
+The replayed records keep their source records' actor, run claim and recorded time, matched by
+event kind and subject, and the merge record carries the merge's actor claim. A companion record
+the replay generates with no matching THEIRS record carries the merge's claims too, and a THEIRS
+companion the replay no longer produces is not written. A replay must act on the same unit version as on
 THEIRS, and an anchor needs the evidence head THEIRS promoted. Unrelated histories are refused,
 and one refused replay refuses the whole merge without writing OURS.
 

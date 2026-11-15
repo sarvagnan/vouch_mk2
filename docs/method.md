@@ -44,7 +44,13 @@ Beads is the task list and `docs/usage-log.md` the cost ledger; nothing lives on
 4. Freeze in the dogfood store: `specify → freeze <pack> → mark-ready → start`, with pack
    version `"<unit>-pack/<n>@" + sha256(b"vouch-mk2/pack\0"+spec+b"\0"+tests)[:16]`.
 5. Record RED #1 through the harness: `record-evidence … --kind red -- pytest
-   tests/test_<unit>.py -q`. Then `advance-anchor`, `generate`, and `check --ci` exits 0.
+   tests/test_<unit>.py -q`. Then `mark-open-in-ci --name <unit> --reason …` (the store's
+   strict CI policy fails `check.ci-policy` for an unfinished unit without one, and `publish`
+   clears it), `advance-anchor`, `generate`, and `check --ci`. The store's anchor mode is `ci`,
+   so a locally advanced anchor carries no workflow run claim. Every mechanical row must be PASS
+   or NOT-APPLICABLE except `check.evidence-anchors`, which reports NOT-CHECKED (organizational
+   rows are always NOT-CHECKED), so `check --ci` exits 1 on the branch until CI anchors on `main`
+   (§6 step 6).
 6. Commit "`<unit>@<v>`: pack frozen, RED recorded, in progress" on the unit branch. The user
    pushes the branch and opens the pull request. Its CI stays red until GREEN, and the red run
    shows less than it seems: the gates job stops at its first failing step, usually the type
@@ -80,7 +86,8 @@ unit (D-3). Then:
 
 - **Amend** (the pack was wrong): `adjudicate-amend --amendment-version <pack/n+1>`,
   `close-deviation`, `respecify`, edit spec and tests, re-freeze as pack/n+1, and re-record RED
-  if the amendment demands new behavior.
+  if the amendment demands new behavior. `respecify` clears the unit's open-in-CI exception, so
+  run `mark-open-in-ci` again after the re-freeze.
 - **Reject** (the pack stands): `adjudicate-reject`, `close-deviation`, `begin-reverify`; the fix
   lies outside the pack.
 
@@ -98,7 +105,8 @@ The DONE file is not evidence.
 - Do the owner obligations the implementer is barred from: `upgrade` the dogfood store when the
   unit bumps the state format (D-13; no invented state), `formal --record`, `generate`, and the
   README test count.
-- Record GREEN through the harness, `advance-anchor`, and `check --ci` exits 0.
+- Record GREEN through the harness, `advance-anchor`, and `check --ci`, with every mechanical row
+  PASS or NOT-APPLICABLE except `check.evidence-anchors` (NOT-CHECKED until CI anchors on `main`, §1 step 5).
 
 ## 5. Review (Astra, T3 delegated task, read-only)
 
@@ -121,7 +129,8 @@ against the fixed tree. Astra re-checks in a new task, given its findings and th
    re-verifying after a deviation stays there; it is published in step 6, like any other. The
    stop rule ([self-hosting-tradeoff.md](self-hosting-tradeoff.md)): if a gate must be bent to
    publish mk2's own unit, adoption stops and that is recorded.
-5. `generate`, certificate, `check --ci` exits 0. Commit "`<unit>@<v>`: … GREEN recorded, done
+5. `generate`, certificate, and `check --ci`, with every mechanical row PASS or
+   NOT-APPLICABLE except `check.evidence-anchors` (§1 step 5). Commit "`<unit>@<v>`: … GREEN recorded, done
    pending acceptance" (or "… GREEN recorded, re-verifying") on the unit branch. The user
    pushes it and merges the pull request with a merge commit, not a squash, so the frozen-pack
    commit stays in `main`'s history ahead of the implementation. If `main` moved meanwhile, cut

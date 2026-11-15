@@ -271,8 +271,10 @@ It finds the deepest shared event record and replays THEIRS' divergent commands 
 `decide()` on top of OURS. If THEIRS is already an ancestor, nothing is written; if OURS is an
 ancestor, the merge fast-forwards. Otherwise the new records are appended to OURS, ending with
 a merge record that names both pre-merge heads. The replayed records keep their source records'
-actor, run claim and recorded time, and the merge record carries the merge's actor claim. A
-command that would act on another unit version than it did on THEIRS, or an anchor whose
+actor, run claim and recorded time, matched by event kind and subject, and the merge record
+carries the merge's actor claim. A companion record the replay generates with no matching record
+on THEIRS carries the merge's claims too, and a THEIRS companion the replay no longer produces
+is not written. A command that would act on another unit version than it did on THEIRS, or an anchor whose
 evidence head on OURS differs from the one THEIRS promoted, is refused. Histories with no shared
 record are refused (`merge.unrelated-histories`), and one refused replay is a `merge.conflict`
 that leaves OURS unchanged.

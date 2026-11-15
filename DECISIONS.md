@@ -1392,3 +1392,10 @@ run that every unit's frozen-pack commit put on `main`.
   without their claim, as now: honest, but erases provenance and makes merge direction matter.
   **Deferred, not rejected:** exact references in every new event, at a later format bump (D-30); this
   derivation stays for history.
+- **Note (2026-11-15): the docs' provenance sentence is narrowed to this decision.** As published,
+  the R16 sentence in `docs/quickstart.md` and `docs/claim-boundary.md` said every replayed record
+  keeps its source claims. Astra's claim check found that it omitted this decision's exceptions: a
+  companion the replay generates with no matching source record carries the merge's claims, and a
+  source companion the replay no longer produces is not written (R7, R12 test both). Both sections
+  now say so, keeping R16's pinned phrases. The behaviour and its tests are unchanged, so this is a
+  correction of the docs to this entry, reviewed under D-28, not a new unit.
