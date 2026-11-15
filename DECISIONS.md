@@ -1399,3 +1399,87 @@ run that every unit's frozen-pack commit put on `main`.
   source companion the replay no longer produces is not written (R7, R12 test both). Both sections
   now say so, keeping R16's pinned phrases. The behaviour and its tests are unchanged, so this is a
   correction of the docs to this entry, reviewed under D-28, not a new unit.
+
+## D-34 — An anchor that lags its evidence head is not checked, and CI advances it (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.4` (pilot finding 2) and
+`vouch_mk2-bd4.4.10` in one unit, `anchor-currency@1`.
+
+- **The finding.** The anchor loop in mk2's `ci.yml` and in the workflow `init` generates advances
+  only evidence heads whose `anchor_run_id` is empty. Once CI has claimed an anchor, evidence
+  recorded after it is never anchored. `check.evidence-anchors` returns PASS whenever the anchor is in
+  the chain and carries a run claim, even when the head has moved past it, so that unanchored
+  evidence is reported as anchored (the pilot, 2026-10-13: three refactors after run 38297556382).
+  mk2 avoided it only because the owner advances the anchor locally after every record. The check's
+  messages also name a head by its unit name alone, so two versions' heads read as duplicates
+  (`bd4.4.10`, pilot 2026-10-30).
+- **Decision.** A head whose claimed anchor differs from its head is NOT-CHECKED, with a detail naming
+  the exact reference and saying the anchor lags its head, the same verdict as a head still at
+  GENESIS or a locally advanced anchor with no run claim. Dangling anchors and unverified chains stay
+  FAIL. Both anchor loops advance every head that has no run claim or whose anchor differs from its
+  head; `advance-anchor` already accepts that (an anchor is refused only when current and unclaimed
+  by a run). Every message of the check names the head by `NAME@VERSION`.
+- **Adopters.** Workflows already generated keep the old loop until they are regenerated or edited;
+  the new check makes the gap visible as NOT-CHECKED instead of PASS. Versioned workflow upgrades
+  are `vouch_mk2-b6g.14`.
+- **Rejected.** FAIL for a lagging anchor: nothing is wrong yet, only waiting for CI, and every
+  local `check --ci` after new evidence would fail. Fixing only the loops: the check would stay
+  blind whenever a loop is skipped or broken, which is the false reassurance the pilot hit.
+
+## D-35 — Unit names and versions may not begin with "-" (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-dww` in one unit,
+`option-safe-identifiers@1`.
+
+- **The finding** (Astra, reviewing `anchor-unit-ref@1`). `valid_unit_identifier` accepts a leading
+  `-`, but every CLI option reads a separate `-v1` token as an option, so `specify --name -x` and
+  `advance-anchor --unit-version -v1` exit 2, and the commands `next` suggests for such a unit, in
+  text and as structured argv, cannot run.
+- **Decision.** `decide()` refuses a unit name or version that begins with `-`, with a refusal code
+  that names the rule, for every command that introduces one. Neither mk2's store nor the pilot's
+  has such an identifier (checked 2026-11-15), so no stored history is invalidated. Other
+  identifiers (deviation ids, release names, pack versions) are out of scope; if the unit finds the
+  same defect there, it is filed as a follow-up for its own decision.
+- **Rejected.** Rendering every option as `--flag=value` and keeping the identifiers legal: every
+  suggested invocation and JSON argv would change, frozen packs that pin the separate-token shape
+  (`anchor-unit-ref@1` R8) would need rebinding, and hand-typed commands would still fail.
+
+## D-36 — A re-freeze that changes the pack needs a fresh GREEN (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.5` (pilot finding 3) in one
+unit, `refreeze-green@1`. Amends D-17.
+
+- **The finding.** D-17 (amended by O-1) binds evidence to the digest of the pack's executable
+  entries. The pilot amended a pack by changing only files bound with `--pack-file`: a generator,
+  41 JSON schemas and the vectors its bound tests load. The test-set digest did not change, so
+  after the re-freeze `mark-done` accepted the earlier GREEN and `check --ci` passed, with no run
+  against the amended vectors. The pilot re-recorded GREEN by hand.
+- **Decision.** When a re-freeze changes the pack's inventory digest, `gate.dod.current-pack-green`
+  also requires that the latest current-pack GREEN was recorded after that re-freeze. RED is
+  unchanged: it stays keyed to the test-set digest, so a re-freeze that leaves the tests alone needs
+  no new RED, as D-17's rationale requires. The gate applies to every later `mark-done` and
+  `publish`; units already published are not re-judged. The unit chooses the mechanism, preferring
+  no event or state format change; if the snapshot must record where the latest freeze sits in the
+  evidence chain, that is a state-format bump under D-13.
+- **Rejected.** Binding executed data files as test files and carrying `red_seen` forward when the
+  implementation is unchanged: it changes D-17's digest rules and asks adopters to classify every
+  data file. Accepting the gap as a residual: the pilot showed it lets an untested pack publish.
+
+## D-37 — A merge skips an incoming clear of an exception ours already cleared (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.3` in one unit,
+`merge-redundant-clear@1`. Amends D-25 for merge replay only.
+
+- **The finding** (`merge-open-in-ci-replay@1` review). Shared history holds an open-in-CI
+  exception; ours clears it; theirs clears it and marks it again. Replay refuses theirs' clear with
+  `ci-policy.exception-missing`, because `decide()` refuses a clear of an absent exception, so the
+  merge fails although both sides agree the exception was cleared.
+- **Decision.** During merge replay only, an incoming `OpenInCiCleared` whose exact unit reference
+  has no exception on ours, and which D-25 and D-33 would otherwise replay onto the same reference,
+  is satisfied: it writes no record, and the merge reports it as skipped. The rest of the incoming
+  history replays as before, so theirs' later re-mark leaves the exception open. A clear whose unit
+  reference differs is still refused (D-25, D-33). `decide()` is unchanged, so a direct
+  `clear-open-in-ci` of an absent exception is still refused.
+- **Rejected.** Accepting a redundant clear in `decide()`: it removes the error that catches a clear
+  aimed at the wrong unit. Keeping the refusal and documenting a manual recovery: two branches that
+  each closed the same exception could not merge.
