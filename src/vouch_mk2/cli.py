@@ -147,7 +147,7 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "exit successfully when the only mechanical NOT-CHECKED row is "
-            "check.evidence-anchors reporting no workflow run claim"
+            "check.evidence-anchors reporting a pending CI anchor"
         ),
     )
     check.add_argument(

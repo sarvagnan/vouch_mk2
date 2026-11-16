@@ -1399,3 +1399,133 @@ run that every unit's frozen-pack commit put on `main`.
   source companion the replay no longer produces is not written (R7, R12 test both). Both sections
   now say so, keeping R16's pinned phrases. The behaviour and its tests are unchanged, so this is a
   correction of the docs to this entry, reviewed under D-28, not a new unit.
+
+## D-34 — An anchor that lags its evidence head is not checked, and CI advances it (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.4` (pilot finding 2) and
+`vouch_mk2-bd4.4.10` in one unit, `anchor-currency@1`.
+
+- **The finding.** The anchor loop in mk2's `ci.yml` and in the workflow `init` generates advances
+  only evidence heads whose `anchor_run_id` is empty. Once CI has claimed an anchor, evidence
+  recorded after it is never anchored. `check.evidence-anchors` returns PASS whenever the anchor is in
+  the chain and carries a run claim, even when the head has moved past it, so that unanchored
+  evidence is reported as anchored (the pilot, 2026-10-13: three refactors after run 38297556382).
+  mk2 avoided it only because the owner advances the anchor locally after every record. The check's
+  messages also name a head by its unit name alone, so two versions' heads read as duplicates
+  (`bd4.4.10`, pilot 2026-10-30).
+- **Decision.** A head whose claimed anchor differs from its head is NOT-CHECKED, with a detail naming
+  the exact reference and saying the anchor lags its head, the same verdict as a head still at
+  GENESIS or a locally advanced anchor with no run claim. Dangling anchors and unverified chains stay
+  FAIL. Both anchor loops advance every head that has no run claim or whose anchor differs from its
+  head; `advance-anchor` already accepts that (an anchor is refused only when current and unclaimed
+  by a run). Every message of the check names the head by `NAME@VERSION`.
+- **Adopters.** Workflows already generated keep the old loop until they are regenerated or edited;
+  the new check makes the gap visible as NOT-CHECKED instead of PASS. Versioned workflow upgrades
+  are `vouch_mk2-b6g.14`.
+- **Rejected.** FAIL for a lagging anchor: nothing is wrong yet, only waiting for CI, and every
+  local `check --ci` after new evidence would fail. Fixing only the loops: the check would stay
+  blind whenever a loop is skipped or broken, which is the false reassurance the pilot hit.
+
+## D-35 — Unit names and versions may not begin with "-" (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-dww` in one unit,
+`option-safe-identifiers@1`.
+
+- **The finding** (Astra, reviewing `anchor-unit-ref@1`). `valid_unit_identifier` accepts a leading
+  `-`, but every CLI option reads a separate `-v1` token as an option, so `specify --name -x` and
+  `advance-anchor --unit-version -v1` exit 2, and the commands `next` suggests for such a unit, in
+  text and as structured argv, cannot run.
+- **Decision.** `decide()` refuses a unit name or version that begins with `-`, with a refusal code
+  that names the rule, for every command that introduces one. Neither mk2's store nor the pilot's
+  has such an identifier (checked 2026-11-15), so no stored history is invalidated. Other
+  identifiers (deviation ids, release names, pack versions) are out of scope; if the unit finds the
+  same defect there, it is filed as a follow-up for its own decision.
+- **Rejected.** Rendering every option as `--flag=value` and keeping the identifiers legal: every
+  suggested invocation and JSON argv would change, frozen packs that pin the separate-token shape
+  (`anchor-unit-ref@1` R8) would need rebinding, and hand-typed commands would still fail.
+
+## D-36 — A re-freeze that changes the pack needs a fresh GREEN (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.5` (pilot finding 3) in one
+unit, `refreeze-green@1`. Amends D-17.
+
+- **The finding.** D-17 (amended by O-1) binds evidence to the digest of the pack's executable
+  entries. The pilot amended a pack by changing only files bound with `--pack-file`: a generator,
+  41 JSON schemas and the vectors its bound tests load. The test-set digest did not change, so
+  after the re-freeze `mark-done` accepted the earlier GREEN and `check --ci` passed, with no run
+  against the amended vectors. The pilot re-recorded GREEN by hand.
+- **Decision.** When a re-freeze changes the pack's inventory digest, `gate.dod.current-pack-green`
+  also requires that the latest current-pack GREEN was recorded after that re-freeze. RED is
+  unchanged: it stays keyed to the test-set digest, so a re-freeze that leaves the tests alone needs
+  no new RED, as D-17's rationale requires. The gate applies to every later `mark-done` and
+  `publish`; units already published are not re-judged. The unit chooses the mechanism, preferring
+  no event or state format change; if the snapshot must record where the latest freeze sits in the
+  evidence chain, that is a state-format bump under D-13.
+- **Rejected.** Binding executed data files as test files and carrying `red_seen` forward when the
+  implementation is unchanged: it changes D-17's digest rules and asks adopters to classify every
+  data file. Accepting the gap as a residual: the pilot showed it lets an untested pack publish.
+
+## D-37 — A merge skips an incoming clear of an exception ours already cleared (2026-11-15)
+
+**Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.3` in one unit,
+`merge-redundant-clear@1`. Amends D-25 for merge replay only.
+
+- **The finding** (`merge-open-in-ci-replay@1` review). Shared history holds an open-in-CI
+  exception; ours clears it; theirs clears it and marks it again. Replay refuses theirs' clear with
+  `ci-policy.exception-missing`, because `decide()` refuses a clear of an absent exception, so the
+  merge fails although both sides agree the exception was cleared.
+- **Decision.** During merge replay only, an incoming `OpenInCiCleared` whose exact unit reference
+  has no exception on ours, and which D-25 and D-33 would otherwise replay onto the same reference,
+  is satisfied: it writes no record, and the merge reports it as skipped. The rest of the incoming
+  history replays as before, so theirs' later re-mark leaves the exception open. A clear whose unit
+  reference differs is still refused (D-25, D-33). `decide()` is unchanged, so a direct
+  `clear-open-in-ci` of an absent exception is still refused.
+- **Rejected.** Accepting a redundant clear in `decide()`: it removes the error that catches a clear
+  aimed at the wrong unit. Keeping the refusal and documenting a manual recovery: two branches that
+  each closed the same exception could not merge.
+
+## D-38 — A replayed merge record names its block's start on the receiving chain (2026-11-16)
+
+**Status:** decided 2026-11-16 by the user, from Sol's design (`design-bd4.4.11`). Settles
+`vouch_mk2-bd4.4.11` in one unit, `nested-merge-boundary@1`. Extends D-33.
+
+- **The finding** (Sol and Fable, reviewing D-33; reproduced by Sol). A←B and C←A replay, then
+  B←C refuses `merge.theirs-history-invalid`. An incoming `MergeRecorded` in a replayed suffix is
+  replayed with its source `ours_head` and `theirs_head` unchanged, but replay re-envelopes the
+  records its block bounded, so its `ours_head` names a digest that is not on the receiving chain.
+  The provenance filter requires that boundary to be an earlier record of the chain it filters, and
+  refuses.
+- **Decision.** When merge replay writes an incoming `MergeRecorded`, its `ours_head` is the digest
+  on the receiving chain at which its replayed block begins: the replayed counterpart of the source
+  boundary record, or, where the provenance filter skipped that record, the staging head at that
+  boundary. `theirs_head` keeps the source value, so a reverse merge still recognises the
+  incorporated work. Claims are matched on the source fact before the translation (D-33). No event,
+  log or snapshot format change. Stores that already hold an untranslated record keep their bytes; a
+  merge that needs its boundary still refuses atomically, with a diagnostic naming the record. No
+  boundary is guessed, no event is rewritten and no interval is widened to skip it.
+- **Rejected.** A new local-boundary field beside both original heads: an event-format change for
+  what the existing field can carry. Resolving the original boundary from source provenance on read:
+  replay does not copy source event objects, so the boundary often exists in neither store.
+
+## D-39 — Rebind continuity is checked within a pack generation, from history (2026-11-16)
+
+**Status:** decided 2026-11-16 by the user, from Sol's design (`design-0tc`). Settles
+`vouch_mk2-0tc` in one unit, `rebind-generations@1`. Amends D-14's continuity invariant.
+
+- **The finding** (Astra, effect-declarations@1 final check; reproduced by Sol). publish, rebind,
+  amend, respecify, re-freeze with different bytes, publish, rebind: the second rebind is decided
+  but the commit refuses with `rebind.history-disconnected`, because the snapshot invariant requires
+  every rebind row's old inventory to equal the previous row's new inventory, across the re-freeze
+  that legitimately broke the chain.
+- **Decision.** A pack generation runs from a freeze to the next respecify. Each
+  `AcceptancePackRebound` must name, as its old inventory and old test set, that unit's current
+  values immediately before the event; that is validated when events are folded, when the event log
+  is verified, before an event extension is committed, and on merge source chains. The unconditional
+  adjacent-row comparison is removed from the snapshot invariant, except for pre-log baseline rows,
+  which keep the contiguous-chain requirement because no event witnesses a generation break there.
+  Every rebind row stays in the snapshot; D-31's effects equality, `rebind.stale-pack` and D-14's
+  fresh GREEN after each rebind are unchanged. No event, log or snapshot format change. mk2's own
+  store (34 published units, 33 rebind rows, no rebind after a respecify) keeps its verdicts.
+- **Rejected.** Generation markers in the snapshot: a D-13 state-format upgrade for information the
+  event log already holds. Clearing the rebind list at respecify: the snapshot would lose adaptations
+  that evidence verification still reads.

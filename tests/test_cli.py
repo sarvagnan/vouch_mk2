@@ -3,11 +3,12 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import sys
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 
-from pytest import CaptureFixture
+from pytest import CaptureFixture, MonkeyPatch, raises
 
 from vouch_mk2.checks import CheckReport, CheckResult
 from vouch_mk2.cli import main
@@ -398,7 +399,10 @@ def _assert_clean_or_pending_ci_anchor(exit_code: int, output: str) -> None:
         assert len(mechanical_not_checked) == 1
         pending = mechanical_not_checked[0]
         assert pending.split()[1] == mk2.CHECK_EVIDENCE_ANCHORS
-        assert "no workflow run claim" in pending
+        # The two pending-CI conditions: no workflow run claim yet, or a claimed anchor that
+        # later evidence has moved past (D-34). CI's anchor job, which runs only after this
+        # suite passes, resolves both.
+        assert "no workflow run claim" in pending or "anchor lags its head" in pending
         assert (exit_code, output.rstrip().splitlines()[-1]) == (
             1,
             "composed: NOT-CHECKED",
@@ -591,3 +595,119 @@ def _regression_effect_declarations(tmp_path: Path) -> None:
     _regression_rebind_invalid_effects_arguments_leave_every_store_file_unchanged(tmp_path / "rebind")
     _regression_merge_replays_the_requirement_and_recovers_a_late_bound_declaration(tmp_path / "merge")
     _regression_replayed_requirement_survives_subsequent_events(tmp_path / "replay")
+
+
+# ---- anchor-currency@1 (D-34) regressions, added by the acceptance owner after review ----
+#
+# Astra's review (HIGH): `_assert_clean_or_pending_ci_anchor` accepted only the
+# `no workflow run claim` detail, so a store whose anchors are all claimed but one lags its head
+# failed this gate, and CI's anchor job, which runs only after the gate passes, could never
+# advance it. These build that lag-only state for a published and a superseded head, with no
+# unclaimed head to mask it.
+
+_LAG_CI_RUN_VARIABLES = (
+    "GITHUB_RUN_ID",
+    "CI_PIPELINE_ID",
+    "CIRCLE_WORKFLOW_ID",
+    "BUILDKITE_BUILD_ID",
+    "BUILD_BUILDID",
+    "JENKINS_BUILD_ID",
+    "BUILD_ID",
+    "TRAVIS_BUILD_ID",
+    "BITBUCKET_PIPELINE_UUID",
+    "CODEBUILD_BUILD_ID",
+    "DRONE_BUILD_NUMBER",
+    "TEAMCITY_BUILD_ID",
+)
+
+
+def _lag_run(*argv: str) -> tuple[int, str]:
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        try:
+            code = main(list(argv))
+        except SystemExit as error:
+            code = error.code if isinstance(error.code, int) else 2
+    return code, out.getvalue() + err.getvalue()
+
+
+def _lag_must(*argv: str) -> None:
+    code, output = _lag_run(*argv)
+    assert code == 0, (argv, output)
+
+
+def _lag_published_and_claimed(tmp_path: Path, monkeypatch: MonkeyPatch) -> tuple[Path, str]:
+    """u@v1 published, its anchor claimed by CI at its head, then a late GREEN leaves it behind."""
+    for name in _LAG_CI_RUN_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    ok = [sys.executable, "-c", "raise SystemExit(0)"]
+    fail = [sys.executable, "-c", "raise SystemExit(1)"]
+    project = tmp_path / "proj"
+    project.mkdir()
+    _lag_must("init", "--project", str(project))
+    root = str(project / ".vouch")
+    (project / "packs").mkdir(exist_ok=True)
+    (project / "tests").mkdir(exist_ok=True)
+    (project / "packs" / "u.spec.md").write_text("# u acceptance pack\n")
+    (project / "packs" / "u.effects.json").write_text('{"effects_format": 1, "effects": []}')
+    (project / "tests" / "t.py").write_text("def test_x():\n    assert True\n")
+    _lag_must("set-tier", "--root", root, "--tier", "standard")
+    _lag_must("set-anchor-mode", "--root", root, "--mode", "ci")
+    _lag_must("specify", "--root", root, "--name", "u", "--version", "v1")
+    _lag_must(
+        "freeze", "--root", root, "--name", "u", "--pack-version", "u-pack/1",
+        "--project", str(project), "--pack-file", "packs/u.spec.md",
+        "--pack-test-file", "tests/t.py", "--pack-effects-file", "packs/u.effects.json",
+    )
+    _lag_must("mark-ready", "--root", root, "--name", "u")
+    _lag_must("start", "--root", root, "--name", "u")
+    for kind, argv in (("red", fail), ("green", ok)):
+        _lag_must("record-evidence", "--root", root, "--unit", "u@v1", "--kind", kind, "--", *argv)
+    _lag_must("mark-done", "--root", root, "--name", "u")
+    _lag_must("publish", "--root", root, "--name", "u")
+    monkeypatch.setenv("GITHUB_RUN_ID", "424242")
+    _lag_must("advance-anchor", "--root", root, "--unit-name", "u", "--unit-version", "v1")
+    monkeypatch.delenv("GITHUB_RUN_ID")
+    _lag_must("record-evidence", "--root", root, "--unit", "u@v1", "--kind", "green", "--", *ok)
+    return project, root
+
+
+def _assert_lag_only_is_pending(project: Path, root: str) -> None:
+    with Store.open(root, read_only=True) as store:
+        heads = {head.ref().label(): head for head in store.read_snapshot().evidence_heads}
+    assert all(head.anchor_run_id for head in heads.values()), heads
+    assert [label for label, head in heads.items() if head.anchored != head.head] == ["u@v1"]
+    _lag_must("generate", "--root", root)
+    code, output = _lag_run("check", "--ci", "--root", root, "--project", str(project))
+    assert "'u@v1' anchor lags its head" in output, output
+    _assert_clean_or_pending_ci_anchor(code, output)
+
+
+def test_dogfood_gate_tolerates_a_lag_only_published_head(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    project, root = _lag_published_and_claimed(tmp_path, monkeypatch)
+    _assert_lag_only_is_pending(project, root)
+
+
+def test_dogfood_gate_tolerates_a_lag_only_superseded_head(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    project, root = _lag_published_and_claimed(tmp_path, monkeypatch)
+    _lag_must(
+        "open-deviation", "--root", root, "--deviation-id", "move-on",
+        "--deviation-type", "pack-defect", "--unit", "u@v1",
+    )
+    _lag_must("supersede", "--root", root, "--name", "u")
+    _assert_lag_only_is_pending(project, root)
+
+
+def test_dogfood_gate_still_refuses_another_not_checked_reason() -> None:
+    output = "\n".join(
+        (
+            "NOT-CHECKED    check.evidence-anchors  unit 'u@v1' anchor is something else",
+            "composed: NOT-CHECKED",
+        )
+    )
+    with raises(AssertionError):
+        _assert_clean_or_pending_ci_anchor(1, output)

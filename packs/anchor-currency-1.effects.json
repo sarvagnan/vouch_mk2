@@ -1,0 +1,4 @@
+{"effects_format": 1, "effects": [
+  {"kind": "observation", "name": "evidence-heads", "source": "the Vouch store's evidence heads and their verified chains (state.json and the event objects), read by check.evidence-anchors and by each workflow's head-listing step", "capture": "the check's verdict and per-head detail rows, and the workflow's NAME@VERSION list; nothing is written by reading"},
+  {"kind": "action", "name": "ci-anchor-advance", "system": "the project's Vouch store and its default branch, through the CI anchor job", "outcome": "confirmed", "detail": "for each listed head (no run claim, or an anchor that differs from its head) runs advance-anchor with the exact reference under the workflow run claim, then regenerates projections, runs check --ci and commits .vouch/ as the anchor bot; a head already anchored at its head under a run claim is not listed"}
+]}
