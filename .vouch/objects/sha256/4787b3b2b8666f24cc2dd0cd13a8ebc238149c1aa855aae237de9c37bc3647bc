@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-osi-01","deviation_type":"pack-defect","unit":{"name":"option-safe-identifiers","version":"1"}},"prev":"f68ec4da6b8ab9159b4880ea7b7b57104f767e31a5e08632803e66dadb03e502","recorded_at":"2026-11-16T19:51:39+00:00","revision":957,"run_id":""}

@@ -2,13 +2,17 @@
 
 **Owner:** Claude (acceptance owner). **Implementer:** Sol, who may not edit this file,
 `tests/test_option_safe_identifiers.py` or `packs/option-safe-identifiers-1.effects.json`.
-**Decision:** D-35 (settles `vouch_mk2-dww`).
+**Decision:** D-35 (settles `vouch_mk2-dww`). **pack/2:** DEV-osi-01 narrows the Promise and the
+first ground rule to the D-35 boundary (Astra's re-check); requirements and tests are unchanged.
 **Effects:** none. The change is a pure refusal in `decide()` and a sentence in the quickstart.
 
 ## Promise
 
-A unit name or version that begins with `-` is refused when it is introduced, with a refusal code
-that names the rule, so no unit exists whose suggested commands a CLI option cannot accept.
+`decide()` refuses `SpecifyUnit` when its unit name or version begins with `-`, with a refusal
+code that names the rule, so a newly specified unit cannot give `next` suggested commands that a CLI
+option reads as another option. History a store already holds or adopts without re-deciding it (a
+fast-forward merge, a raw `Store.commit`, a Vouch 0.6 migration) is outside this guarantee (D-35
+note of 2026-11-17).
 
 ## Common rules for every scenario
 
@@ -50,8 +54,9 @@ that names the rule, so no unit exists whose suggested commands a CLI option can
 ## Ground rules
 
 - The rule lives in `decide()`'s handling of `SpecifyUnit`, the only command that introduces a
-  unit name and version, so every transport and merge replay (which re-decides incoming
-  `UnitSpecified` events) gets it.
+  unit name and version. Every transport that issues the command, and divergent merge replay
+  (which re-decides incoming `UnitSpecified` events), gets the refusal; fast-forward history
+  adoption and raw store writes do not re-decide it, and migration is out of scope (D-35).
 - `valid_identifier`, `valid_unit_identifier`, the snapshot invariants, the codec, and the event
   and snapshot formats do not change, so stored history stays readable. The formal universes keep
   their sizes.
