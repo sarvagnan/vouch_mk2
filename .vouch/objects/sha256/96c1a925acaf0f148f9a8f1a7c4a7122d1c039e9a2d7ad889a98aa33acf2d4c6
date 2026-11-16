@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_option_safe_identifiers.py -q","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"f047ba93f115867ad2078208ef73b57472ebc5856d10bb58a8be4396b97c6e77","parent":"GENESIS","recorded_at":"2026-11-16T06:27:45+00:00","sequence":1,"unit":{"name":"option-safe-identifiers","version":"1"}}
