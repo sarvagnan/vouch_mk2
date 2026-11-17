@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationAmended","pack_digest":"","payload":{"amendment_version":"merge-redundant-clear-pack/2@48aea19114bc9017","deviation_id":"DEV-mrc-01","impact_set":["merge-redundant-clear"],"release_impact_set":[]},"prev":"4486cebcded819a78721a06dcbb6f292a6b37d166ec724b197338fe1e41dd80d","recorded_at":"2026-11-17T16:30:54+00:00","revision":1052,"run_id":""}

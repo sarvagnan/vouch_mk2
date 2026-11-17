@@ -1,0 +1,3 @@
+{"effects_format": 1, "effects": [
+  {"kind": "action", "name": "target-store-merge-skip", "system": "the target (ours) Vouch store", "outcome": "confirmed", "detail": "during a replayed merge (merge and merge-git-stages), an incoming OpenInCiCleared whose exact unit reference has no open-in-CI exception on ours writes no record and is counted as skipped in the merge's output; every other replayed record and the merge record are written as before, in the merge's one atomic commit, and a refused merge still writes nothing"}
+]}

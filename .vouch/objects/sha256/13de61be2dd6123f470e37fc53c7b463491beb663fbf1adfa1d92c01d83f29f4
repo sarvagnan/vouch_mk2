@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-mrc-01","deviation_type":"pack-defect","unit":{"name":"merge-redundant-clear","version":"1"}},"prev":"4bc260de1fe55ac46f518d0916c63496738bc337f50adb9f8e1d4f55f54f307e","recorded_at":"2026-11-17T16:30:54+00:00","revision":1050,"run_id":""}

@@ -30,6 +30,7 @@ class MergeOutcome:
     mode: str
     snapshot: Snapshot
     replayed_records: int
+    skipped_records: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -654,6 +655,7 @@ def merge_store_roots(
         if ancestor.digest == theirs.event_head:
             return MergeOutcome("no-op", ours, 0)
 
+        skipped = 0
         if ancestor.digest == ours.event_head:
             suffix_start = next(
                 index for index, item in enumerate(theirs_chain) if item.digest == ancestor.digest
@@ -707,6 +709,19 @@ def merge_store_roots(
                         )
                 decision = decide(current, command)
                 if isinstance(decision, Refused):
+                    if (
+                        isinstance(source_event, events.OpenInCiCleared)
+                        and isinstance(command, commands.ClearOpenInCi)
+                        and len(decision.violations) == 1
+                        and decision.violations[0].code == "ci-policy.exception-missing"
+                    ):
+                        # The refusal proves absence; resolve exactly as decide()
+                        # does before treating the clear as already satisfied.
+                        # Historical presence alone must not bypass D-25.
+                        unit = current.unit(command.name)
+                        if unit is not None and unit.ref().label() == source_event.name:
+                            skipped += 1
+                            continue
                     return _conflict(item, decision)
                 identity_refusal = _check_batch_identity(batch, current, decision.events)
                 if identity_refusal is not None:
@@ -770,10 +785,10 @@ def merge_store_roots(
             )
             objects = supporting + event_objects
             mode = "replayed"
-            replayed = len(source_suffix)
+            replayed = len(source_suffix) - skipped
 
     _commit_if_unchanged(ours_root, ours, candidate, objects)
-    return MergeOutcome(mode, candidate, replayed)
+    return MergeOutcome(mode, candidate, replayed, skipped)
 
 
 __all__ = ["MergeOutcome", "merge_store_roots"]
