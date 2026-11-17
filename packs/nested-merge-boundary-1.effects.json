@@ -1,0 +1,4 @@
+{"effects_format": 1, "effects": [
+  {"kind": "action", "name": "target-store-merge-boundary", "system": "the target (ours) Vouch store", "outcome": "confirmed", "detail": "when a replayed merge writes an incoming MergeRecorded, its ours_head is the digest on the receiving chain at which its replayed block begins (the replayed counterpart of the source boundary, or the staging head where that boundary was filtered); theirs_head keeps the source value; the record keeps its source claims; every other record is written as before, in the merge's one atomic commit, and a refused merge writes nothing"},
+  {"kind": "observation", "name": "legacy-merge-boundary", "source": "the source (theirs) Vouch store's verified event chain", "capture": "when a merge needs the block boundary of a stored MergeRecorded whose ours_head is not an earlier record of that chain, the refusal names that record's digest; nothing is written and no lock is taken"}
+]}
