@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_merge_redundant_clear.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"c2701a5c71ade694236e6d37325076843eb607e90bf10474334655a87041e19b","parent":"GENESIS","recorded_at":"2026-11-17T15:47:49+00:00","sequence":1,"unit":{"name":"merge-redundant-clear","version":"1"}}

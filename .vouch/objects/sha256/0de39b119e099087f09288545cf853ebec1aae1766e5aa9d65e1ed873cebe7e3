@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"merge-redundant-clear@1","reason":"pack frozen and RED recorded; the bound acceptance tests fail until the implementation lands (D-37)"},"prev":"4623acb811056546424386741bc75ca56fa7becfde6d25bda7cc168a9b923ea5","recorded_at":"2026-11-17T15:47:49+00:00","revision":1048,"run_id":""}
