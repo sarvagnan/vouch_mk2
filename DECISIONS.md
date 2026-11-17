@@ -1472,6 +1472,11 @@ unit, `refreeze-green@1`. Amends D-17.
   implementation is unchanged: it changes D-17's digest rules and asks adopters to classify every
   data file. Accepting the gap as a residual: the pilot showed it lets an untested pack publish.
 
+- **Note (2026-11-17, owner, writing `refreeze-green@1`).** `mark-done` has no gate; only
+  `publish` (from `done-pending-acceptance` and from `re-verifying`) evaluates
+  `gate.dod.current-pack-green`. "Every later `mark-done` and `publish`" above therefore means
+  every later `publish`; `next` offers `publish` only when the gate would pass.
+
 ## D-37 — A merge skips an incoming clear of an exception ours already cleared (2026-11-15)
 
 **Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.3` in one unit,
