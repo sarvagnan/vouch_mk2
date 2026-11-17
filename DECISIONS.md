@@ -1444,6 +1444,13 @@ run that every unit's frozen-pack commit put on `main`.
   suggested invocation and JSON argv would change, frozen packs that pin the separate-token shape
   (`anchor-unit-ref@1` R8) would need rebinding, and hand-typed commands would still fail.
 
+- **Note (2026-11-17, Astra's review of `option-safe-identifiers@1`).** Two other paths can bring
+  in a dash-led unit, and the rule deliberately does not reach either. (1) A fast-forward merge
+  (and `merge-git-stages`, which uses it) copies the source's records byte for byte, and a raw
+  `Store.commit` writes events without `decide()`. Both carry recorded history, which no
+  `decide()` rule re-judges (D-33). (2) Migration from a Vouch 0.6 ledger builds units directly,
+  but no 0.6 project exists (D-11 note), so the user ruled it out of scope.
+
 ## D-36 — A re-freeze that changes the pack needs a fresh GREEN (2026-11-15)
 
 **Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.5` (pilot finding 3) in one

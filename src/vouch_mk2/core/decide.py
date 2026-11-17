@@ -635,6 +635,12 @@ def _decide_specify(snapshot: Snapshot, command: SpecifyUnit) -> Decision:
             "unit name and version must be printable identifiers of at most 200 "
             "characters without surrounding whitespace or '@'",
         )
+    if command.name.startswith("-") or command.version.startswith("-"):
+        return _refuse(
+            "identifier.leading-dash",
+            "unit name or version may not begin with '-' because a CLI option "
+            "reads a separate value token that starts with '-' as another option",
+        )
     same_name = tuple(unit for unit in snapshot.units if unit.name == command.name)
     if any(
         unit.status is not UnitStatus.SUPERSEDED

@@ -34,6 +34,10 @@ frozen before implementation starts. Freezing records a pack-version label you c
 fails from then on if any of them change. Vouch cannot prove that the freeze came before the
 implementation, because that work is not recorded; keeping the order is up to your process.
 
+A unit name or version may not begin with `-`, because a CLI option reads a separate value token
+that starts with `-` as another option. `specify` refuses such a name or version; history a store
+already holds, or adopts through a fast-forward merge, is not re-checked.
+
 New stores require an effect declaration for bound packs. An empty list declares a transform
 with no effects; observations disclose a source and capture, and actions disclose a system and
 declared outcome. `show-effects --root .vouch` reports these declarations.
