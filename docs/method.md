@@ -10,8 +10,8 @@ is scarce.
 | Role | Who | Owns |
 |---|---|---|
 | Acceptance owner / planner | Claude (Opus 5.5, the main session) | plan, beads, decision records, **the pack**, adjudication of deviations, the final pass, publish, commit |
-| Implementer | GPT 6.1 Sol (T3 `delegate_task`: provider `codex`, model `gpt-6.1-sol`, `reasoningEffort: high`) | implementation against a frozen pack; raises deviations; owns and closes its implementation bead |
-| Reviewer | GPT 6 Astra (T3 `delegate_task`: provider `codex`, model `gpt-6-astra`) | reproduces defects in the uncommitted diff, ranked, with minimal fixes; novel attacks on the riskiest surface |
+| Implementer | GPT 6.2 Sol (T3 `delegate_task`: provider `codex`, model `gpt-6.2-sol`, `reasoningEffort: high`) | implementation against a frozen pack; raises deviations; owns and closes its implementation bead |
+| Reviewer | GPT 6.2 Astra (T3 `delegate_task`: provider `codex`, model `gpt-6.2-astra`) | reproduces defects in the uncommitted diff, ranked, with minimal fixes; novel attacks on the riskiest surface |
 | Decider | the user | contract-conflict deviations, D-numbered decisions, `git push`, merging pull requests, `bd sync` |
 
 The planner never implements a unit it wrote the pack for, the implementer never edits a pack,
@@ -63,7 +63,7 @@ Beads is the task list and `docs/usage-log.md` the cost ledger; nothing lives on
 ## 2. Implementation (Sol, T3 delegated task)
 
 Write the brief to `/tmp/codex_prompts/<unit>.md` (read-first list, hard rules, done file, bead
-id) and pass its text to one T3 `delegate_task`: provider `codex`, model `gpt-6.1-sol`, options
+id) and pass its text to one T3 `delegate_task`: provider `codex`, model `gpt-6.2-sol`, options
 `{"reasoningEffort": "high"}`, in this checkout. The planner commits. Every brief says:
 
 - the pack may not be edited; on a contradiction, stop on that requirement, write
@@ -110,7 +110,7 @@ The DONE file is not evidence.
 
 ## 5. Review (Astra, T3 delegated task, read-only)
 
-The brief (provider `codex`, model `gpt-6-astra`) lists defect classes in priority order: false
+The brief (provider `codex`, model `gpt-6.2-astra`) lists defect classes in priority order: false
 refusals, fail-opens, honesty of `NOT_CHECKED` rows, formal vacuity, projection and transport
 gaps, codec strictness. Then it asks for novel attacks on the riskiest surface, and ends:
 "Reproduce with a real snippet before reporting; write `<unit>_review.OUT.md` ranked by
