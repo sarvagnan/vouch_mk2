@@ -93,10 +93,13 @@ def _format_four_checkpoint_record(baseline: Snapshot) -> bytes:
     )
     document = json.loads(current)
     embedded = document["payload"]["baseline"]
-    assert embedded["state_format"] == 5
+    assert embedded["state_format"] == 6
     embedded["state_format"] = 4
     for head in embedded["evidence_heads"]:
         head.pop("anchor_run_id")
+    for unit in embedded["units"]:
+        unit.pop("previous_acceptance_pack_digest")
+        unit.pop("refreeze_green_required")
     historical = json.dumps(
         document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8") + b"\n"
@@ -132,7 +135,7 @@ def test_format_four_checkpoint_replays_after_store_upgrade(tmp_path: Path) -> N
 
     code, output = _run("upgrade", "--root", str(root))
     assert code == 0, output
-    assert json.loads((root / "state.json").read_bytes())["state_format"] == 5
+    assert json.loads((root / "state.json").read_bytes())["state_format"] == 6
     with Store.open(str(root), read_only=True) as store:
         snapshot = store.read_snapshot()
         result = next(
@@ -152,7 +155,7 @@ def test_event_record_refuses_unknown_newer_embedded_snapshot_format() -> None:
 
     with pytest.raises(
         DecodeError,
-        match=r"payload\.baseline\.state_format: format 6 .*newer vouch",
+        match=rf"payload\.baseline\.state_format: format {CURRENT_STATE_FORMAT + 1} .*newer vouch",
     ):
         decode_event_record(data)
 
@@ -188,7 +191,7 @@ def test_upgrade_refuses_state_format_below_high_water_mark_and_names_both_forma
 
     assert code == 2
     assert "state_format 3" in output
-    assert "high-water mark 5" in output
+    assert "high-water mark 6" in output
     assert "git history" in output
 
 
@@ -224,7 +227,7 @@ def test_state_format_high_water_mark_survives_event_log_removal(
     code, output = _run("upgrade", "--root", str(root))
     assert code == 2, output
     assert mark.read_bytes() == mark_before
-    assert "state_format 3" in output and "high-water mark 5" in output
+    assert "state_format 3" in output and "high-water mark 6" in output
 
 
 def test_event_digest_domain_never_aliases_other_artifact_kinds() -> None:

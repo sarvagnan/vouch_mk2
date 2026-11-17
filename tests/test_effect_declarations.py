@@ -337,7 +337,7 @@ def test_require_effects_is_recorded_and_one_way(tmp_path: Path) -> None:
     assert b'"effects_required":true' in encode_snapshot(_snapshot(root))
     _must("require-effects", "--root", root)  # idempotent, still required
     assert _snapshot(root).effects_required is True
-    assert CURRENT_STATE_FORMAT == 5
+    assert CURRENT_STATE_FORMAT == 6
     assert mk2.CMD_REQUIRE_EFFECTS == "require-effects"
     assert not [name for name in dir(mk2) if name.startswith("CMD_") and "EFFECT" in name and name != "CMD_REQUIRE_EFFECTS"]
 
@@ -571,7 +571,7 @@ def test_the_formal_model_covers_the_requirement_without_moving_other_universes(
     core = run.universe("core-v1")
     assert (core.state_count, core.transition_count) == (264_462, 1_381_350)
     history = run.universe("history-v1")
-    assert (history.state_count, history.transition_count) == (62_832, 219_976)
+    assert (history.state_count, history.transition_count) == (79_408, 281_976)
     tier = run.universe("tier-v1")
     assert (tier.state_count, tier.transition_count) == (246, 1_640)
     effects_universe = next(u for u in UNIVERSES if u.name == "effects-v1")

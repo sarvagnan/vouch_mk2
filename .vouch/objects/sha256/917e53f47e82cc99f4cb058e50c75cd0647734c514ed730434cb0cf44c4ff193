@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"refreeze-green@1","reason":"pack frozen and RED recorded; the bound acceptance tests fail until the implementation lands (D-36)"},"prev":"6340f55b876a519cd2fa2af90974452229a4779dd5174183b3eede22d0331f39","recorded_at":"2026-11-17T10:04:49+00:00","revision":977,"run_id":""}

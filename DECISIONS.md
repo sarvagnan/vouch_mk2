@@ -1472,6 +1472,11 @@ unit, `refreeze-green@1`. Amends D-17.
   implementation is unchanged: it changes D-17's digest rules and asks adopters to classify every
   data file. Accepting the gap as a residual: the pilot showed it lets an untested pack publish.
 
+- **Note (2026-11-17, owner, writing `refreeze-green@1`).** `mark-done` has no gate; only
+  `publish` (from `done-pending-acceptance` and from `re-verifying`) evaluates
+  `gate.dod.current-pack-green`. "Every later `mark-done` and `publish`" above therefore means
+  every later `publish`; `next` offers `publish` only when the gate would pass.
+
 ## D-37 — A merge skips an incoming clear of an exception ours already cleared (2026-11-15)
 
 **Status:** decided 2026-11-15 by the user. Settles `vouch_mk2-bd4.4.3` in one unit,
@@ -1536,3 +1541,26 @@ unit, `refreeze-green@1`. Amends D-17.
 - **Rejected.** Generation markers in the snapshot: a D-13 state-format upgrade for information the
   event log already holds. Clearing the rebind list at respecify: the snapshot would lose adaptations
   that evidence verification still reads.
+
+## D-40 — Deviation ids, release ids, pack versions and amendment versions may not begin with "-" (2026-11-17)
+
+**Status:** decided 2026-11-17 by the user. Settles `vouch_mk2-rkh` in one unit,
+`option-safe-labels@1`, run after D-36 to D-39.
+
+- **The finding** (Sol, implementing `option-safe-identifiers@1`). `decide()` accepts
+  `OpenDeviation` with a deviation id `-d`, `PrepareRelease` with a release id `-r`,
+  `FreezeAcceptance` with a pack version `-p` and `AmendDeviation` with an amendment version `-a`.
+  Only the bound form (`--deviation-id=-d`) can deliver such a value, and every later command that
+  passes it as a separate token exits 2. Deviation and release ids also appear as separate tokens
+  in the commands `next` suggests, so Vouch would suggest commands that cannot run (the D-35
+  defect).
+- **Decision.** `decide()` refuses each of the four when it begins with `-`, with D-35's refusal
+  code `identifier.leading-dash`, in the command that introduces it. With D-35 the rule is uniform:
+  no identifier or label an operator gives Vouch may begin with `-`. D-35's boundaries carry over:
+  history a store already holds, or adopts through a fast-forward merge or a raw `Store.commit`, is
+  not re-judged (D-33). The unit checks that mk2's store and the pilot's hold no such value.
+- **Rejected.** Fixing only deviation and release ids, the two that appear in suggested commands:
+  the rule would differ by identifier and the other two would still be stored and then unusable.
+  Recording the gap as won't-fix: Vouch would keep accepting values it cannot then use. Rendering
+  options as `--flag=value`: rejected in D-35 for the same reasons.
+

@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"refreeze-green@1","reason":"pack/3 frozen (DEV-rg-02, late-binding bypass); RED #3 recorded; the fix follows (D-36)"},"prev":"1905129c9f1fd92d5b519b6153c6fbf8e015e5ad1e39eea04495aa54b27e4f8a","recorded_at":"2026-11-17T11:22:47+00:00","revision":1020,"run_id":""}

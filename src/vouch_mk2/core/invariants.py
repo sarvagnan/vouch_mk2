@@ -76,8 +76,12 @@ def current_pack_evidence_is_green(snapshot: Snapshot, unit: Unit) -> bool:
     """Whether the exact unit's current pack has a RED→GREEN result still green.
 
     ``REFACTOR`` records preserve the preceding result; the fold maintains this
-    summary so the pure publication gate never needs artifact I/O.
+    summary so the pure publication gate never needs artifact I/O. A changed
+    re-freeze additionally needs an explicit GREEN recorded after it, or after
+    the bind-pack that bound it (D-36). Label-only evidence cannot qualify.
     """
+    if not unit.acceptance_test_set_digest:
+        return False
     head = snapshot.evidence_head_ref(unit.ref())
     if head is None:
         return False
@@ -91,6 +95,7 @@ def current_pack_evidence_is_green(snapshot: Snapshot, unit: Unit) -> bool:
     )
     return (
         summary is not None
+        and not unit.refreeze_green_required
         and summary.green
         and (summary.red_seen or unit.pack_binding == "rebound")
         and (
@@ -173,6 +178,21 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
             )
         digest = unit.acceptance_pack_digest
         test_set_digest = unit.acceptance_test_set_digest
+        previous_digest = unit.previous_acceptance_pack_digest
+        if previous_digest and (
+            len(previous_digest) != 64
+            or any(character not in "0123456789abcdef" for character in previous_digest)
+        ):
+            add(
+                "pack.previous-digest-invalid",
+                f"units[{index}].previous_acceptance_pack_digest must be empty or "
+                "64 lowercase hexadecimal characters",
+            )
+        if type(unit.refreeze_green_required) is not bool:
+            add(
+                "pack.refreeze-green-invalid",
+                f"units[{index}].refreeze_green_required must be boolean",
+            )
         if digest and (
             len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)

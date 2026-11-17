@@ -133,7 +133,9 @@ python3 vouch.lock publish --root .vouch --name greeter
 `publish` succeeds only if the definition-of-done gates pass: a recorded pack version,
 satisfied dependencies, no blocking deviations, and the evidence the tier requires. At
 `standard` and `high`, `gate.dod.current-pack-green` also requires RED then GREEN for the
-current pack, with green as the latest result. If a shared interface changes after publication,
+current pack, with green as the latest result. A re-freeze that changes any bound pack file needs a
+GREEN recorded after it or after the `bind-pack` that bound it; RED stays keyed to the test-set
+digest. If a shared interface changes after publication,
 `rebind-pack --reason …` updates the bound files without changing the label or evidence chain;
 checks then require a fresh GREEN.
 

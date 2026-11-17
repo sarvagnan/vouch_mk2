@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_refreeze_green.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"04c40e80866f5abc180ce26de4c38223ccec1c724b24e3fc7d2081b0be342132","parent":"GENESIS","recorded_at":"2026-11-17T10:04:48+00:00","sequence":1,"unit":{"name":"refreeze-green","version":"1"}}

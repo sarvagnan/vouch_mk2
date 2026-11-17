@@ -71,7 +71,7 @@ def test_state_format_4_upgrader_records_the_pre_log_gap(tmp_path: Path) -> None
     from vouch_mk2.store import ArtifactKind, Store
     from vouch_mk2.store.codec import CURRENT_STATE_FORMAT
 
-    assert CURRENT_STATE_FORMAT == 5
+    assert CURRENT_STATE_FORMAT == 6
     # A GENUINE legacy store: the owner-pinned canonical format-3 document, with no event
     # objects at all. (Downgrading a format-4 store instead would be the very re-baselining
     # path R8 refuses -- see the pack/2 amendment.)
@@ -183,6 +183,8 @@ def test_check_event_log_fails_when_replay_diverges_from_the_committed_snapshot(
             "acceptance_pack_version": "",
             "acceptance_pack_digest": "",
             "acceptance_test_set_digest": "",
+            "previous_acceptance_pack_digest": "",
+            "refreeze_green_required": False,
             "pack_history": [],
             "published_once": False,
         }

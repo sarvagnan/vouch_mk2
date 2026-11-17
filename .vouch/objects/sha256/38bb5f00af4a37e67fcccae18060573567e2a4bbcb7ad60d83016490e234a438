@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/pack-binding-1.spec.md","role":"test","sha256":"b94fa7909ea6e85d42396e800cdb397bf25afddb9df1bc142f80874c87335dfb","size":6351},{"path":"tests/test_pack_binding.py","role":"test","sha256":"7d1cfda29c8496c8b5abe729d09503dfda4fc4ab7516dc0975ba0004f1ae66bd","size":14508}],"pack_format":2}

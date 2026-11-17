@@ -114,6 +114,7 @@ from vouch_mk2.core.model import (
     DeviationStatus,
     EvidenceHead,
     EvidenceKind,
+    EvidenceOutcome,
     CiException,
     PackRebound,
     Release,
@@ -366,7 +367,9 @@ def _gate_current_pack_green(ctx: _GateContext) -> tuple[Violation, ...]:
             detail=(
                 f"{ctx.snapshot.tier.value} publication of unit "
                 f"{ctx.unit.ref().label()!r} requires RED followed by GREEN "
-                "for the current acceptance pack, with no later RED"
+                "for the current acceptance pack, with no later RED; a changed "
+                "re-freeze requires a GREEN recorded after the latest freeze "
+                "or after the bind-pack that bound it"
             ),
         ),
     )
@@ -691,7 +694,12 @@ def _transition_event(
         case Supersede():
             return UnitSuperseded(name=unit.name)
         case Respecify():
-            return UnitRespecified(name=unit.name, gate=record)
+            return UnitRespecified(
+                name=unit.name, gate=record,
+                previous_pack_digest=(
+                    unit.acceptance_pack_digest or unit.previous_acceptance_pack_digest
+                ),
+            )
         case BeginReverify():
             return ReverificationStarted(name=unit.name, gate=record)
         case _:
@@ -1693,6 +1701,17 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                     acceptance_pack_digest=pack_digest,
                     acceptance_test_set_digest=test_set_digest or pack_digest,
                     pack_binding="at-freeze" if pack_digest else "",
+                    previous_acceptance_pack_digest=(
+                        "" if pack_digest else unit.previous_acceptance_pack_digest
+                    ),
+                    refreeze_green_required=(
+                        unit.refreeze_green_required
+                        or bool(
+                            pack_digest
+                            and unit.previous_acceptance_pack_digest
+                            and pack_digest != unit.previous_acceptance_pack_digest
+                        )
+                    ),
                 ),
             )
         case AcceptancePackBound(
@@ -1709,6 +1728,14 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                     acceptance_pack_digest=pack_digest,
                     acceptance_test_set_digest=test_set_digest or pack_digest,
                     pack_binding="late",
+                    previous_acceptance_pack_digest="",
+                    refreeze_green_required=(
+                        unit.refreeze_green_required
+                        or bool(
+                            unit.previous_acceptance_pack_digest
+                            and pack_digest != unit.previous_acceptance_pack_digest
+                        )
+                    ),
                 ),
             )
         case AcceptancePackRebound(
@@ -1759,7 +1786,7 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
             units = _with_status(snapshot, name, UnitStatus.SUPERSEDED)
         case UnitReleaseBound(name=name):
             units = _with_status(snapshot, name, UnitStatus.RELEASE_BOUND)
-        case UnitRespecified(name=name):
+        case UnitRespecified(name=name, previous_pack_digest=previous_pack_digest):
             unit = _existing(snapshot, name)
             units = _with_unit(
                 units,
@@ -1770,6 +1797,7 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                     acceptance_pack_version="",
                     acceptance_pack_digest="",
                     acceptance_test_set_digest="",
+                    previous_acceptance_pack_digest=previous_pack_digest,
                     pack_history=(
                         unit.pack_history + (unit.acceptance_pack_version,)
                         if unit.acceptance_pack_version
@@ -1867,6 +1895,18 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                 anchor_run_id="" if prior is None else prior.anchor_run_id,
             )
             evidence_heads = _with_evidence_head(evidence_heads, changed)
+            unit = snapshot.unit_ref(recorded.unit)
+            if (
+                unit is not None
+                and unit.refreeze_green_required
+                and bool(unit.acceptance_test_set_digest)
+                and recorded.pack_digest == unit.acceptance_test_set_digest
+                and recorded.kind is EvidenceKind.GREEN
+                and recorded.outcome is EvidenceOutcome.TESTS_PASSED
+            ):
+                units = _with_unit(
+                    units, unit.name, replace(unit, refreeze_green_required=False)
+                )
         case AnchorAdvanced(unit_name=unit_name, unit_version=unit_version):
             ref = UnitRef(unit_name, unit_version)
             head = (
