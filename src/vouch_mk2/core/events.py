@@ -126,10 +126,12 @@ class UnitSuperseded:
 @dataclass(frozen=True, slots=True)
 class UnitRespecified:
     """Return to draft: the recorded acceptance pack version is cleared; a new
-    freeze must record a new one."""
+    freeze must record a new one. New records retain its inventory for D-36;
+    the empty legacy sentinel invents no comparison for historical replay."""
 
     name: str
     gate: GateRecord
+    previous_pack_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)

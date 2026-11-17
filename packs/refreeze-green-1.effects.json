@@ -1,1 +1,4 @@
-{"effects_format": 1, "effects": []}
+{"effects_format": 1, "effects": [
+  {"kind": "action", "name": "state-format-6", "system": "the project's Vouch store (state.json)", "outcome": "confirmed", "detail": "every snapshot write uses state format 6, whose units carry previous_acceptance_pack_digest and refreeze_green_required; a format-5 store is refused until upgrade rewrites it, adding both fields as empty and false without changing its revision or evidence"},
+  {"kind": "action", "name": "respecify-previous-digest", "system": "the project's Vouch store (its event log)", "outcome": "confirmed", "detail": "a new UnitRespecified event records, as previous_pack_digest, the inventory digest the respecify clears (or the one already retained); an older event without the field decodes as empty and sets no fresh-GREEN requirement"}
+]}

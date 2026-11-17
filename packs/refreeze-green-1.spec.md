@@ -3,7 +3,10 @@
 **Owner:** Claude (acceptance owner). **Implementer:** Sol, who may not edit this file,
 `tests/test_refreeze_green.py` or `packs/refreeze-green-1.effects.json`.
 **Decision:** D-36 and its note of 2026-11-17 (settles `vouch_mk2-bd4.4.5`, pilot finding 3).
-**Effects:** none. The change is a stricter publication gate and a sentence in the quickstart.
+**Effects:** two store actions, in `packs/refreeze-green-1.effects.json`: state format 6 and the
+previous inventory digest on new `UnitRespecified` events (D-31 note of 2026-11-15).
+**Pack/2** (DEV-rg-01): pack/1 declared no effects, but the mechanism the ground rules allow, and
+the one chosen, changes what the store writes. The tests are unchanged.
 
 ## Promise
 
@@ -59,10 +62,14 @@ identical bytes keeps the earlier GREEN, and RED stays keyed to the test-set dig
   RED. `rebind-pack` and its fresh-GREEN rule (D-14, D-31) are unchanged.
 - Units already published or release-bound are not re-judged: `check` keeps its verdicts on them,
   including mk2's own store, which the dogfood tests check.
-- Prefer no event or state format change. If the snapshot must record where the latest freeze sits
-  in the evidence chain, that is a state-format bump under D-13: the format number, an upgrader
-  that invents no state (a unit upgraded from the old format keeps the old rule until it is next
-  re-frozen), a fixture, and the canonical-bytes golden. The owner upgrades mk2's own store at the
-  final pass. Report any change in the formal universes' sizes.
+- The snapshot must keep the previous inventory digest across a respecify, so this is a
+  state-format bump under D-13 (format 6): the format number, an upgrader that invents no state (a
+  unit upgraded from format 5 has no retained previous digest, so its next re-freeze sets no
+  requirement), a fixture, and the canonical-bytes golden. New `UnitRespecified` events carry the
+  digest they clear; older events decode without it. The owner upgrades mk2's own store and adapts,
+  rebinds and re-GREENs the published units whose frozen tests pin format 5, the format-5 upgrader
+  steps or golden, or the history-v1 size. `evidence-semantics@1` pins the D-17 behavior D-36
+  reverses (a spec-only amendment publishing on the old GREEN), so its test is adapted the same
+  way, under D-36.
 - Whether a `refactor` record after the re-freeze satisfies the rule is not pinned. `mark-done`
   stays ungated.

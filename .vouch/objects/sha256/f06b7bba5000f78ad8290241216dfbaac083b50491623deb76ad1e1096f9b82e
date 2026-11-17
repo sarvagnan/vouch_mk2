@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitInvalidated","pack_digest":"","payload":{"name":"refreeze-green","trigger_deviation_id":"DEV-rg-01"},"prev":"350500a1181c13a8b9eebbc8f6a2df101ef2c59ee3de46e243643b27aad8ff45","recorded_at":"2026-11-17T10:53:40+00:00","revision":982,"run_id":""}

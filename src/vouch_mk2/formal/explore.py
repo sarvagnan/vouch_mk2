@@ -84,6 +84,8 @@ def state_fingerprint(snapshot: Snapshot) -> str:
             unit.acceptance_test_set_digest,
             tuple(unit.pack_history),
             unit.pack_binding,
+            unit.previous_acceptance_pack_digest,
+            unit.refreeze_green_required,
             tuple(
                 (
                     rebound.old_inventory_digest,

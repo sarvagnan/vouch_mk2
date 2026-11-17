@@ -278,6 +278,8 @@ def test_prose_only_amendment_preserves_current_pack_evidence(tmp_path: Path) ->
     assert _freeze_roles(project, root, "u", "u-pack/2")[0] == 0
     assert _run("mark-ready", "--root", root, "--name", "u")[0] == 0
     assert _run("start", "--root", root, "--name", "u")[0] == 0
+    # D-36 (refreeze-green@1): the changed re-freeze needs a GREEN recorded after it; RED is kept.
+    assert _evidence(root, "u@v1", "green", OK)[0] == 0
     assert _run("advance-anchor", "--root", root, "--unit-name", "u")[0] == 0
     assert _run("mark-done", "--root", root, "--name", "u")[0] == 0
     code, out = _run("publish", "--root", root, "--name", "u")

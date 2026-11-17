@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"refreeze-green@1","reason":"pack/2 frozen (DEV-rg-01); RED #1 stands for the unchanged test set; GREEN follows the owner rebinds (D-36)"},"prev":"b031917588a88f844e1b59f41501921bafa150f8edf3f0695d731aef462363a6","recorded_at":"2026-11-17T10:53:40+00:00","revision":988,"run_id":""}

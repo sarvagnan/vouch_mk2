@@ -177,6 +177,10 @@ class Unit:
     pack_history: tuple[str, ...] = ()
     pack_binding: str = ""
     rebound_history: tuple[PackRebound, ...] = ()
+    # Retained across respecify, consumed by freeze; empty for legacy history.
+    previous_acceptance_pack_digest: str = ""
+    # A changed re-freeze sets this until an explicit current-pack GREEN is folded.
+    refreeze_green_required: bool = False
 
     def __post_init__(self) -> None:
         # Format 2 predates the provenance spelling in the owner-pinned golden.

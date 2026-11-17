@@ -104,7 +104,8 @@ At `standard` and `high`, `gate.dod.current-pack-green` refuses publication unle
 pack's test-set digest has RED then GREEN and the latest evidence for it is green. A later
 refactor keeps that result; a later RED breaks it. Legacy pack format 1 uses the whole inventory
 digest. Evidence from before D-17 has no pack digest; checks name it and never count it as
-current-pack GREEN.
+current-pack GREEN. A re-freeze that changes any bound pack file also needs a GREEN recorded
+after it; RED stays keyed to the test-set digest. Identical-byte re-freezes keep earlier evidence.
 
 The CLI validates the exact command descriptor before opening the store or starting the child,
 and refuses an invalid one without running it. `--redact-arg INDEX` (repeatable, before `--`)

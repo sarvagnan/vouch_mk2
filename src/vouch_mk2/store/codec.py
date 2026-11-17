@@ -73,7 +73,7 @@ from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
 
-CURRENT_STATE_FORMAT = 5
+CURRENT_STATE_FORMAT = 6
 CURRENT_EVIDENCE_FORMAT = 2
 
 
@@ -245,6 +245,8 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
                 "acceptance_pack_version": unit.acceptance_pack_version,
                 "acceptance_pack_digest": unit.acceptance_pack_digest,
                 "acceptance_test_set_digest": unit.acceptance_test_set_digest,
+                "previous_acceptance_pack_digest": unit.previous_acceptance_pack_digest,
+                "refreeze_green_required": unit.refreeze_green_required,
                 "depends_on": list(unit.depends_on),
                 "name": unit.name,
                 "pack_history": list(unit.pack_history),
@@ -810,6 +812,8 @@ _UNIT_FIELDS = frozenset(
         "acceptance_test_set_digest",
         "pack_history",
         "published_once",
+        "previous_acceptance_pack_digest",
+        "refreeze_green_required",
     }
 )
 _UNIT_OPTIONAL_FIELDS = frozenset({"pack_binding", "rebound_history"})
@@ -1129,6 +1133,17 @@ def _decode_event_value(value: object, annotation: object, path: str) -> object:
                 obj = {**obj, "unit_version": ""}
             elif _string(obj["unit_version"], _child(path, "unit_version")) == "":
                 raise DecodeError(f"{_child(path, 'unit_version')}: must be non-empty")
+        elif annotation is event_module.UnitRespecified:
+            # Pre-D-36 records did not retain the inventory across respecify.
+            obj = _fields(
+                value, path, names - {"previous_pack_digest"},
+                frozenset({"previous_pack_digest"}),
+            )
+            obj = {"previous_pack_digest": "", **obj}
+            _digest(
+                obj["previous_pack_digest"],
+                _child(path, "previous_pack_digest"), allow_empty=True,
+            )
         else:
             obj = _fields(value, path, names)
         return annotation(
@@ -1253,6 +1268,13 @@ def _decode_unit(value: object, path: str) -> Unit:
         ),
         acceptance_pack_digest=digest,
         acceptance_test_set_digest=test_set_digest,
+        previous_acceptance_pack_digest=_digest(
+            obj["previous_acceptance_pack_digest"],
+            _child(path, "previous_acceptance_pack_digest"), allow_empty=True,
+        ),
+        refreeze_green_required=_boolean(
+            obj["refreeze_green_required"], _child(path, "refreeze_green_required"),
+        ),
         published_once=_boolean(
             obj["published_once"], _child(path, "published_once")
         ),

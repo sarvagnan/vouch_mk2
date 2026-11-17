@@ -187,12 +187,32 @@ def _upgrade_4_to_5(document: StateDocument) -> StateDocument:
     return upgraded
 
 
+def _upgrade_5_to_6(document: StateDocument) -> StateDocument:
+    """Do not invent a previous inventory or a fresh-GREEN obligation."""
+    upgraded = dict(document)
+    raw_units = document.get("units")
+    if type(raw_units) is list:
+        units: list[object] = []
+        for raw_unit in cast(list[object], raw_units):
+            if type(raw_unit) is not dict:
+                units.append(raw_unit)
+                continue
+            copied = dict(cast(dict[str, object], raw_unit))
+            copied["previous_acceptance_pack_digest"] = ""
+            copied["refreeze_green_required"] = False
+            units.append(copied)
+        upgraded["units"] = units
+    upgraded["state_format"] = 6
+    return upgraded
+
+
 UPGRADERS: dict[int, Upgrader] = {
     0: _upgrade_0_to_1,
     1: _upgrade_1_to_2,
     2: _upgrade_2_to_3,
     3: _upgrade_3_to_4,
     4: _upgrade_4_to_5,
+    5: _upgrade_5_to_6,
 }
 
 
