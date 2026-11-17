@@ -198,8 +198,13 @@
     },
     {
       "key": "D-39",
-      "bytes": 1814,
-      "sha256": "323541b15f0b40607acca99c547374a70beb51f5157efbabe091b87d639a22e9"
+      "bytes": 1815,
+      "sha256": "d238a0dcbbe0660cba1361688a4327ff1ab656be6d3af38cd3600255a309a96f"
+    },
+    {
+      "key": "D-40",
+      "bytes": 1666,
+      "sha256": "9acbad14daeafdeef357ae210c174ba6a666feb4d805d20d735feb52341c8d35"
     }
   ]
 }
