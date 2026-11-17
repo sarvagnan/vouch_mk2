@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","pack_digest":"","payload":{"deviation_id":"DEV-rg-02","deviation_type":"pack-defect","unit":{"name":"refreeze-green","version":"1"}},"prev":"690bcff417a57d4e321f7b03ead3bb531c53179f32b124cca6c6c8f81ac0240f","recorded_at":"2026-11-17T11:22:46+00:00","revision":1011,"run_id":""}

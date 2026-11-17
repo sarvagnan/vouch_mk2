@@ -62,12 +62,17 @@ def _write_pack(project: Path, spec: str, test_body: str) -> None:
     (project / "tests" / "t.py").write_text(f"def test_x():\n    {test_body}\n")
 
 
-def _freeze(project: Path, root: str, pack_version: str) -> None:
-    _must(
-        "freeze", "--root", root, "--name", "u", "--pack-version", pack_version,
+def _freeze(project: Path, root: str, pack_version: str, *, late: bool = False) -> None:
+    """Freeze with the pack bound, or (``late``) label-only and then bound with ``bind-pack``."""
+    files = (
         "--project", str(project), "--pack-file", "packs/u.spec.md",
         "--pack-test-file", "tests/t.py", "--pack-effects-file", "packs/u.effects.json",
     )
+    if late:
+        _must("freeze", "--root", root, "--name", "u", "--pack-version", pack_version)
+        _must("bind-pack", "--root", root, "--name", "u", *files)
+    else:
+        _must("freeze", "--root", root, "--name", "u", "--pack-version", pack_version, *files)
     _must("mark-ready", "--root", root, "--name", "u")
     _must("start", "--root", root, "--name", "u")
 
@@ -76,11 +81,14 @@ def _evidence(root: str, kind: str, argv: list[str]) -> None:
     _must("record-evidence", "--root", root, "--unit", "u@v1", "--kind", kind, "--", *argv)
 
 
-def _refrozen(tmp_path: Path, spec: str, test_body: str) -> tuple[Path, str]:
+def _refrozen(
+    tmp_path: Path, spec: str, test_body: str, *, late: bool = False
+) -> tuple[Path, str]:
     """u@v1 frozen as u-pack/1, RED then GREEN, done; then amended and re-frozen as u-pack/2.
 
-    The re-freeze binds ``spec`` and ``test_body``; no evidence is recorded after it, and the
-    unit is marked done again, so the next step is ``publish``.
+    The re-freeze binds ``spec`` and ``test_body`` (``late``: label-only, then ``bind-pack``); no
+    evidence is recorded after it, and the unit is marked done again, so the next step is
+    ``publish``.
     """
     project = tmp_path / "proj"
     project.mkdir()
@@ -104,7 +112,7 @@ def _refrozen(tmp_path: Path, spec: str, test_body: str) -> tuple[Path, str]:
     )
     _must("close-deviation", "--root", root, "--deviation-id", "DEV-1")
     _must("respecify", "--root", root, "--name", "u")
-    _freeze(project, root, "u-pack/2")
+    _freeze(project, root, "u-pack/2", late=late)
     _must("mark-done", "--root", root, "--name", "u")
     return project, root
 
@@ -162,6 +170,36 @@ def test_a_refreeze_that_changes_the_tests_still_needs_red_then_green(tmp_path: 
     assert code == 2, output
     _evidence(root, "red", FAIL)
     _evidence(root, "green", OK)
+    _must("publish", "--root", root, "--name", "u")
+    assert _status(root) is UnitStatus.PUBLISHED
+
+
+def test_a_label_only_refreeze_bound_late_to_changed_bytes_needs_a_fresh_green(
+    tmp_path: Path,
+) -> None:
+    """R6 (pack/3, DEV-rg-02)."""
+    _project, root = _refrozen(
+        tmp_path, "# u acceptance pack\n\nAmended: the vectors changed.\n", "assert True", late=True
+    )
+    before = _snapshot(root)
+    assert not _publish_offered(root)
+    code, output = _run("publish", "--root", root, "--name", "u")
+    assert code == 2, output
+    assert re.findall(r"\bgate\.[a-z.-]+", output) == [CODE], output
+    assert DETAIL in " ".join(output.split()), output
+    assert _snapshot(root) == before
+    _evidence(root, "green", OK)
+    assert _publish_offered(root)
+    _must("publish", "--root", root, "--name", "u")
+    assert _status(root) is UnitStatus.PUBLISHED
+
+
+def test_a_label_only_refreeze_bound_late_to_identical_bytes_keeps_the_earlier_green(
+    tmp_path: Path,
+) -> None:
+    """R7 (pack/3, DEV-rg-02). # guard:"""
+    _project, root = _refrozen(tmp_path, "# u acceptance pack\n", "assert True", late=True)
+    assert _publish_offered(root)
     _must("publish", "--root", root, "--name", "u")
     assert _status(root) is UnitStatus.PUBLISHED
 

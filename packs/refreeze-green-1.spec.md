@@ -7,11 +7,13 @@
 previous inventory digest on new `UnitRespecified` events (D-31 note of 2026-11-15).
 **Pack/2** (DEV-rg-01): pack/1 declared no effects, but the mechanism the ground rules allow, and
 the one chosen, changes what the store writes. The tests are unchanged.
+**Pack/3** (DEV-rg-02, Astra's review): pack/2 did not cover a label-only re-freeze whose pack is
+bound later with `bind-pack`, which published on the old GREEN. R6 and R7 add that path.
 
 ## Promise
 
-When a unit is re-frozen with a pack whose inventory digest differs from its previous freeze,
-`publish` is refused with `gate.dod.current-pack-green` until a GREEN for the current pack is
+When a unit is re-frozen with a pack whose inventory digest differs from its previous bound
+inventory, whether the re-freeze binds the pack or a later `bind-pack` does, `publish` is refused with `gate.dod.current-pack-green` until a GREEN for the current pack is
 recorded after that re-freeze, and `next` does not offer `publish` before then. A re-freeze of
 identical bytes keeps the earlier GREEN, and RED stays keyed to the test-set digest (D-17).
 
@@ -49,12 +51,21 @@ identical bytes keeps the earlier GREEN, and RED stays keyed to the test-set dig
   `test_quickstart_states_that_a_refreeze_needs_a_fresh_green`. Matching ignores runs of
   whitespace. `docs/quickstart.md` contains `A re-freeze that changes any bound pack file needs a
   GREEN recorded after it`.
+- **R6 — Binding late does not avoid it.** `test_a_label_only_refreeze_bound_late_to_changed_bytes_needs_a_fresh_green`.
+  The re-freeze is label-only and `bind-pack` then binds a changed `packs/u.spec.md`. `next`
+  offers no `publish`; `publish` exits 2 with only `gate.dod.current-pack-green`, its output
+  contains `after the latest freeze`, and the snapshot is unchanged. After one passing `green`,
+  `next` offers `publish` and it succeeds.
+- **R7 — Late binding of identical bytes keeps the earlier GREEN.** `# guard:`
+  `test_a_label_only_refreeze_bound_late_to_identical_bytes_keeps_the_earlier_green`. The same
+  label-only re-freeze then `bind-pack` of unchanged bytes: `next` offers `publish` and it succeeds
+  with no new evidence.
 
 ## Ground rules
 
-- "Changes the inventory digest" compares the re-freeze's inventory digest with the one the unit
-  had at its previous freeze, before the respecify cleared it. A unit's first freeze is unaffected.
-  Effects files are part of the inventory.
+- "Changes the inventory digest" compares the inventory a re-freeze or a later `bind-pack`
+  installs with the unit's last bound inventory, which a respecify or a label-only freeze does not
+  erase. A unit's first binding is unaffected. Effects files are part of the inventory.
 - The rule lives in `gate.dod.current-pack-green` and in the predicate `next` uses for it
   (`current_pack_evidence_is_green` today), so the two cannot disagree. The gate's refusal detail
   names the reason. The IR obligation's description states the new requirement.
