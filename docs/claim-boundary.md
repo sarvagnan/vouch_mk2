@@ -200,6 +200,11 @@ companion the replay no longer produces is not written. A replay must act on the
 THEIRS, and an anchor needs the evidence head THEIRS promoted. Unrelated histories are refused,
 and one refused replay refuses the whole merge without writing OURS.
 
+A replayed merge record names the receiving-chain record where its replayed block begins
+as its OURS head. It keeps the original THEIRS head. If replay filtered out the original
+boundary, the record names the receiving head at that point in the replay. A merge that
+needs an unlocatable boundary from an old record refuses and names that record's digest.
+
 Success proves only that the merged log replays to the merged snapshot. It does not prove that
 the branches were compatible in any wider sense, that their intentions agreed, that their
 claims were true, or that the actor was verified.

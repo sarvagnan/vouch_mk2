@@ -288,6 +288,10 @@ evidence head on OURS differs from the one THEIRS promoted, is refused. Historie
 record are refused (`merge.unrelated-histories`), and one refused replay is a `merge.conflict`
 that leaves OURS unchanged.
 
+A replayed merge record names, as its OURS head, the record on the receiving chain
+where its replayed block begins. It keeps the original THEIRS head. If replay filtered
+out the original boundary, the record names the receiving head at that point in the replay.
+
 An incoming clear of an open-in-CI exception that OURS has already cleared is skipped
 without writing a record, provided the clear would resolve to the same exact unit reference.
 The merge reports how many redundant clears it skipped; THEIRS' later commands still replay,

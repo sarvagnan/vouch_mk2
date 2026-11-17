@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"nested-merge-boundary@1","reason":"pack/2 frozen (DEV-nmb-01); RED #2 recorded against the pre-change code; GREEN follows (D-38)"},"prev":"293f4876d7ab65b691f842cff3654a97e00229b4dd070b361bc13a6425268e30","recorded_at":"2026-11-17T19:19:27+00:00","revision":1082,"run_id":""}

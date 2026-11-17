@@ -141,18 +141,18 @@ def test_a_replayed_merge_record_names_a_boundary_on_the_receiving_chain(tmp_pat
     assert marker.record.actor == source[0].record.actor
 
 
-def test_later_work_and_a_fourth_store_merge_without_duplicates(tmp_path: Path) -> None:
-    """R3."""
-    a, b, c, d = _stores(tmp_path, "A", "B", "C", "D")
+def test_later_work_on_every_store_merges_again_without_duplicates(tmp_path: Path) -> None:
+    """R3 (pack/2, DEV-nmb-01)."""
+    a, b, c = _stores(tmp_path, "A", "B", "C")
     for ours, theirs in ((a, b), (c, a), (b, c)):
         assert _merge(ours, theirs)[0] == 0, (ours.name, theirs.name)
-    _cmd(a, "specify", "--name", "a2", "--version", "1")
-    _cmd(c, "specify", "--name", "c2", "--version", "1")
-    for ours, theirs in ((c, a), (d, c), (b, d), (a, b)):
+    for root in (a, b, c):
+        _cmd(root, "specify", "--name", f"{root.name.lower()}2", "--version", "1")
+    for ours, theirs in ((c, a), (b, c), (a, b), (c, b)):
         code, output = _merge(ours, theirs)
         assert code == 0, (ours.name, theirs.name, output)
-    expected = ["a2@1", "a@1", "b@1", "c2@1", "c@1", "d@1", "shared@1"]
-    for root in (a, b):
+    expected = ["a2@1", "a@1", "b2@1", "b@1", "c2@1", "c@1", "shared@1"]
+    for root in (a, b, c):
         assert _units(root) == expected, root.name
         kinds = [type(item.record.folded_event).__name__ for item in _chain(root)]
         assert kinds.count("UnitSpecified") == len(expected), (root.name, kinds)
