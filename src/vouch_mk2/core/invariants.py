@@ -77,8 +77,11 @@ def current_pack_evidence_is_green(snapshot: Snapshot, unit: Unit) -> bool:
 
     ``REFACTOR`` records preserve the preceding result; the fold maintains this
     summary so the pure publication gate never needs artifact I/O. A changed
-    re-freeze additionally needs an explicit GREEN recorded after it (D-36).
+    re-freeze additionally needs an explicit GREEN recorded after it, or after
+    the bind-pack that bound it (D-36). Label-only evidence cannot qualify.
     """
+    if not unit.acceptance_test_set_digest:
+        return False
     head = snapshot.evidence_head_ref(unit.ref())
     if head is None:
         return False

@@ -448,7 +448,8 @@ _OBLIGATIONS = (
         description=(
             "At standard and high tier, the current acceptance pack has a RED "
             "followed by GREEN and no later RED regression; a re-freeze that "
-            "changes the inventory requires a GREEN recorded after the latest freeze."
+            "changes the inventory requires a GREEN recorded after the latest freeze "
+            "or after the bind-pack that bound it."
         ),
     ),
     Obligation(

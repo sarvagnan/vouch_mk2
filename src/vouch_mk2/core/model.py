@@ -177,7 +177,8 @@ class Unit:
     pack_history: tuple[str, ...] = ()
     pack_binding: str = ""
     rebound_history: tuple[PackRebound, ...] = ()
-    # Retained across respecify, consumed by freeze; empty for legacy history.
+    # Retained across respecify and label-only freeze; consumed when an inventory
+    # is installed by freeze or bind-pack. Empty for legacy history.
     previous_acceptance_pack_digest: str = ""
     # A changed re-freeze sets this until an explicit current-pack GREEN is folded.
     refreeze_green_required: bool = False

@@ -497,8 +497,9 @@ def test_history_v1_witnesses_claiming_a_superseded_versions_head_without_shrink
         for _fingerprint, snapshot in history.relation.representatives
     )
     # Coverage gauge: the seeded head can only double the relation; nothing else may move.
-    # refreeze-green@1 (D-36) adds 2,368 states that retain a respecified unit's inventory.
-    assert 31_416 < history.state_count <= 62_832 + 2_368
+    # refreeze-green@1 (D-36) adds 16,576 states that retain a unit's last bound inventory
+    # across respecify and label-only freeze.
+    assert 31_416 < history.state_count <= 62_832 + 16_576
     assert 94_280 < history.transition_count
     core = run.universe("core-v1")
     assert (core.state_count, core.transition_count) == (264_462, 1_381_350)

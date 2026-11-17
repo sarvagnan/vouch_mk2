@@ -571,7 +571,7 @@ def test_the_formal_model_covers_the_requirement_without_moving_other_universes(
     core = run.universe("core-v1")
     assert (core.state_count, core.transition_count) == (264_462, 1_381_350)
     history = run.universe("history-v1")
-    assert (history.state_count, history.transition_count) == (65_200, 227_480)
+    assert (history.state_count, history.transition_count) == (79_408, 281_976)
     tier = run.universe("tier-v1")
     assert (tier.state_count, tier.transition_count) == (246, 1_640)
     effects_universe = next(u for u in UNIVERSES if u.name == "effects-v1")

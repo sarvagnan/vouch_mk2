@@ -368,7 +368,8 @@ def _gate_current_pack_green(ctx: _GateContext) -> tuple[Violation, ...]:
                 f"{ctx.snapshot.tier.value} publication of unit "
                 f"{ctx.unit.ref().label()!r} requires RED followed by GREEN "
                 "for the current acceptance pack, with no later RED; a changed "
-                "re-freeze requires a GREEN recorded after the latest freeze"
+                "re-freeze requires a GREEN recorded after the latest freeze "
+                "or after the bind-pack that bound it"
             ),
         ),
     )
@@ -1700,7 +1701,9 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                     acceptance_pack_digest=pack_digest,
                     acceptance_test_set_digest=test_set_digest or pack_digest,
                     pack_binding="at-freeze" if pack_digest else "",
-                    previous_acceptance_pack_digest="",
+                    previous_acceptance_pack_digest=(
+                        "" if pack_digest else unit.previous_acceptance_pack_digest
+                    ),
                     refreeze_green_required=(
                         unit.refreeze_green_required
                         or bool(
@@ -1725,6 +1728,14 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                     acceptance_pack_digest=pack_digest,
                     acceptance_test_set_digest=test_set_digest or pack_digest,
                     pack_binding="late",
+                    previous_acceptance_pack_digest="",
+                    refreeze_green_required=(
+                        unit.refreeze_green_required
+                        or bool(
+                            unit.previous_acceptance_pack_digest
+                            and pack_digest != unit.previous_acceptance_pack_digest
+                        )
+                    ),
                 ),
             )
         case AcceptancePackRebound(
@@ -1888,6 +1899,7 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
             if (
                 unit is not None
                 and unit.refreeze_green_required
+                and bool(unit.acceptance_test_set_digest)
                 and recorded.pack_digest == unit.acceptance_test_set_digest
                 and recorded.kind is EvidenceKind.GREEN
                 and recorded.outcome is EvidenceOutcome.TESTS_PASSED
