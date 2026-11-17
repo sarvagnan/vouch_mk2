@@ -5,6 +5,10 @@
 **Decision:** D-37 (settles `vouch_mk2-bd4.4.3`). Amends D-25 for merge replay only.
 **Effects:** one store action, in `packs/merge-redundant-clear-1.effects.json`: a replayed merge
 writes no record for a redundant incoming clear and reports it (D-31 note of 2026-11-15).
+**Pack/2** (DEV-mrc-01): pack/1's `_event_kinds` helper read the `GENESIS` sentinel as an object,
+and R2 called `replayed_records` the records written from THEIRS, which conflicts with the
+existing counter's meaning (THEIRS' source records replayed, D-33 companions included) and with
+unchanged output when nothing is skipped.
 
 ## Promise
 
@@ -32,8 +36,8 @@ before. A clear that would land on another unit version is still a `merge.confli
   reason, OURS' chain holds exactly one `OpenInCiCleared`, and its last three events are OURS'
   clear, the replayed `OpenInCiMarked` and the `MergeRecorded`.
 - **R2 — JSON reports it.** `test_json_merge_reports_the_skipped_clear`. The same merge with
-  `--json` prints `accepted` true, `mode` `replayed`, `replayed_records` 1 (records written from
-  THEIRS; the skipped clear is not counted) and `skipped_records` 1.
+  `--json` prints `accepted` true, `mode` `replayed`, `replayed_records` 1 (THEIRS' source records
+  replayed, as before; the skipped clear is not counted) and `skipped_records` 1.
 - **R3 — Both sides only clear.** `test_a_clear_on_both_sides_merges_with_no_exception`. THEIRS
   only clears. The merge exits 0, reports the skip, leaves no exception, and OURS' chain holds
   exactly one `OpenInCiCleared`.

@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitInvalidated","pack_digest":"","payload":{"name":"merge-redundant-clear","trigger_deviation_id":"DEV-mrc-01"},"prev":"e6d9d36c8cf6b2e1343afbec77181ecb5cb22b846ccb9333674210e4ea37f5b0","recorded_at":"2026-11-17T16:30:54+00:00","revision":1053,"run_id":""}

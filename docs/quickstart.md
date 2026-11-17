@@ -288,6 +288,11 @@ evidence head on OURS differs from the one THEIRS promoted, is refused. Historie
 record are refused (`merge.unrelated-histories`), and one refused replay is a `merge.conflict`
 that leaves OURS unchanged.
 
+An incoming clear of an open-in-CI exception that OURS has already cleared is skipped
+without writing a record, provided the clear would resolve to the same exact unit reference.
+The merge reports how many redundant clears it skipped; THEIRS' later commands still replay,
+so a later re-mark leaves the exception open.
+
 #### Recovering from a Git merge or rebase conflict
 
 When Git reports unmerged paths under `.vouch`, recover from the index stages:

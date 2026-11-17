@@ -189,6 +189,10 @@ protection are organizational governance and trust-root concerns.
 comparing snapshots, and needs a shared event-record ancestor. An already-merged THEIRS changes
 nothing, and an ancestor OURS fast-forwards. Otherwise each divergent THEIRS command is replayed
 through `decide()` against the evolving OURS state, and a final merge record names both heads.
+The exception is an incoming open-in-CI clear whose exact recorded unit reference has no
+exception on the evolving OURS state: if the clear would resolve to that same reference, it is
+skipped without writing a record and reported as skipped. A clear that resolves to another
+unit version is still refused.
 The replayed records keep their source records' actor, run claim and recorded time, matched by
 event kind and subject, and the merge record carries the merge's actor claim. A companion record
 the replay generates with no matching THEIRS record carries the merge's claims too, and a THEIRS

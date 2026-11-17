@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"merge-redundant-clear@1","reason":"pack/2 frozen (DEV-mrc-01); RED #2 recorded against the pre-change code; GREEN follows (D-37)"},"prev":"b9711bcda6e7d4a1d2015654c1b30a736a15f5c04c5b966a681f549060579fe5","recorded_at":"2026-11-17T16:30:55+00:00","revision":1059,"run_id":""}

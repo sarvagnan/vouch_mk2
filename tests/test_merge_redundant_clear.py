@@ -77,7 +77,7 @@ def _event_kinds(project: Path) -> list[str]:
     kinds: list[str] = []
     with Store.open(_store(project), read_only=True) as store:
         digest = store.read_snapshot().event_head
-        while digest:
+        while digest and digest != "GENESIS":
             record = decode_event_record(store.get_object(ArtifactKind.EVENT, digest))
             kinds.append(type(record.folded_event).__name__)
             digest = record.prev

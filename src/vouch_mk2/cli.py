@@ -1186,6 +1186,7 @@ def _merge_handler(namespace: argparse.Namespace) -> int:
                     "accepted": True,
                     "mode": result.mode,
                     "replayed_records": result.replayed_records,
+                    "skipped_records": result.skipped_records,
                     "revision": result.snapshot.revision,
                 },
                 sort_keys=True,
@@ -1195,6 +1196,10 @@ def _merge_handler(namespace: argparse.Namespace) -> int:
         print(
             f"merge: {result.mode}; revision {result.snapshot.revision}; "
             f"replayed {result.replayed_records} source record(s)"
+            + (
+                f"; skipped {result.skipped_records} redundant open-in-CI clear(s)"
+                if result.skipped_records else ""
+            )
         )
     return 0
 
@@ -1210,6 +1215,10 @@ def _merge_git_stages_handler(namespace: argparse.Namespace) -> int:
     print(
         f"merge-git-stages: {result.mode}; revision {result.snapshot.revision}; "
         f"replayed {result.replayed_records} source record(s)"
+        + (
+            f"; skipped {result.skipped_records} redundant open-in-CI clear(s)"
+            if result.skipped_records else ""
+        )
     )
     next_step = shlex.join(("git", "add", "--", namespace.root))
     print(f"review the resolved store, then run: {next_step}")
