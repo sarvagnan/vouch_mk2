@@ -1658,3 +1658,9 @@ unit, `refreeze-green@1`. Amends D-17.
   or forges a whole consistent history, is outside what this rule detects and is not a defect of it;
   a locally disprovable `origin` is.
 
+- **Note (2026-11-18, owner, after Astra's round-3 re-check): position is part of the bound.** A
+  `satisfied` entry that resolves on a chain must name a record at or before the `theirs_head` of the
+  merge that lists it (the source history that merge accounted for), and a resolving `origin` must name a
+  record at or before the `theirs_head` of the merge block that holds the copy. A resolving entry
+  authored later than that head is locally disprovable and refuses like any other.
+
