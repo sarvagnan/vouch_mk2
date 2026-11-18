@@ -79,6 +79,7 @@ def _format_four_checkpoint_record(baseline: Snapshot) -> bytes:
     """Encode the historical bytes written before state format 5 existed."""
     current = encode_event_record(
         EventRecord(
+            event_format=1,
             folded_event=PreLogHistoryRecorded(
                 description="pre-format-5 checkpoint",
                 baseline=baseline,
@@ -93,7 +94,7 @@ def _format_four_checkpoint_record(baseline: Snapshot) -> bytes:
     )
     document = json.loads(current)
     embedded = document["payload"]["baseline"]
-    assert embedded["state_format"] == 6
+    assert embedded["state_format"] == CURRENT_STATE_FORMAT
     embedded["state_format"] = 4
     for head in embedded["evidence_heads"]:
         head.pop("anchor_run_id")
@@ -135,7 +136,7 @@ def test_format_four_checkpoint_replays_after_store_upgrade(tmp_path: Path) -> N
 
     code, output = _run("upgrade", "--root", str(root))
     assert code == 0, output
-    assert json.loads((root / "state.json").read_bytes())["state_format"] == 6
+    assert json.loads((root / "state.json").read_bytes())["state_format"] == CURRENT_STATE_FORMAT
     with Store.open(str(root), read_only=True) as store:
         snapshot = store.read_snapshot()
         result = next(
@@ -191,7 +192,7 @@ def test_upgrade_refuses_state_format_below_high_water_mark_and_names_both_forma
 
     assert code == 2
     assert "state_format 3" in output
-    assert "high-water mark 6" in output
+    assert f"high-water mark {CURRENT_STATE_FORMAT}" in output
     assert "git history" in output
 
 
@@ -227,7 +228,7 @@ def test_state_format_high_water_mark_survives_event_log_removal(
     code, output = _run("upgrade", "--root", str(root))
     assert code == 2, output
     assert mark.read_bytes() == mark_before
-    assert "state_format 3" in output and "high-water mark 6" in output
+    assert "state_format 3" in output and f"high-water mark {CURRENT_STATE_FORMAT}" in output
 
 
 def test_event_digest_domain_never_aliases_other_artifact_kinds() -> None:

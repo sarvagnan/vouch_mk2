@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 
 from vouch_mk2.core import commands as commands
@@ -19,7 +21,16 @@ from vouch_mk2.store.codec import (
 )
 from vouch_mk2.store.digests import ArtifactKind, digest_of
 from vouch_mk2.store.errors import StoreError
-from vouch_mk2.store.event_log import build_event_records
+from vouch_mk2.store.event_log import (
+    ReplayHistory,
+    build_event_records,
+    event_batch_length,
+    event_fact_key,
+    event_unit_references,
+    index_replay_provenance,
+    validate_replay_claims,
+    validate_replay_placement,
+)
 from vouch_mk2.store.store import Store
 
 
@@ -31,6 +42,7 @@ class MergeOutcome:
     snapshot: Snapshot
     replayed_records: int
     skipped_records: int = 0
+    incorporated_batches: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,63 +51,19 @@ class _LoggedEvent:
     payload: bytes
     record: events.EventRecord
 
+    @property
+    def root(self) -> str:
+        return self.record.origin or self.digest
+
+    @property
+    def root_format(self) -> int:
+        return self.record.origin_format or self.record.event_format
+
 
 @dataclass(frozen=True, slots=True)
 class _SourceFact:
     item: _LoggedEvent
     before: Snapshot
-
-
-def _unit_references(snapshot: Snapshot, event: events.Event) -> tuple[UnitRef, ...]:
-    """Resolve operation targets only; by-name dependency lookups stay unpinned."""
-    match event:
-        case events.UnitSpecified(name=name, version=version):
-            return (UnitRef(name, version),)
-        case events.DeviationOpened(unit=ref):
-            return (ref,)
-        case events.EvidenceRecorded(event=evidence):
-            return (evidence.unit,)
-        case events.ReleasePrepared(includes=includes):
-            return includes
-        case events.AnchorAdvanced(unit_name=name, unit_version=version):
-            if version:
-                return (UnitRef(name, version),)
-        case (
-            events.AcceptanceFrozen(name=name)
-            | events.AcceptancePackBound(name=name)
-            | events.AcceptancePackRebound(name=name)
-            | events.UnitMarkedReady(name=name)
-            | events.WorkStarted(name=name)
-            | events.UnitMarkedDone(name=name)
-            | events.UnitPublished(name=name)
-            | events.UnitSuperseded(name=name)
-            | events.UnitRespecified(name=name)
-            | events.ReverificationStarted(name=name)
-            | events.UnitBlocked(name=name)
-            | events.UnitInvalidated(name=name)
-            | events.UnitReleaseBound(name=name)
-        ):
-            pass
-        case _:
-            return ()
-    unit = snapshot.unit(name)
-    return () if unit is None else (unit.ref(),)
-
-
-def _fact_key(event: events.Event) -> tuple[str, tuple[str, ...]]:
-    """Identify correspondence within one decision, independently of ordering."""
-    if isinstance(event, events.MergeRecorded):
-        subject = (event.ours_head, event.theirs_head)
-    elif isinstance(event, events.EvidenceRecorded):
-        subject = (event.event.unit.label(),)
-    else:
-        subject = ()
-        for field in ("name", "deviation_id", "release_id", "unit_name"):
-            value = getattr(event, field, None)
-            if isinstance(value, str):
-                subject = (value,)
-                break
-    return type(event).__name__, subject
 
 
 def _replay_conflict(item: _LoggedEvent, detail: str) -> Refused:
@@ -106,21 +74,14 @@ def _replay_conflict(item: _LoggedEvent, detail: str) -> Refused:
     ),))
 
 
-def _source_batches(chain: tuple[_LoggedEvent, ...]) -> tuple[tuple[_SourceFact, ...], ...]:
+def _source_batches(facts: tuple[_SourceFact, ...]) -> tuple[tuple[_SourceFact, ...], ...]:
     """Derive context and command boundaries before any provenance filtering."""
-    current = Snapshot()
-    facts: list[_SourceFact] = []
-    for item in chain:
-        facts.append(_SourceFact(item, current))
-        current = apply(
-            current, (item.record.folded_event,),
-            event_digests=(item.digest,), event_run_ids=(item.record.run_id,),
-        )
+    source_events = tuple(fact.item.record.folded_event for fact in facts)
     batches: list[tuple[_SourceFact, ...]] = []
     index = 0
-    while index < len(chain):
-        length = _source_batch_length(chain, index)
-        batches.append(tuple(facts[index:index + length]))
+    while index < len(facts):
+        length = event_batch_length(source_events, index)
+        batches.append(facts[index:index + length])
         index += length
     return tuple(batches)
 
@@ -133,12 +94,12 @@ def _check_batch_identity(
     counterparts: dict[tuple[str, tuple[str, ...]], tuple[UnitRef, ...]] = {}
     current = snapshot
     for event in replayed:
-        counterparts[_fact_key(event)] = _unit_references(current, event)
+        counterparts[event_fact_key(event)] = event_unit_references(current, event)
         current = apply(current, (event,))
     for fact in source:
         event = fact.item.record.folded_event
-        expected = _unit_references(fact.before, event)
-        actual = counterparts.get(_fact_key(event), _unit_references(snapshot, event))
+        expected = event_unit_references(fact.before, event)
+        actual = counterparts.get(event_fact_key(event), event_unit_references(snapshot, event))
         if expected != actual:
             return _replay_conflict(
                 fact.item,
@@ -156,11 +117,11 @@ def _artifact_reference_key(
 
 def _read_verified_chain(
     store: Store, snapshot: Snapshot, branch: str
-) -> tuple[_LoggedEvent, ...]:
-    """Load a chain in chronological order and prove it derives its snapshot."""
+) -> tuple[tuple[_SourceFact, ...], ReplayHistory]:
+    """Load and fold a chain in chronological order, retaining the context of each fact."""
     if not snapshot.event_head:
         if snapshot == Snapshot():
-            return ()
+            return (), ReplayHistory({}, {})
         raise StoreError(f"merge.{branch}-history-invalid: non-empty snapshot has no event head")
 
     reverse_chain: list[_LoggedEvent] = []
@@ -171,8 +132,13 @@ def _read_verified_chain(
         if digest in visited:
             raise StoreError(f"merge.{branch}-history-invalid: event chain cycle at {digest!r}")
         visited.add(digest)
-        payload = store.get_object(ArtifactKind.EVENT, digest)
-        record = decode_event_record(payload)
+        try:
+            payload = store.get_object(ArtifactKind.EVENT, digest)
+            record = decode_event_record(payload)
+        except StoreError as error:
+            raise StoreError(
+                f"merge.{branch}-history-invalid: event {digest}: {error}"
+            ) from error
         if record.revision != expected_revision:
             raise StoreError(
                 f"merge.{branch}-history-invalid: revision {expected_revision} "
@@ -183,8 +149,17 @@ def _read_verified_chain(
         expected_revision = record.revision - 1
 
     chain = tuple(reversed(reverse_chain))
+    try:
+        source_heads = validate_replay_placement(tuple((item.digest, item.record) for item in chain))
+    except StoreError as error:
+        raise StoreError(f"merge.{branch}-history-invalid: {error}") from error
     replay = Snapshot()
+    facts: list[_SourceFact] = []
+    history = ReplayHistory({}, source_heads)
     for item in chain:
+        facts.append(_SourceFact(item, replay))
+        units = event_unit_references(replay, item.record.folded_event)
+        history.records[item.digest] = (item.record, units)
         try:
             replay = apply(
                 replay,
@@ -203,7 +178,7 @@ def _read_verified_chain(
         raise StoreError(
             f"merge.{branch}-history-invalid: event chain does not replay to snapshot"
         )
-    return chain
+    return tuple(facts), history
 
 
 def _event_label(event: events.Event) -> str:
@@ -361,87 +336,10 @@ def _command_for_event(
             )
 
 
-def _source_batch_length(chain: tuple[_LoggedEvent, ...], index: int) -> int:
-    """Skip companion facts emitted by the source command's one decision."""
-    event = chain[index].record.folded_event
-    if isinstance(event, events.DeviationOpened):
-        companion = (
-            None
-            if index + 1 >= len(chain)
-            else chain[index + 1].record.folded_event
-        )
-        if isinstance(companion, events.UnitBlocked):
-            if companion.name != event.unit.name:
-                raise StoreError("open-deviation event batch blocks a different unit")
-            return 2
-        return 1
-    if isinstance(event, events.DeviationAmended):
-        length = 1 + len(event.impact_set) + len(event.release_impact_set)
-        if index + length > len(chain):
-            raise StoreError("amendment event batch is truncated")
-        companions = tuple(
-            item.record.folded_event for item in chain[index + 1 : index + length]
-        )
-        unit_count = len(event.impact_set)
-        expected_units = tuple(event.impact_set)
-        actual_units = tuple(
-            item.name
-            for item in companions[:unit_count]
-            if isinstance(item, events.UnitInvalidated)
-            and item.trigger_deviation_id == event.deviation_id
-        )
-        if actual_units != expected_units:
-            raise StoreError("amendment event batch has invalid unit companions")
-        expected_releases = tuple(event.release_impact_set)
-        actual_releases = tuple(
-            item.release_id
-            for item in companions[unit_count:]
-            if isinstance(item, events.ReleaseInvalidated)
-        )
-        if actual_releases != expected_releases:
-            raise StoreError("amendment event batch has invalid release companions")
-        return length
-    if isinstance(event, events.ReleasePrepared):
-        length = 1
-        included = {reference.name for reference in event.includes}
-        while index + length < len(chain):
-            companion = chain[index + length].record.folded_event
-            if not isinstance(companion, events.UnitReleaseBound):
-                break
-            if companion.name not in included:
-                raise StoreError("release preparation has an unrelated bound-unit companion")
-            length += 1
-        return length
-    return 1
-
-
-def _provenance_ancestors(
-    head: str,
-    *chains: tuple[_LoggedEvent, ...],
-) -> frozenset[str]:
-    """Return linear and recorded-merge ancestors visible in either branch."""
-    records = {item.digest: item for chain in chains for item in chain}
-    found: set[str] = set()
-    pending = [head]
-    while pending:
-        digest = pending.pop()
-        if not digest or digest == "GENESIS" or digest in found:
-            continue
-        found.add(digest)
-        item = records.get(digest)
-        if item is None:
-            continue
-        if item.record.prev != "GENESIS":
-            pending.append(item.record.prev)
-        event = item.record.folded_event
-        if isinstance(event, events.MergeRecorded):
-            pending.extend((event.ours_head, event.theirs_head))
-    return frozenset(found)
-
-
 def _source_records_to_replay(
     chain: tuple[_LoggedEvent, ...],
-    incorporated: frozenset[str],
+    incorporated: Collection[str],
+    batches: tuple[tuple[_SourceFact, ...], ...],
 ) -> tuple[_LoggedEvent, ...]:
     """Exclude source records already represented by our provenance DAG.
 
@@ -456,6 +354,11 @@ def _source_records_to_replay(
     if not incorporated_positions:
         return chain
     start = max(incorporated_positions) + 1
+    batch_ends = {
+        fact.item.digest: positions[batch[-1].item.digest]
+        for batch in batches
+        for fact in batch
+    }
     skipped: set[int] = set()
     for index in range(start, len(chain)):
         event = chain[index].record.folded_event
@@ -465,15 +368,114 @@ def _source_records_to_replay(
             continue
         ours_index = positions.get(event.ours_head)
         if ours_index is None or ours_index >= index:
-            raise StoreError(
-                "merge.theirs-history-invalid: merge provenance does not name "
-                "an earlier linear ours head"
-            )
-        skipped.update(range(max(start, ours_index + 1), index + 1))
+            raise _invalid_merge_boundary(chain[index])
+        # A translated boundary names its exact counterpart. Companions generated
+        # after that counterpart still belong to the command before the block.
+        block_start = batch_ends[event.ours_head] + 1
+        skipped.update(range(max(start, block_start), index + 1))
     return tuple(
         item
         for index, item in enumerate(chain[start:], start=start)
         if index not in skipped
+    )
+
+
+def _invalid_merge_boundary(item: _LoggedEvent) -> StoreError:
+    return StoreError(
+        "merge.theirs-history-invalid: merge provenance does not name "
+        f"an earlier linear ours head for record {item.digest}"
+    )
+
+
+def _legacy_ancestry_refusal(
+    ours: tuple[_LoggedEvent, ...],
+    theirs: tuple[_LoggedEvent, ...],
+    remaining: set[str],
+    primaries: set[str],
+    shared_revision: int,
+) -> Refused | None:
+    """Apply D-41 after exact provenance filtering and before origin selection."""
+    positions = {item.digest: index for index, item in enumerate(theirs)}
+    has_legacy_merge = any(
+        item.record.revision > shared_revision
+        and item.record.event_format == 1
+        and isinstance(item.record.folded_event, events.MergeRecorded)
+        for item in ours
+    )
+    block_start = len(theirs)
+    for index in range(len(theirs) - 1, -1, -1):
+        item = theirs[index]
+        event = item.record.folded_event
+        if item.record.revision <= shared_revision:
+            break
+        if item.record.event_format == 1 and isinstance(event, events.MergeRecorded):
+            boundary = positions.get(event.ours_head, index)
+            if boundary >= index:
+                if item.digest in remaining:
+                    raise _invalid_merge_boundary(item)
+            else:
+                block_start = min(block_start, boundary + 1)
+        if item.digest not in remaining:
+            continue
+        if index >= block_start:
+            detail = "is inside a version-1 merge block in theirs"
+        elif has_legacy_merge and item.digest in primaries and item.root_format == 1:
+            detail = "has a version-1 root and ours has a version-1 merge after the shared cut"
+        else:
+            continue
+        return Refused((Violation("merge.ancestry-unproven", f"event {item.digest} {detail}"),))
+    return None
+
+
+def _check_excluded_companions(
+    batch: tuple[_SourceFact, ...],
+    current: Snapshot,
+) -> Refused | None:
+    """Require flagged companions to agree with the staged state."""
+    for fact in batch:
+        item = fact.item
+        if not item.record.generated:
+            continue
+        event = item.record.folded_event
+        after = apply(fact.before, (event,))
+        if isinstance(event, events.ReleaseInvalidated):
+            expected = after.release(event.release_id)
+            actual = current.release(event.release_id)
+            holds = (
+                expected is not None and actual is not None
+                and actual.state == expected.state
+                and (event.closure is None or actual.closure == event.closure)
+            )
+        else:
+            refs = event_unit_references(fact.before, event)
+            expected_unit = after.unit_ref(refs[0]) if refs else None
+            actual_unit = current.unit_ref(refs[0]) if refs else None
+            holds = (
+                expected_unit is not None and actual_unit is not None
+                and actual_unit.status == expected_unit.status
+            )
+        if not holds:
+            return _replay_conflict(item, "has an effect missing from ours after skipping its batch")
+    return None
+
+
+def _stage_events(
+    snapshot: Snapshot,
+    replayed: tuple[events.Event, ...],
+    *,
+    actor: str,
+    run_id: str,
+    recorded_at: str,
+    counterparts: tuple[tuple[str, events.EventRecord] | None, ...] | None = None,
+    satisfied: tuple[str, ...] = (),
+) -> tuple[Snapshot, tuple[_LoggedEvent, ...]]:
+    next_snapshot, objects, _records = build_event_records(
+        snapshot, replayed, actor=actor, run_id=run_id,
+        recorded_at=recorded_at, source_records=counterparts, satisfied=satisfied,
+    )
+    return next_snapshot, tuple(
+        _LoggedEvent(digest_of(kind, payload), payload, decode_event_record(payload))
+        for kind, payload in objects
     )
 
 
@@ -624,8 +626,20 @@ def merge_store_roots(
     ):
         ours = ours_store.read_snapshot()
         theirs = theirs_store.read_snapshot()
-        ours_chain = _read_verified_chain(ours_store, ours, "ours")
-        theirs_chain = _read_verified_chain(theirs_store, theirs, "theirs")
+        ours_facts, ours_history = _read_verified_chain(ours_store, ours, "ours")
+        theirs_facts, theirs_history = _read_verified_chain(theirs_store, theirs, "theirs")
+        records = theirs_history.records | ours_history.records
+        ours_provenance = index_replay_provenance(ours_history, records)
+        theirs_provenance = index_replay_provenance(theirs_history, records)
+        provenance = (ours_provenance, theirs_provenance)
+        for branch, history in (("ours", ours_history), ("theirs", theirs_history)):
+            try:
+                validate_replay_claims(history, records, provenance)
+            except StoreError as error:
+                raise StoreError(f"merge.{branch}-history-invalid: {error}") from error
+        ours_incorporated = ours_provenance.incorporated
+        ours_chain = tuple(fact.item for fact in ours_facts)
+        theirs_chain = tuple(fact.item for fact in theirs_facts)
 
         ours_positions = {item.digest: index for index, item in enumerate(ours_chain)}
         shared = tuple(item for item in theirs_chain if item.digest in ours_positions)
@@ -643,19 +657,11 @@ def merge_store_roots(
 
         ancestor = max(shared, key=ours_position)
 
-        if ours.event_head == theirs.event_head:
-            return MergeOutcome("no-op", ours, 0)
-
-        incorporated = _provenance_ancestors(
-            ours.event_head, ours_chain, theirs_chain
-        )
-        if theirs.event_head in incorporated:
-            return MergeOutcome("no-op", ours, 0)
-
         if ancestor.digest == theirs.event_head:
             return MergeOutcome("no-op", ours, 0)
 
         skipped = 0
+        incorporated_batches = 0
         if ancestor.digest == ours.event_head:
             suffix_start = next(
                 index for index, item in enumerate(theirs_chain) if item.digest == ancestor.digest
@@ -672,17 +678,45 @@ def merge_store_roots(
             mode = "fast-forward"
             replayed = 0
         else:
-            source_batches = _source_batches(theirs_chain)
-            source_suffix = _source_records_to_replay(theirs_chain, incorporated)
+            if theirs.event_head in ours_incorporated:
+                return MergeOutcome("no-op", ours, 0)
+            source_batches = _source_batches(theirs_facts)
+            source_suffix = _source_records_to_replay(theirs_chain, ours_incorporated, source_batches)
             selected = {item.digest for item in source_suffix}
+            legacy_refusal = _legacy_ancestry_refusal(
+                ours_chain, theirs_chain, selected,
+                {batch[0].item.digest for batch in source_batches}, ancestor.record.revision,
+            )
+            if legacy_refusal is not None:
+                return legacy_refusal
+
+            coverage = {
+                digest for item in ours_chain
+                for digest in (item.digest, item.root, *item.record.satisfied)
+            }
             current = ours
-            replayed_events: list[events.Event] = []
-            source_claims: list[events.EventRecord | None] = []
+            boundaries: dict[str, str] = {}
+            staged: list[_LoggedEvent] = []
+            satisfied: dict[str, None] = {}
+            recorded_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
             for batch in source_batches:
-                if not any(fact.item.digest in selected for fact in batch):
-                    continue
                 item = batch[0].item
-                if not all(fact.item.digest in selected for fact in batch):
+                in_selection = sum(fact.item.digest in selected for fact in batch)
+                if in_selection and item.root in coverage:
+                    selected.difference_update(fact.item.digest for fact in batch)
+                    incorporated_batches += 1
+                    in_selection = 0
+                if not in_selection:
+                    if batch[-1].item.record.revision > ancestor.record.revision:
+                        companion_refusal = _check_excluded_companions(batch, current)
+                        if companion_refusal is not None:
+                            return companion_refusal
+                    # The initial source prefix crosses at our pre-merge head.
+                    # Later filtered batches cross after the work already staged.
+                    for fact in batch:
+                        boundaries[fact.item.digest] = current.event_head
+                    continue
+                if in_selection != len(batch):
                     return _replay_conflict(item, "has a partially filtered command batch")
                 source_event = item.record.folded_event
                 try:
@@ -692,7 +726,7 @@ def merge_store_roots(
                 except StoreError as error:
                     return _replay_conflict(item, f"cannot be replayed: {error}")
                 if isinstance(source_event, events.AnchorAdvanced):
-                    references = _unit_references(batch[0].before, source_event)
+                    references = event_unit_references(batch[0].before, source_event)
                     if not references:
                         return _replay_conflict(item, "has no source unit reference")
                     ref = references[0]
@@ -721,6 +755,8 @@ def merge_store_roots(
                         unit = current.unit(command.name)
                         if unit is not None and unit.ref().label() == source_event.name:
                             skipped += 1
+                            satisfied[item.root] = None
+                            boundaries[item.digest] = current.event_head
                             continue
                     return _conflict(item, decision)
                 identity_refusal = _check_batch_identity(batch, current, decision.events)
@@ -736,59 +772,73 @@ def merge_store_roots(
                             item, f"would replay as {_event_label(replayed_event)} "
                             "instead of the recorded exact reference",
                         )
-                originals = {_fact_key(fact.item.record.folded_event): fact.item.record for fact in batch}
-                claims = tuple(originals.get(_fact_key(event)) for event in decision.events)
-                current = apply(
-                    current, decision.events,
-                    event_run_ids=tuple(run_id if record is None else record.run_id for record in claims),
+                originals = {event_fact_key(fact.item.record.folded_event): fact.item for fact in batch}
+                counterparts = tuple(originals.get(event_fact_key(event)) for event in decision.events)
+                matched = {source.digest for source in counterparts if source is not None}
+                for fact in batch:
+                    if fact.item.digest not in matched:
+                        satisfied[fact.item.root] = None
+                replayed_batch = decision.events
+                if isinstance(source_event, events.MergeRecorded):
+                    boundary = boundaries.get(source_event.ours_head)
+                    if boundary is None:
+                        raise _invalid_merge_boundary(item)
+                    replayed_batch = (replace(source_event, ours_head=boundary),)
+
+                boundary_head = current.event_head
+                current, staged_batch = _stage_events(
+                    current, replayed_batch, actor=actor, run_id=run_id,
+                    recorded_at=recorded_at,
+                    counterparts=tuple(
+                        (source.digest, source.record) if source is not None else None
+                        for source in counterparts
+                    ),
                 )
-                replayed_events.extend(decision.events)
-                source_claims.extend(claims)
+                staged.extend(staged_batch)
+                replayed_digests = {
+                    source.digest: record.digest
+                    for source, record in zip(counterparts, staged_batch, strict=True)
+                    if source is not None
+                }
+                for fact in batch[:-1]:
+                    boundary_head = replayed_digests.get(fact.item.digest, boundary_head)
+                    boundaries[fact.item.digest] = boundary_head
+                last_source = batch[-1].item.digest
+                boundaries[last_source] = replayed_digests.get(last_source, current.event_head)
+
+            for item in theirs_chain:
+                satisfied.update(dict.fromkeys(item.record.satisfied))
 
             merge_decision = decide(
                 current, commands.RecordMerge(ours.event_head, theirs.event_head)
             )
             if not isinstance(merge_decision, Accepted):
                 raise StoreError("merge record was refused after a successful replay")
-            replayed_events.extend(merge_decision.events)
-            source_claims.extend(None for _event in merge_decision.events)
-            candidate, event_objects, _records = build_event_records(
-                ours,
-                tuple(replayed_events),
-                actor=actor,
-                run_id=run_id,
-                source_records=tuple(source_claims),
+            candidate, merge_records = _stage_events(
+                current, merge_decision.events, actor=actor, run_id=run_id,
+                recorded_at=recorded_at, satisfied=tuple(satisfied),
             )
-            staged_chain = ours_chain + tuple(
-                _LoggedEvent(
-                    digest_of(ArtifactKind.EVENT, payload),
-                    payload,
-                    decode_event_record(payload),
-                )
-                for kind, payload in event_objects
-                if kind is ArtifactKind.EVENT
-            )
+            staged.extend(merge_records)
             replay_check = Snapshot()
-            for staged in staged_chain:
+            for item in ours_chain + tuple(staged):
                 replay_check = apply(
                     replay_check,
-                    (staged.record.folded_event,),
-                    event_digests=(staged.digest,),
-                    event_run_ids=(staged.record.run_id,),
+                    (item.record.folded_event,),
+                    event_digests=(item.digest,),
+                    event_run_ids=(item.record.run_id,),
                 )
             if replay_check != candidate:
                 raise StoreError(
                     "merge.replay-invalid: staged event chain does not derive candidate snapshot"
                 )
-            supporting = _supporting_objects(
-                ours_store, theirs_store, candidate, source_suffix
-            )
-            objects = supporting + event_objects
+            replayed_suffix = tuple(item for item in source_suffix if item.digest in selected)
+            supporting = _supporting_objects(ours_store, theirs_store, candidate, replayed_suffix)
+            objects = supporting + tuple((ArtifactKind.EVENT, item.payload) for item in staged)
             mode = "replayed"
-            replayed = len(source_suffix) - skipped
+            replayed = len(replayed_suffix) - skipped
 
     _commit_if_unchanged(ours_root, ours, candidate, objects)
-    return MergeOutcome(mode, candidate, replayed, skipped)
+    return MergeOutcome(mode, candidate, replayed, skipped, incorporated_batches)
 
 
 __all__ = ["MergeOutcome", "merge_store_roots"]

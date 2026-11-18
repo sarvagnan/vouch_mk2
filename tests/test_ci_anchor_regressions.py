@@ -137,7 +137,7 @@ def test_format4_upgrade_adds_no_invented_anchor_run_claim() -> None:
     for head in document["evidence_heads"]:
         del head["anchor_run_id"]
     upgraded, steps = upgrade_document(document)
-    assert steps == [(4, 5), (5, 6)]
+    assert steps == [(4, 5), (5, 6), (6, 7)]
     heads = upgraded["evidence_heads"]
     assert isinstance(heads, list) and isinstance(heads[0], dict)
     assert heads[0]["anchor_run_id"] == ""

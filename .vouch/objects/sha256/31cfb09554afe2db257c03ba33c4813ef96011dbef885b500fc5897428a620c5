@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_nested_merge_boundary.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"ac3c6c63dc5d07d5f96320dc05211a918fea57e640de10df6f71c46d84d975b4","parent":"GENESIS","recorded_at":"2026-11-17T18:43:43+00:00","sequence":1,"unit":{"name":"nested-merge-boundary","version":"1"}}

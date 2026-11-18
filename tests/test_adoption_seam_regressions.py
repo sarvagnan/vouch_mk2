@@ -113,7 +113,7 @@ def test_format_four_legacy_policy_defaults_to_ledger_and_new_facts_round_trip()
         ci_exceptions=(CiException("u@v1", "planned work"),),
     )
     encoded = encode_snapshot(strict)
-    assert json.loads(encoded)["state_format"] == 6
+    assert json.loads(encoded)["state_format"] == 7
     assert decode_snapshot(encoded) == strict
 
 

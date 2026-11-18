@@ -200,6 +200,34 @@ companion the replay no longer produces is not written. A replay must act on the
 THEIRS, and an anchor needs the evidence head THEIRS promoted. Unrelated histories are refused,
 and one refused replay refuses the whole merge without writing OURS.
 
+A replayed merge record names the receiving-chain record where its replayed block begins
+as its OURS head. It keeps the original THEIRS head. If replay filtered out the original
+boundary, the record names the receiving head at that point in the replay. A merge that
+needs an unlocatable boundary from an old record refuses and names that record's digest.
+
+Each copied record carries its first occurrence's EVENT digest and envelope version.
+A companion generated during replay carries `generated: true` and starts at its own
+EVENT digest. Later copies carry that digest as `origin` and keep the flag.
+The final merge record lists the roots of facts satisfied without a record and carries
+forward the source chain's `satisfied` entries. OURS covers the digests, origins and
+`satisfied` entries in its own chain. Replay skips a source command batch whose primary
+root OURS covers and continues with the other batches. For every batch excluded as
+already incorporated by digest, merge block or origin, replay checks the effect of each
+record flagged `generated` in the state reached after staging the preceding work. It
+refuses with `merge.conflict` if that effect is absent.
+
+Version-1 envelopes lack origin information. After exact provenance exclusions, replay
+refuses with `merge.ancestry-unproven` if a remaining source batch is inside a version-1
+merge block, or if a remaining primary has a version-1 root and OURS has a version-1 merge
+after the last shared record. Fast-forwards and exact no-ops still work. `upgrade` reports
+how many version-1 merge markers a store holds.
+
+`origin` and `satisfied` are claims written by the merging tool, trusted at the same level
+as `theirs_head`. That trust level also applies to `generated`. Vouch checks the syntax
+and placement of `origin` and `generated` inside version-2 merge blocks and compares
+claims when the receiver holds a counterpart. A hand-edited store can mislabel new work
+as a copy and cause a receiver to skip it.
+
 Success proves only that the merged log replays to the merged snapshot. It does not prove that
 the branches were compatible in any wider sense, that their intentions agreed, that their
 claims were true, or that the actor was verified.

@@ -1519,6 +1519,14 @@ unit, `refreeze-green@1`. Amends D-17.
   what the existing field can carry. Resolving the original boundary from source provenance on read:
   replay does not copy source event objects, so the boundary often exists in neither store.
 
+- **Note (2026-11-18, Astra's review of `nested-merge-boundary@1`).** With the boundary rule in
+  place, a merge can silently re-apply work a store already merged and then undid: B merges C's
+  open-in-CI mark and clears it; D replays C's later history; B<-D replays D's copy of the old mark
+  and restores the exception. B knows C's older head, D names C's newer one, and neither chain links
+  them, so the provenance filter cannot tell D's copies from new work. Before D-38 the first nested
+  merge in that chain was refused. The user paused the unit: ancestry that survives replay copies
+  (`vouch_mk2-bd4.4.18`) is decided first, and both ship as one unit.
+
 ## D-39 — Rebind continuity is checked within a pack generation, from history (2026-11-16)
 
 **Status:** decided 2026-11-16 by the user, from Sol's design (`design-0tc`). Settles
@@ -1563,4 +1571,132 @@ unit, `refreeze-green@1`. Amends D-17.
   the rule would differ by identifier and the other two would still be stored and then unusable.
   Recording the gap as won't-fix: Vouch would keep accepting values it cannot then use. Rendering
   options as `--flag=value`: rejected in D-35 for the same reasons.
+
+## D-41 — A replayed record carries its origin, and a merge skips work it already holds by origin (2026-11-18)
+
+**Status:** decided 2026-11-18 by the user, choosing Fable's option O over Sol's receipt design
+(`design-bd4.4.18`) after independent design reviews by Astra and Fable. Settles
+`vouch_mk2-bd4.4.18`. Ships with D-38 in one unit, `nested-merge-boundary@1`.
+
+- **The finding.** Replay re-envelopes records, so a copy has a new digest, and a merge cannot tell
+  a copy of a record it already holds from new work. Any command `decide()` accepts twice then
+  replays a second time: an open-in-CI mark restores an exception the receiver cleared, a copied
+  clear removes a later mark, and settings and repeated lifecycle steps are exposed the same way.
+  Fable reproduced this on `main` without a nested merge (three stores, and an ordinary two-branch
+  flow whose receiver had never merged), so it is a defect of the released merge, not of D-38 alone.
+  A related defect: a merge that skips a block whose source replay generated a companion leaves the
+  two stores disagreeing (one unit `invalidated`, the other `in-progress`).
+- **Decision.**
+  - New event envelopes are version 2. A record written by merge replay carries `origin`: the EVENT
+    digest of the first-authored occurrence of that fact; a copy of a copy inherits it unchanged. A
+    record authored directly has no `origin`. The merge's own final record carries `satisfied`: the
+    origins of source facts the merge accounted for without writing a record (D-37's skipped clears,
+    omitted D-33 companions), plus those inherited from the source chain. The `MergeRecorded`
+    payload, the snapshot and the artifact kinds do not change; nothing extra is stored or retained.
+  - A chain's coverage is every record digest, every `origin` and every `satisfied` entry on it.
+    After the existing exact-digest and D-38 exclusions, a merge drops each source command batch
+    whose primary record's root (its `origin`, else its own digest) is in OURS' coverage. The
+    decision is per batch, never a prefix cut, so earlier independent work on THEIRS still replays.
+  - When a batch dropped this way carried a companion that THEIRS' replay generated, OURS must
+    already show that companion's effect once the preceding work is staged; otherwise the merge
+    refuses with `merge.conflict` naming the fact.
+  - `origin` must be a well-formed digest and appear only on records inside a version-2 merge block;
+    where OURS holds its own counterpart of an origin, the two must agree on kind, subject, actor,
+    run claim and recorded time. A violation refuses with `merge.theirs-history-invalid`, and
+    `check.event-log` reports it.
+  - **History written before the change (version 1).** After the exact-digest exclusions, a merge
+    refuses with `merge.ancestry-unproven`, before any lock and writing nothing, if (a) any remaining
+    source batch lies inside a version-1 merge block, or (b) any remaining source batch has a
+    version-1 root and OURS has a version-1 merge marker after the exact shared cut. A copy records
+    whether its origin was a version-1 or version-2 record, so (b) needs no source object. A store
+    with no version-1 merges, or whose version-1 merges all lie in the shared prefix, merges as
+    before. The refusal is final in this unit: the refused branch's work is re-recorded on the merged
+    side. An operator assertion to override it is a separate later decision. `upgrade` reports how
+    many version-1 merge markers a store holds.
+  - The state format moves from 6 to 7 (D-13), so an older binary gives a clear "run upgrade"
+    refusal instead of appending version-1 records to a version-2 chain. The upgrader changes only
+    the format number.
+  - Trust: `origin` and `satisfied` are claims written by the merging tool, at the same level as the
+    `theirs_head` a merge already trusts. A hand-edited store could label new work as a copy and have
+    a receiver skip it, as it can already forge a merge record or omit work. `docs/claim-boundary.md`
+    states this.
+- **Rejected.** Sol's option A (a receipt per merge, retained source records and a verifier that
+  re-runs historical merges): the verifier re-judges history with today's `decide()`, which
+  reproduces only 646 of mk2's 759 recorded command batches; two correct receipts can give identical
+  replay bytes different origins (Astra); and it adds a new artifact kind, archive, sweep and
+  verification path. Astra's option B (an immediate source pointer plus the archive and a replay
+  check): the same verifier problem and machinery, for protection only against hand-edited stores.
+  Refusing on suspicion alone: it would leave legitimate four-store merges failing.
+- **Note (2026-11-18, owner, writing `nested-merge-boundary@1` pack/3).** The companion rule above
+  says "a batch dropped this way", meaning by origin. Fable's reproduction drops the block through
+  the existing provenance filter, by exact digest. The rule applies to every source batch a merge
+  excludes as already incorporated, whether by exact digest, a D-38 block or origin.
+
+- **Note (2026-11-18, owner, from Fable's audit of the pilot's merges).** D-41's selection rules and
+  its version-1 rules (a) and (b) govern replay only. A fast-forward, where OURS' head is an ancestor
+  of THEIRS' and OURS adopts THEIRS' verified chain verbatim, replays nothing and so cannot apply a
+  fact twice; it is unaffected, including when THEIRS' suffix holds version-1 merge blocks. Exact
+  no-ops are unaffected too. The audit found the pilot's history clean: no replayed record copied a
+  command its receiver already held, and its next ordinary merge passes rules (a) and (b).
+
+- **Note (2026-11-18, owner, from Sol's implementation report).** A companion that merge replay
+  generates has no source occurrence, and it cannot name itself as `origin`, since an object cannot
+  contain its own digest. Such a record carries `"generated": true` and no `origin`; its root is its
+  own digest. A copy of it carries `origin` (that digest), `origin_format` 2 and `generated: true`,
+  inherited unchanged by further copies. `generated` is valid only inside a version-2 merge block. The
+  companion rule then applies to every excluded batch holding a `generated` record, with no inference
+  from claims. Correction to the state-format bullet: an older binary refuses a format-7 store with
+  D-13's "written by a newer vouch" message; the "run upgrade" message is what a format-7 binary
+  prints for a format-6 store.
+
+- **Note (2026-11-18, owner, after Astra's re-check of `nested-merge-boundary@1`): the validation
+  bound.** Every `origin` (and `satisfied` entry) that resolves to a record on either chain, OURS' or
+  THEIRS' own, is validated against that record: it must be a first occurrence (carry no `origin`
+  itself), agree on kind and subject, and agree on actor, run claim and recorded time; `check.event-log`
+  applies the same rule to origins resolving within a single store. An `origin` naming a digest held by
+  neither store is accepted as a claim, at D-41's trust level. A hand edit that invents such a digest,
+  or forges a whole consistent history, is outside what this rule detects and is not a defect of it;
+  a locally disprovable `origin` is.
+
+- **Note (2026-11-18, owner, after Astra's round-3 re-check): position is part of the bound.** A
+  `satisfied` entry that resolves on a chain must name a record at or before the `theirs_head` of the
+  merge that lists it (the source history that merge accounted for), and a resolving `origin` must name a
+  record at or before the `theirs_head` of the merge block that holds the copy. A resolving entry
+  authored later than that head is locally disprovable and refuses like any other.
+
+- **Note (2026-11-18, user decision after Astra's round-4 re-check): position across stores.** The
+  position rule also applies when the entry and the merge's `theirs_head` resolve on different chains.
+  If the chain holding a resolving `satisfied` entry (or the record an `origin` names) had already
+  incorporated that `theirs_head`, through its own merge provenance, before the entry was authored, the
+  head's history cannot contain the entry, and the claim refuses like any other. Order is judged only
+  through recorded provenance (exact digests and merge markers), never by comparing revision numbers or
+  times across stores.
+
+- **Note (2026-11-18, user decision after Astra's round-5 re-check): the general rule, and when review
+  stops.** The position notes above are special cases of one rule. When the source history through a
+  merge's `theirs_head` is fully available (on either chain, through exact digests and merge
+  provenance), every resolving `satisfied` entry the merge lists, and every resolving `origin` on a
+  copy in its block, must be found in that history: as the record itself, as a copy's `origin`, or as
+  an inherited `satisfied` entry. Otherwise the claim refuses before any lock, and `check.event-log`
+  reports it when one store suffices. Where the history is not fully available, D-41's trust level
+  holds. **Stop rule for this unit's reviews:** from here, a review finding blocks only if it drops or
+  duplicates honest work, or shows actual loss caused by a forged claim. Other forged-provenance findings
+  go to a follow-up bead.
+
+- **Note (2026-11-18, user decision, from Astra's and Fable's opinions on the recurring findings,
+  `d41-forgery-loop_*.OUT.md`).** Two changes to the note above. (1) When the source history through a
+  merge's `theirs_head` is fully available, every `satisfied` entry and every `origin` in its block must be
+  found in it, whether or not the entry resolves on a chain. (2) The stop rule is reworded: a finding
+  blocks only if (a) histories written only by the tool, with no hand edit, are dropped, duplicated,
+  wrongly refused or left disagreeing, or (b) the implementation accepts a claim the general rule, as
+  written, requires it to refuse. Loss that needs a forged claim the general rule does not cover (for
+  example a merge record whose `theirs_head` is rewritten to a later source head, or an entry naming a
+  record only a third store holds) is D-41's stated trust limit and goes to the follow-up bead
+  `vouch_mk2-22a` on the threat model for hand-edited stores, not to a unit.
+
+- **Note (2026-11-18, user decision, after Astra's final review of `nested-merge-boundary@1`).** Stop
+  rule (a) covers behaviour this unit introduces or changes. Astra's randomized test found honest stores
+  left disagreeing after two-way merges when both sides changed the same CI policy or exception; the
+  released merge on `main` does the same, so it predates D-38 and D-41. It is decided and fixed separately
+  under `vouch_mk2-oa2`, and does not block this unit.
 

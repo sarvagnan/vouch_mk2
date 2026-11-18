@@ -61,6 +61,11 @@ class EventRecord:
     actor: str
     run_id: str
     pack_digest: str
+    event_format: int = 2
+    origin: str = ""
+    origin_format: int | None = None
+    satisfied: tuple[str, ...] = ()
+    generated: bool = False
 
 
 @dataclass(frozen=True, slots=True)

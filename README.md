@@ -81,7 +81,7 @@ commits.
 
 Every change to mk2's behavior is itself a unit run through mk2's lifecycle (D-11); decision
 records, prose edits that change no claim, and housekeeping are the named exceptions. Claude plans
-and writes the frozen pack, GPT 6.1 Sol implements against it, and GPT 6 Astra reviews.
+and writes the frozen pack, GPT 6.2 Sol implements against it, and GPT 6.2 Astra reviews.
 [`docs/method.md`](docs/method.md) has the procedure.
 
 The rest of this file is for people changing mk2.
@@ -131,6 +131,6 @@ Run what CI runs (`.github/workflows/ci.yml`):
 uv sync
 uv run pyrefly check     # strict types (D-1)
 uv run lint-imports      # policy IR purity contract (D-1)
-uv run pytest            # 1260 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest            # 1362 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run vouch-mk2 formal  # invariants over core-v1 and history-v1
 ```

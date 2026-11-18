@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","pack_digest":"","payload":{"name":"nested-merge-boundary@1","reason":"pack frozen and RED recorded; the bound acceptance tests fail until the implementation lands (D-38)"},"prev":"a0639a166f10ba62382d6236827615da9167e43dc4e2e6260fe406c4842ca42e","recorded_at":"2026-11-17T18:43:43+00:00","revision":1071,"run_id":""}

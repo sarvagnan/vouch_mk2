@@ -73,7 +73,7 @@ from vouch_mk2.store.errors import DecodeError, StoreError
 from vouch_mk2.store.paths import RelPath
 
 
-CURRENT_STATE_FORMAT = 6
+CURRENT_STATE_FORMAT = 7
 CURRENT_EVIDENCE_FORMAT = 2
 
 
@@ -124,18 +124,28 @@ def encode_event_record(record: EventRecord) -> bytes:
     event = record.folded_event
     if isinstance(event, event_module.AnchorAdvanced) and event.unit_version == "":
         raise StoreError("an AnchorAdvanced record must name its resolved unit_version")
-    return _canonical_json(
-        {
-            "actor": record.actor,
-            "event": type(record.folded_event).__name__,
-            "pack_digest": record.pack_digest,
-            "payload": _event_payload(record.folded_event),
-            "prev": record.prev,
-            "recorded_at": record.recorded_at,
-            "revision": record.revision,
-            "run_id": record.run_id,
-        }
-    )
+    document: dict[str, object] = {
+        "actor": record.actor,
+        "event": type(event).__name__,
+        "pack_digest": record.pack_digest,
+        "payload": _event_payload(event),
+        "prev": record.prev,
+        "recorded_at": record.recorded_at,
+        "revision": record.revision,
+        "run_id": record.run_id,
+    }
+    if record.event_format == 2:
+        document["event_format"] = 2
+        if record.origin:
+            document["origin"] = record.origin
+            document["origin_format"] = record.origin_format
+        elif isinstance(event, event_module.MergeRecorded):
+            document["satisfied"] = list(record.satisfied)
+        if record.generated:
+            document["generated"] = True
+    elif record.event_format != 1:
+        raise StoreError(f"unsupported event format {record.event_format}")
+    return _canonical_json(document)
 
 
 def _pack_rebound_object(rebound: PackRebound) -> dict[str, object]:
@@ -1180,7 +1190,18 @@ def decode_event_record(data: bytes) -> EventRecord:
     embedded payloads may have been upgraded in memory and must not make their
     historical content-addressed bytes appear non-canonical.
     """
-    obj = _fields(_decode_json(data, "event record"), "", _EVENT_RECORD_FIELDS)
+    raw = _object(_decode_json(data, "event record"), "")
+    event_format = 1
+    if "event_format" in raw:
+        event_format = _integer(raw["event_format"], "event_format")
+        if event_format != 2:
+            raise DecodeError(f"event_format: unsupported explicit version {event_format}")
+        obj = _fields(
+            raw, "", _EVENT_RECORD_FIELDS | {"event_format"},
+            frozenset({"origin", "origin_format", "satisfied", "generated"}),
+        )
+    else:
+        obj = _fields(raw, "", _EVENT_RECORD_FIELDS)
     event_name = _string(obj["event"], "event")
     event_type = _EVENT_TYPES.get(event_name)
     if event_type is None:
@@ -1190,6 +1211,32 @@ def decode_event_record(data: bytes) -> EventRecord:
     if isinstance(event, event_module.MergeRecorded):
         _digest(event.ours_head, "payload.ours_head")
         _digest(event.theirs_head, "payload.theirs_head")
+    origin = ""
+    origin_format = None
+    satisfied: tuple[str, ...] = ()
+    generated = False
+    if event_format == 2:
+        if ("origin" in obj) != ("origin_format" in obj):
+            raise DecodeError("origin and origin_format must appear together")
+        if "origin" in obj:
+            origin = _digest(obj["origin"], "origin")
+            origin_format = _integer(obj["origin_format"], "origin_format")
+            if origin_format not in {1, 2}:
+                raise DecodeError("origin_format: expected 1 or 2")
+        if "generated" in obj:
+            generated = _boolean(obj["generated"], "generated")
+            if not generated:
+                raise DecodeError("generated: expected true when present")
+            if origin_format == 1:
+                raise DecodeError("generated: a copy must have origin_format 2")
+        closes_merge = isinstance(event, event_module.MergeRecorded) and not origin
+        if ("satisfied" in obj) != closes_merge:
+            raise DecodeError("satisfied must appear only on the final record of a merge")
+        if closes_merge:
+            satisfied = tuple(
+                _digest(value, f"satisfied[{index}]")
+                for index, value in enumerate(_array(obj["satisfied"], "satisfied"))
+            )
     revision = _integer(obj["revision"], "revision")
     if revision < 0:
         raise DecodeError("revision: must be non-negative")
@@ -1205,6 +1252,11 @@ def decode_event_record(data: bytes) -> EventRecord:
         actor=actor,
         run_id=_string(obj["run_id"], "run_id"),
         pack_digest=_digest(obj["pack_digest"], "pack_digest", allow_empty=True),
+        event_format=event_format,
+        origin=origin,
+        origin_format=origin_format,
+        satisfied=satisfied,
+        generated=generated,
     )
     expected_pack_digest = _event_pack_digest(event)
     if record.pack_digest != expected_pack_digest:

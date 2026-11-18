@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"nested-merge-boundary@1","reason":"pack/4 frozen (DEV-nmb-03, generated companions); RED #5 recorded; the flag implementation follows"},"prev":"5f13de35256fb0a4cc3ac4dbe80c10a81b5c708fa03b57caf53c7121bbd8876e","recorded_at":"2026-11-18T08:33:21+00:00","revision":1111,"run_id":""}

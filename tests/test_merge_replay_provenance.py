@@ -1017,7 +1017,15 @@ def test_incoming_merge_record_keeps_its_source_claims(
     assert len(merges) == 2
     incoming, final = merges
     assert final is added[-1]
-    assert _subject(incoming) == _subject(source)
+    incoming_event, source_event = incoming.record.folded_event, source.record.folded_event
+    assert isinstance(incoming_event, MergeRecorded) and isinstance(source_event, MergeRecorded)
+    assert incoming_event.theirs_head == source_event.theirs_head
+    # D-38 (nested-merge-boundary@1): ours_head names the replayed counterpart of the source
+    # boundary, theirs' t@1 record as replayed onto ours, not the source digest.
+    counterpart = next(
+        item for item in added if _kind(item) == "UnitSpecified" and _subject(item) == "t"
+    )
+    assert incoming_event.ours_head == counterpart.digest
     assert _claims(incoming) == _claims(source)
     assert _claims(final)[:2] == ("merger", "merge-run")
     assert final.record.recorded_at != source.record.recorded_at

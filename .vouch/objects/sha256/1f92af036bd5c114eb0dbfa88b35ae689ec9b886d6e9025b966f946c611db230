@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitInvalidated","pack_digest":"","payload":{"name":"nested-merge-boundary","trigger_deviation_id":"DEV-nmb-02"},"prev":"9adff0d6e65d70c4e695f2ad1c332b65dfcf3694b77eec38b99bde4d8c30a9ab","recorded_at":"2026-11-18T07:07:38+00:00","revision":1093,"run_id":""}

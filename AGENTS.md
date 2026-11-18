@@ -61,8 +61,8 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 ## Working method
 
 Every forward change to mk2 is a unit run through mk2's own lifecycle (D-11, D-27). Claude
-(Opus 5.5, the main session) plans, writes the frozen pack and publishes. GPT 6.1 Sol implements
-through a T3 delegated task and never edits the pack. GPT 6 Astra reviews through a T3 delegated
+(Opus 5.5, the main session) plans, writes the frozen pack and publishes. GPT 6.2 Sol implements
+through a T3 delegated task and never edits the pack. GPT 6.2 Astra reviews through a T3 delegated
 task. The procedure, roles, cost rules and commands are in `docs/method.md`.
 
 ## Gates
