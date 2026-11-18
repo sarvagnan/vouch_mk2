@@ -82,6 +82,7 @@ from vouch_mk2.store.event_log import (
     commit_events,
     default_actor,
     event_unit_references,
+    replay_provenance_positions,
     validate_replay_claims,
     validate_replay_placement,
 )
@@ -200,7 +201,7 @@ def _check_event_log(store: Store, snapshot: Snapshot) -> CheckResult:
             )
 
     try:
-        validate_replay_claims(history, history)
+        validate_replay_claims(history, history, replay_provenance_positions(history))
     except StoreError as error:
         return CheckResult(mk2.CHECK_EVENT_LOG, Verdict.FAIL, str(error))
 

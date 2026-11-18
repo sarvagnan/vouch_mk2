@@ -340,6 +340,83 @@ def test_an_origin_cannot_name_a_matching_mark_after_its_block_source_head(
     )
 
 
+@pytest.mark.parametrize(
+    ("branch", "source_advanced"),
+    [("ours", False), ("theirs", False), ("ours", True)],
+    ids=["ours", "theirs", "transitive"],
+)
+def test_a_satisfied_entry_cannot_name_a_clear_authored_after_incorporating_the_source_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, branch: str, source_advanced: bool,
+) -> None:
+    witness = _store(tmp_path / "witness")
+    _command(witness, commands.MarkOpenInCi("x", "old"))
+    source = Path(shutil.copytree(witness, tmp_path / "source"))
+    _command(witness, commands.SpecifyUnit("a", "1"))
+    _command(source, commands.SpecifyUnit("b", "1"))
+    source_head = _snapshot(source).event_head
+    if source_advanced:
+        _command(source, commands.SpecifyUnit("c", "1"))
+        assert _records(source)[-1][1].prev == source_head
+    merged_head = _snapshot(source).event_head
+    _merge(witness, source)
+    witness_digest, witness_record = _records(witness)[-1]
+    assert isinstance(witness_record.folded_event, MergeRecorded)
+    assert witness_record.folded_event.theirs_head == merged_head
+
+    _command(witness, commands.ClearOpenInCi("x"))
+    clear, clear_record = _records(witness)[-1]
+    assert clear_record.prev == witness_digest
+    _command(source, commands.ClearOpenInCi("x"))
+    assert source_head not in dict(_records(witness))
+    assert clear not in dict(_records(source))
+
+    # In the mirror, OURS supplies the witness and THEIRS makes the claim.
+    carrier, incoming = (witness, source) if branch == "ours" else (source, witness)
+    assert _merge(carrier, incoming).skipped_records == 1
+    marker = _records(carrier)[-1][1].folded_event
+    assert isinstance(marker, MergeRecorded)
+    _rewrite_record(carrier, {
+        "satisfied": [clear],
+        "payload": {"ours_head": marker.ours_head, "theirs_head": source_head},
+    }, recompute=True, offset=1)
+
+    _assert_position_refusal(
+        witness, source, monkeypatch, branch=branch, field="satisfied entry",
+        digest=clear, source_head=source_head,
+    )
+
+
+def test_an_origin_cannot_name_a_mark_authored_after_incorporating_the_source_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ours = _store(tmp_path / "ours")
+    source = Path(shutil.copytree(ours, tmp_path / "source"))
+    _command(ours, commands.SpecifyUnit("a", "1"))
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    source_head = _snapshot(source).event_head
+    _merge(ours, source)
+    witness = _snapshot(ours).event_head
+    _command(ours, commands.MarkOpenInCi("x", "old"))
+    later, later_record = _records(ours)[-1]
+    assert later_record.prev == witness
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    assert source_head not in dict(_records(ours))
+    assert later not in dict(_records(source))
+
+    _merge(ours, source)
+    marker = _records(ours)[-1][1].folded_event
+    assert isinstance(marker, MergeRecorded)
+    _rewrite_record(ours, {"origin": later}, recompute=True)
+    _rewrite_record(ours, {
+        "payload": {"ours_head": marker.ours_head, "theirs_head": source_head},
+    }, recompute=True, offset=1)
+
+    _assert_position_refusal(
+        ours, source, monkeypatch, branch="ours", field="origin",
+        digest=later, source_head=source_head,
+    )
+
+
 @pytest.mark.parametrize("field", ["satisfied", "origin"])
 def test_check_event_log_refuses_a_claim_past_a_same_chain_source_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], field: str,
@@ -403,6 +480,37 @@ def test_a_d37_skip_and_inherited_satisfaction_merge_when_the_clear_resolves(
     result = _merge(carrier, source)
     assert result.snapshot.unit("new") is not None
     assert tuple(item.reason for item in result.snapshot.ci_exceptions) == ("fresh",)
+
+
+def test_a_d37_skip_keeps_a_clear_that_predates_the_source_head(tmp_path: Path) -> None:
+    source = _store(tmp_path / "source")
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    ours = Path(shutil.copytree(source, tmp_path / "ours"))
+    _command(ours, commands.SpecifyUnit("a", "1"))
+    _command(ours, commands.ClearOpenInCi("x"))
+    _command(source, commands.ClearOpenInCi("x"))
+    clear = _snapshot(source).event_head
+    _command(source, commands.SpecifyUnit("b", "1"))
+    source_head, source_record = _records(source)[-1]
+    assert source_record.prev == clear
+
+    result = _merge(ours, source)
+    assert result.skipped_records == 1 and not result.snapshot.ci_exceptions
+    marker_digest, marker = _records(ours)[-1]
+    assert isinstance(marker.folded_event, MergeRecorded)
+    assert marker.folded_event.theirs_head == source_head
+    assert marker.satisfied == (clear,)
+
+    # The reverse merge inherits the clear, then incorporates the head that carried it.
+    _merge(source, ours)
+    _, inherited = _records(source)[-1]
+    assert isinstance(inherited.folded_event, MergeRecorded)
+    assert inherited.folded_event.theirs_head == marker_digest
+    assert clear in inherited.satisfied
+    assert marker_digest not in dict(_records(source)) and clear not in dict(_records(ours))
+
+    _command(source, commands.SpecifyUnit("c", "1"))
+    assert _merge(ours, source).snapshot.unit("c") is not None
 
 
 def test_a_satisfied_entry_cannot_name_a_companion_copy(

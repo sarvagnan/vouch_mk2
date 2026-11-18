@@ -38,6 +38,7 @@ from vouch_mk2.store.store import Store
 class ReplayHistory:
     """Physical chain records, their resolved subjects, and the bounds of their claims."""
 
+    # In physical chain order, oldest first.
     records: dict[str, tuple[EventRecord, tuple[UnitRef, ...]]]
     source_heads: dict[str, str]
 
@@ -305,13 +306,39 @@ def _origin_claims(record: EventRecord, units: tuple[UnitRef, ...]) -> tuple[obj
     )
 
 
-def validate_replay_claims(history: ReplayHistory, targets: ReplayHistory) -> None:
+def replay_provenance_positions(
+    history: ReplayHistory, other: ReplayHistory | None = None,
+) -> dict[str, int]:
+    """Index when each digest first became reachable from this physical chain."""
+    records = history.records if other is None else other.records | history.records
+    incorporated: dict[str, int] = {}
+    for digest, (physical, _) in history.records.items():
+        # Extend the preceding prefix's ancestry. Each digest's parents are visited once.
+        pending = [digest]
+        while pending:
+            ancestor = pending.pop()
+            if not ancestor or ancestor == "GENESIS" or ancestor in incorporated:
+                continue
+            incorporated[ancestor] = physical.revision
+            entry = records.get(ancestor)
+            if entry is None:
+                continue
+            record, _ = entry
+            pending.append(record.prev)
+            event = record.folded_event
+            if isinstance(event, MergeRecorded):
+                pending.extend((event.ours_head, event.theirs_head))
+    return incorporated
+
+
+def validate_replay_claims(
+    history: ReplayHistory, targets: ReplayHistory, incorporated: dict[str, int],
+) -> None:
     """Check provenance claims whose digests occur on the target's physical chain."""
     for digest, source_head in reversed(history.source_heads.items()):
         record, units = history.records[digest]
-        # Revisions are comparable when the claimed record and the bound share a chain.
-        bound = targets.records.get(source_head)
-        bound_revision = None if bound is None else bound[0].revision
+        # Both revisions are local to the chain holding the claimed record.
+        bound_revision = incorporated.get(source_head)
         origin = targets.records.get(record.origin)
         if origin is not None:
             original, original_units = origin
@@ -435,6 +462,7 @@ __all__ = [
     "event_fact_key",
     "event_pack_digest",
     "event_unit_references",
+    "replay_provenance_positions",
     "validate_replay_claims",
     "validate_replay_placement",
 ]

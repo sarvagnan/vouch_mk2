@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 
 from vouch_mk2.core import commands as commands
@@ -26,6 +27,7 @@ from vouch_mk2.store.event_log import (
     event_batch_length,
     event_fact_key,
     event_unit_references,
+    replay_provenance_positions,
     validate_replay_claims,
     validate_replay_placement,
 )
@@ -114,10 +116,10 @@ def _artifact_reference_key(
 
 
 def _validate_branch_replay_claims(
-    history: ReplayHistory, targets: ReplayHistory, branch: str,
+    history: ReplayHistory, targets: ReplayHistory, incorporated: dict[str, int], branch: str,
 ) -> None:
     try:
-        validate_replay_claims(history, targets)
+        validate_replay_claims(history, targets, incorporated)
     except StoreError as error:
         raise StoreError(f"merge.{branch}-history-invalid: {error}") from error
 
@@ -185,7 +187,6 @@ def _read_verified_chain(
         raise StoreError(
             f"merge.{branch}-history-invalid: event chain does not replay to snapshot"
         )
-    _validate_branch_replay_claims(history, history, branch)
     return tuple(facts), history
 
 
@@ -344,33 +345,9 @@ def _command_for_event(
             )
 
 
-def _provenance_ancestors(
-    head: str,
-    *chains: tuple[_LoggedEvent, ...],
-) -> frozenset[str]:
-    """Return linear and recorded-merge ancestors visible in either branch."""
-    records = {item.digest: item for chain in chains for item in chain}
-    found: set[str] = set()
-    pending = [head]
-    while pending:
-        digest = pending.pop()
-        if not digest or digest == "GENESIS" or digest in found:
-            continue
-        found.add(digest)
-        item = records.get(digest)
-        if item is None:
-            continue
-        if item.record.prev != "GENESIS":
-            pending.append(item.record.prev)
-        event = item.record.folded_event
-        if isinstance(event, events.MergeRecorded):
-            pending.extend((event.ours_head, event.theirs_head))
-    return frozenset(found)
-
-
 def _source_records_to_replay(
     chain: tuple[_LoggedEvent, ...],
-    incorporated: frozenset[str],
+    incorporated: Collection[str],
     batches: tuple[tuple[_SourceFact, ...], ...],
 ) -> tuple[_LoggedEvent, ...]:
     """Exclude source records already represented by our provenance DAG.
@@ -660,8 +637,12 @@ def merge_store_roots(
         theirs = theirs_store.read_snapshot()
         ours_facts, ours_history = _read_verified_chain(ours_store, ours, "ours")
         theirs_facts, theirs_history = _read_verified_chain(theirs_store, theirs, "theirs")
-        _validate_branch_replay_claims(theirs_history, ours_history, "theirs")
-        _validate_branch_replay_claims(ours_history, theirs_history, "ours")
+        ours_incorporated = replay_provenance_positions(ours_history, theirs_history)
+        theirs_incorporated = replay_provenance_positions(theirs_history, ours_history)
+        _validate_branch_replay_claims(ours_history, ours_history, ours_incorporated, "ours")
+        _validate_branch_replay_claims(theirs_history, theirs_history, theirs_incorporated, "theirs")
+        _validate_branch_replay_claims(theirs_history, ours_history, ours_incorporated, "theirs")
+        _validate_branch_replay_claims(ours_history, theirs_history, theirs_incorporated, "ours")
         ours_chain = tuple(fact.item for fact in ours_facts)
         theirs_chain = tuple(fact.item for fact in theirs_facts)
 
@@ -702,11 +683,10 @@ def merge_store_roots(
             mode = "fast-forward"
             replayed = 0
         else:
-            incorporated = _provenance_ancestors(ours.event_head, ours_chain, theirs_chain)
-            if theirs.event_head in incorporated:
+            if theirs.event_head in ours_incorporated:
                 return MergeOutcome("no-op", ours, 0)
             source_batches = _source_batches(theirs_facts)
-            source_suffix = _source_records_to_replay(theirs_chain, incorporated, source_batches)
+            source_suffix = _source_records_to_replay(theirs_chain, ours_incorporated, source_batches)
             selected = {item.digest for item in source_suffix}
             legacy_refusal = _legacy_ancestry_refusal(
                 ours_chain, theirs_chain, selected,
