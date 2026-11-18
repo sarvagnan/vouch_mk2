@@ -206,6 +206,11 @@ def _upgrade_5_to_6(document: StateDocument) -> StateDocument:
     return upgraded
 
 
+def _upgrade_6_to_7(document: StateDocument) -> StateDocument:
+    """Fence older writers while preserving the snapshot and event objects."""
+    return {**document, "state_format": 7}
+
+
 UPGRADERS: dict[int, Upgrader] = {
     0: _upgrade_0_to_1,
     1: _upgrade_1_to_2,
@@ -213,6 +218,7 @@ UPGRADERS: dict[int, Upgrader] = {
     3: _upgrade_3_to_4,
     4: _upgrade_4_to_5,
     5: _upgrade_5_to_6,
+    6: _upgrade_6_to_7,
 }
 
 

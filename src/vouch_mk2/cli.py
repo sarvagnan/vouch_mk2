@@ -1188,6 +1188,10 @@ def _merge_handler(namespace: argparse.Namespace) -> int:
                     "replayed_records": result.replayed_records,
                     "skipped_records": result.skipped_records,
                     "revision": result.snapshot.revision,
+                    **(
+                        {"incorporated_batches": result.incorporated_batches}
+                        if result.incorporated_batches else {}
+                    ),
                 },
                 sort_keys=True,
             )
@@ -1199,6 +1203,10 @@ def _merge_handler(namespace: argparse.Namespace) -> int:
             + (
                 f"; skipped {result.skipped_records} redundant open-in-CI clear(s)"
                 if result.skipped_records else ""
+            )
+            + (
+                f"; skipped {result.incorporated_batches} already-incorporated batch(es)"
+                if result.incorporated_batches else ""
             )
         )
     return 0
@@ -1218,6 +1226,10 @@ def _merge_git_stages_handler(namespace: argparse.Namespace) -> int:
         + (
             f"; skipped {result.skipped_records} redundant open-in-CI clear(s)"
             if result.skipped_records else ""
+        )
+        + (
+            f"; skipped {result.incorporated_batches} already-incorporated batch(es)"
+            if result.incorporated_batches else ""
         )
     )
     next_step = shlex.join(("git", "add", "--", namespace.root))
@@ -1518,6 +1530,7 @@ def _present_upgrade(result: UpgradeResult, *, dry_run: bool) -> None:
         f"{prefix}{action} {result.evidence_head_summaries_rebuilt} "
         "evidence-head summaries"
     )
+    print(f"{prefix}version-1 merge markers: {result.version_1_merge_markers}")
     if dry_run:
         print("dry-run: no changes written")
 

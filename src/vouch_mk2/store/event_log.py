@@ -16,11 +16,13 @@ from vouch_mk2.core.events import (
     Event,
     EventRecord,
     EvidenceRecorded,
+    MergeRecorded,
     PreLogHistoryRecorded,
 )
 from vouch_mk2.core.model import Snapshot
 from vouch_mk2.store.codec import encode_event_record
 from vouch_mk2.store.digests import ArtifactKind, digest_of
+from vouch_mk2.store.errors import StoreError
 from vouch_mk2.store.store import Store
 
 
@@ -75,9 +77,14 @@ def build_event_records(
     actor: str,
     run_id: str,
     recorded_at: str | None = None,
-    source_records: tuple[EventRecord | None, ...] | None = None,
+    source_records: tuple[tuple[str, EventRecord] | None, ...] | None = None,
+    satisfied: tuple[str, ...] = (),
 ) -> tuple[Snapshot, tuple[tuple[ArtifactKind, bytes], ...], tuple[EventRecord, ...]]:
-    """Fold events, optionally retaining corresponding source envelope claims."""
+    """Fold events, retaining source claims and roots for matched copies.
+
+    During replay, an unmatched event is a generated companion. Its own EVENT
+    digest is its root. Later copies carry that digest and inherit the flag.
+    """
     if source_records is not None and len(source_records) != len(events):
         raise ValueError("source_records must contain one entry per event")
     timestamp = (
@@ -89,7 +96,8 @@ def build_event_records(
     objects: list[tuple[ArtifactKind, bytes]] = []
     records: list[EventRecord] = []
     for index, event in enumerate(events):
-        source = None if source_records is None else source_records[index]
+        counterpart = None if source_records is None else source_records[index]
+        source_digest, source = ("", None) if counterpart is None else counterpart
         revision = (
             event.baseline.revision
             if isinstance(event, PreLogHistoryRecorded)
@@ -103,6 +111,10 @@ def build_event_records(
             actor=actor if source is None else source.actor,
             run_id=run_id if source is None else source.run_id,
             pack_digest=event_pack_digest(event),
+            origin="" if source is None else source.origin or source_digest,
+            origin_format=None if source is None else source.origin_format or source.event_format,
+            satisfied=satisfied,
+            generated=(source_records is not None) if source is None else source.generated,
         )
         data = encode_event_record(record)
         digest = digest_of(ArtifactKind.EVENT, data)
@@ -115,6 +127,26 @@ def build_event_records(
         objects.append((ArtifactKind.EVENT, data))
         records.append(record)
     return current, tuple(objects), tuple(records)
+
+
+def validate_replay_placement(chain: Sequence[tuple[str, EventRecord]]) -> None:
+    """Require origin and generated to lie inside physically appended version-2 blocks."""
+    positions = {digest: index for index, (digest, _record) in enumerate(chain)}
+    block_end = -1
+    block_start = len(chain)
+    for index in range(len(chain) - 1, -1, -1):
+        digest, record = chain[index]
+        event = record.folded_event
+        if record.event_format == 2 and isinstance(event, MergeRecorded):
+            boundary = positions.get(event.ours_head, index)
+            if boundary >= index:
+                raise StoreError(f"merge record {digest} has no earlier linear ours head")
+            if not record.origin:
+                block_end = index
+                block_start = boundary + 1
+        if (record.origin or record.generated) and not block_start <= index < block_end:
+            field = "generated" if record.generated else "origin"
+            raise StoreError(f"{field} on event {digest} is outside a version-2 merge block")
 
 
 def commit_events(

@@ -337,7 +337,7 @@ def test_require_effects_is_recorded_and_one_way(tmp_path: Path) -> None:
     assert b'"effects_required":true' in encode_snapshot(_snapshot(root))
     _must("require-effects", "--root", root)  # idempotent, still required
     assert _snapshot(root).effects_required is True
-    assert CURRENT_STATE_FORMAT == 6
+    assert CURRENT_STATE_FORMAT == 7
     assert mk2.CMD_REQUIRE_EFFECTS == "require-effects"
     assert not [name for name in dir(mk2) if name.startswith("CMD_") and "EFFECT" in name and name != "CMD_REQUIRE_EFFECTS"]
 

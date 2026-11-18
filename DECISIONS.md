@@ -1639,3 +1639,13 @@ unit, `refreeze-green@1`. Amends D-17.
   no-ops are unaffected too. The audit found the pilot's history clean: no replayed record copied a
   command its receiver already held, and its next ordinary merge passes rules (a) and (b).
 
+- **Note (2026-11-18, owner, from Sol's implementation report).** A companion that merge replay
+  generates has no source occurrence, and it cannot name itself as `origin`, since an object cannot
+  contain its own digest. Such a record carries `"generated": true` and no `origin`; its root is its
+  own digest. A copy of it carries `origin` (that digest), `origin_format` 2 and `generated: true`,
+  inherited unchanged by further copies. `generated` is valid only inside a version-2 merge block. The
+  companion rule then applies to every excluded batch holding a `generated` record, with no inference
+  from claims. Correction to the state-format bullet: an older binary refuses a format-7 store with
+  D-13's "written by a newer vouch" message; the "run upgrade" message is what a format-7 binary
+  prints for a format-6 store.
+

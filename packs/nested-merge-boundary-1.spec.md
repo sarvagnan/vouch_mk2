@@ -10,6 +10,9 @@ merge writes, version-2 envelopes with `origin` and `satisfied`, state format 7,
 reads and refusals (D-31 note of 2026-11-15).
 **Pack/2** (DEV-nmb-01): pack/1's R3 needed ancestry across replay copies, which D-38 does not
 decide; R3 became a three-store round and the Promise was narrowed.
+**Pack/4** (DEV-nmb-03): from Sol's implementation report, a generated companion cannot carry its
+own digest as `origin`, so it is flagged `generated` instead (D-41 note), pinned by R31; R27 counts
+only `dep`'s invalidation (x's own was already present); R28 creates its scratch parent directory.
 **Pack/3** (DEV-nmb-02): Astra's review showed that, with D-38 alone, a merge can silently re-apply
 a copy of a command the receiver already merged and undid, and Fable showed the same on `main`
 without a nested merge. The user decided D-41 and that it ships in this unit. Pack/3 restores pack/1's
@@ -34,7 +37,7 @@ merge that needs that record's boundary refuses atomically and names the record.
 - CLI scenarios (R1 to R7, R15, R26) build stores with `Store.init` and the CLI, each command run with
   `--actor` set to the store's name (A, B, C, D). Each store starts as a copy of one holding
   `shared@1`, then specifies its own unit (`a@1`, `b@1`, …). "X<-Y" is `merge --root X --other Y`.
-- Library scenarios (R8 to R14, R16 to R19, R27 to R30) start from store A holding `x@1` specified and frozen
+- Library scenarios (R8 to R14, R16 to R19, R27 to R31) start from store A holding `x@1` specified and frozen
   label-only, copied once per other store. Commands go through `decide()` and `commit_events` with
   the store's name as actor, an empty run claim and the fixed recorded time
   `2026-11-18T00:00:00+00:00`, so a copy and its original agree on every claim. Merges go through
@@ -49,8 +52,10 @@ merge that needs that record's boundary refuses atomically and names the record.
   just before the merge).
 - Wire format pinned by this pack: a version-2 event object is the same canonical JSON as today plus
   `"event_format": 2`; a replayed record adds `"origin"` (a digest) and `"origin_format"` (1 or 2); the
-  merge's own final record adds `"satisfied"` (a list of digests); a directly authored record has
-  neither `origin` nor `satisfied`. `EventRecord` exposes them as `origin` (empty when absent) and
+  merge's own final record adds `"satisfied"` (a list of digests); a companion merge replay
+  generates, having no source occurrence, carries `"generated": true` and no `origin` (its root is its
+  own digest), and a copy of it carries `origin`, `origin_format` 2 and `"generated": true`; a directly
+  authored record has none of `origin`, `satisfied` or `generated`. `EventRecord` exposes them as `origin` (empty when absent) and
   `satisfied` (a tuple). R30 edits a stored object as a hand edit would: it re-encodes the JSON with
   `encode_document` and re-chains every later record.
 - "Refused before lock" means the merge exits 2 with the named code, `Store.write_locked` is never
@@ -162,7 +167,7 @@ merge that needs that record's boundary refuses atomically and names the record.
 - **R27 — A skipped companion whose effect OURS already has.**
   `test_a_skipped_companion_whose_effect_ours_already_has_merges`. In R18's stores, C<-B replays and
   leaves `dep` invalidated on C; then C<-D replays: C gains `d`, `dep` stays invalidated, and C's chain
-  holds exactly one `DeviationAmended` and one `UnitInvalidated`.
+  holds exactly one `DeviationAmended` and exactly one `UnitInvalidated` for `dep`.
 - **R28 — The merge record lists exactly the facts it satisfied.**
   `test_the_merge_record_lists_exactly_the_facts_it_satisfied`. A marks x once (`shared`) before the
   copies. OURS specifies `ours-only`; OURS and THEIRS each clear; OURS<-THEIRS skips THEIRS' clear,
@@ -180,6 +185,10 @@ merge that needs that record's boundary refuses atomically and names the record.
   to carry an `origin`: OURS<-THEIRS is refused before lock with `merge.theirs-history-invalid`, and
   `check` on THEIRS reports `check.event-log` FAIL. Separately, A marks x, CARRIER copies it, and the
   copy's actor is edited: A<-CARRIER is refused before lock with `merge.theirs-history-invalid`.
+- **R31 — A generated companion is flagged, and its copies name it.**
+  `test_a_generated_companion_is_flagged_and_its_copies_name_it`. In R18's stores, A's generated
+  `UnitInvalidated` for `dep` has `generated` true and no `origin`; D's copy of it has `generated` true,
+  `origin` equal to A's record's digest and `origin_format` 2.
 
 ## Ground rules
 
@@ -192,8 +201,8 @@ merge that needs that record's boundary refuses atomically and names the record.
   a copy of a copy) and the origin's envelope version on every record replay writes; `satisfied` on
   the merge's own final record; coverage is every digest, `origin` and `satisfied` entry on OURS'
   chain; selection is per source command batch, never a prefix cut; a batch excluded as already
-  incorporated, by exact digest, D-38 block or origin, whose source replay generated a companion
-  requires OURS to already show that companion's effect, else `merge.conflict`. Every THEIRS record
+  incorporated, by exact digest, D-38 block or origin, that holds a `generated` record or a copy
+  of one requires OURS to already show that companion's effect, else `merge.conflict`. Every THEIRS record
   after the exact shared cut is validated, whether replayed or excluded: a malformed or misplaced
   `origin` (on a record outside a version-2 merge block) refuses with `merge.theirs-history-invalid`
   and fails `check.event-log` on that store; an `origin` disagreeing with OURS' counterpart on kind,

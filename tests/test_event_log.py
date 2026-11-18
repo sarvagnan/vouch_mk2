@@ -71,7 +71,7 @@ def test_state_format_4_upgrader_records_the_pre_log_gap(tmp_path: Path) -> None
     from vouch_mk2.store import ArtifactKind, Store
     from vouch_mk2.store.codec import CURRENT_STATE_FORMAT
 
-    assert CURRENT_STATE_FORMAT == 6
+    assert CURRENT_STATE_FORMAT == 7
     # A GENUINE legacy store: the owner-pinned canonical format-3 document, with no event
     # objects at all. (Downgrading a format-4 store instead would be the very re-baselining
     # path R8 refuses -- see the pack/2 amendment.)

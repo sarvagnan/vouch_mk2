@@ -40,6 +40,7 @@ from vouch_mk2.core import (
     evidence_kind_outcome_coherent,
     fold_evidence_pack_summaries,
 )
+from vouch_mk2.core.events import MergeRecorded
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.explore import emit_tables
 from vouch_mk2.formal.invariants import INVARIANTS
@@ -79,6 +80,7 @@ from vouch_mk2.store.event_log import (
     ci_run_id,
     commit_events,
     default_actor,
+    validate_replay_placement,
 )
 
 
@@ -163,8 +165,14 @@ def _check_event_log(store: Store, snapshot: Snapshot) -> CheckResult:
         digest = record.prev
         expected_revision = record.revision - 1
 
+    chain = tuple(reversed(reverse_chain))
+    try:
+        validate_replay_placement(chain)
+    except StoreError as error:
+        return CheckResult(mk2.CHECK_EVENT_LOG, Verdict.FAIL, str(error))
+
     replay = Snapshot()
-    for record_digest, record in reversed(reverse_chain):
+    for record_digest, record in chain:
         try:
             replay = apply(
                 replay,
@@ -228,6 +236,7 @@ class UpgradeResult:
     assertions: tuple[tuple[str, bool], ...]
     projections_regenerated: bool
     evidence_head_summaries_rebuilt: int
+    version_1_merge_markers: int
 
 
 class ProjectionRegenerationError(StoreError):
@@ -1184,6 +1193,21 @@ def _refuse_event_log_downgrade_signals(
         )
 
 
+def _count_legacy_merges(store: Store, head: str) -> int:
+    count = 0
+    visited: set[str] = set()
+    digest = head
+    while digest and digest != "GENESIS":
+        if digest in visited:
+            raise StoreError(f"event chain cycle at {digest!r}")
+        visited.add(digest)
+        record = decode_event_record(store.get_object(ArtifactKind.EVENT, digest))
+        if record.event_format == 1 and isinstance(record.folded_event, MergeRecorded):
+            count += 1
+        digest = record.prev
+    return count
+
+
 def upgrade_store(
     store: Store,
     *,
@@ -1207,13 +1231,16 @@ def upgrade_store(
             store_name=os.path.dirname(store.generated_path("map.json")),
         )
         snapshot = decode_snapshot(encode_document(upgraded))
-        snapshot, rebuilt = _rebuild_evidence_head_summaries(store, snapshot)
+        rebuilt = 0
+        if steps != [(6, 7)]:
+            snapshot, rebuilt = _rebuild_evidence_head_summaries(store, snapshot)
         encode_snapshot(snapshot)
         return UpgradeResult(
             steps=tuple(steps),
             assertions=tuple(sorted(published_once.items())) if steps else (),
             projections_regenerated=False,
             evidence_head_summaries_rebuilt=rebuilt,
+            version_1_merge_markers=_count_legacy_merges(store, snapshot.event_head),
         )
 
     with store.write_locked():
@@ -1226,7 +1253,10 @@ def upgrade_store(
             store_name=os.path.dirname(store.generated_path("map.json")),
         )
         snapshot = decode_snapshot(encode_document(upgraded))
-        snapshot, rebuilt = _rebuild_evidence_head_summaries(store, snapshot)
+        legacy_merges = _count_legacy_merges(store, snapshot.event_head)
+        rebuilt = 0
+        if steps != [(6, 7)]:
+            snapshot, rebuilt = _rebuild_evidence_head_summaries(store, snapshot)
         event_objects: tuple[tuple[ArtifactKind, bytes], ...] = ()
         if (3, 4) in steps:
             baseline = replace(snapshot, event_head="")
@@ -1238,7 +1268,7 @@ def upgrade_store(
                 actor=default_actor() if actor is None else actor,
                 run_id=ci_run_id() if run_id is None else run_id,
             )
-        encoded = encode_snapshot(snapshot)
+        encoded = encode_document(upgraded) if steps == [(6, 7)] else encode_snapshot(snapshot)
         state_upgraded = bool(steps) or encoded != original
         if state_upgraded:
             if event_objects:
@@ -1266,6 +1296,7 @@ def upgrade_store(
         assertions=tuple(sorted(published_once.items())) if steps else (),
         projections_regenerated=True,
         evidence_head_summaries_rebuilt=rebuilt,
+        version_1_merge_markers=legacy_merges,
     )
 
 

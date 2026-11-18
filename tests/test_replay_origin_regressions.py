@@ -1,0 +1,472 @@
+"""D-41 transport, validation and repeat-replay regressions."""
+
+from __future__ import annotations
+
+import datetime
+import json
+import shutil
+import subprocess
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
+from typing import cast
+from unittest.mock import patch
+
+import pytest
+
+from vouch_mk2.cli import main
+from vouch_mk2.core import commands
+from vouch_mk2.core.decide import Accepted, Refused, apply, decide
+from vouch_mk2.core.events import (
+    DeviationAmended, EventRecord, MergeRecorded, OpenInCiMarked, UnitInvalidated,
+)
+from vouch_mk2.core.model import AnchorMode, DeviationType, Snapshot, Tier, UnitRef
+from vouch_mk2.store import ArtifactKind, Store, StoreError, decode_event_record, digest_of
+from vouch_mk2.store import codec, merge as merge_module
+from vouch_mk2.store.codec import decode_raw_document, encode_document, encode_snapshot
+from vouch_mk2.store.event_log import commit_events
+from vouch_mk2.store.merge import MergeOutcome, merge_store_roots
+
+TIME = "2026-11-18T00:00:00+00:00"
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "state-format"
+
+
+def _command(root: Path, command: commands.Command, *, actor: str = "author") -> None:
+    with Store.open(str(root)) as store, store.write_locked():
+        before = store.read_snapshot()
+        decision = decide(before, command)
+        assert isinstance(decision, Accepted), (command, decision)
+        commit_events(store, before, decision.events, actor=actor, run_id="", recorded_at=TIME)
+
+
+def _snapshot(root: Path) -> Snapshot:
+    with Store.open(str(root), read_only=True) as store:
+        return store.read_snapshot()
+
+
+def _records(root: Path) -> tuple[tuple[str, EventRecord], ...]:
+    chain: list[tuple[str, EventRecord]] = []
+    with Store.open(str(root), read_only=True) as store:
+        digest = store.read_snapshot().event_head
+        while digest != "GENESIS":
+            record = decode_event_record(store.get_object(ArtifactKind.EVENT, digest))
+            chain.append((digest, record))
+            digest = record.prev
+    return tuple(reversed(chain))
+
+
+def _store(root: Path, *, freeze: bool = True) -> Path:
+    Store.init(str(root)).close()
+    _command(root, commands.SpecifyUnit("x", "1"))
+    if freeze:
+        _command(root, commands.FreezeAcceptance("x", "pack/1"))
+    return root
+
+
+def _merge(ours: Path, theirs: Path) -> MergeOutcome:
+    result = merge_store_roots(str(ours), str(theirs), actor=ours.name, run_id="")
+    assert isinstance(result, MergeOutcome), result
+    assert result.mode == "replayed"
+    return result
+
+
+def _carry_mark(ours: Path, carrier: Path) -> None:
+    _command(ours, commands.MarkOpenInCi("x", "old"))
+    _command(carrier, commands.SpecifyUnit("carrier", "1"))
+    _merge(carrier, ours)
+
+
+def _rewrite_copy(
+    root: Path, changes: dict[str, object], *, recompute: bool,
+) -> None:
+    """Rewrite a copy and its final marker with valid artifact hashes."""
+    chain = _records(root)
+    target = len(chain) - 2
+    before = Snapshot()
+    previous = "GENESIS"
+    objects = root / "objects" / "sha256"
+    for index, (digest, record) in enumerate(chain):
+        if index >= target:
+            raw = decode_raw_document((objects / digest).read_bytes())
+            if index == target:
+                assert record.origin
+                raw.update(changes)
+            else:
+                assert isinstance(record.folded_event, MergeRecorded)
+                raw["prev"] = previous
+            data = encode_document(raw)
+            digest = digest_of(ArtifactKind.EVENT, data)
+            (objects / digest).write_bytes(data)
+            if recompute:
+                record = decode_event_record(data)
+        if recompute:
+            before = apply(
+                before, (record.folded_event,), event_digests=(digest,),
+                event_run_ids=(record.run_id,),
+            )
+        previous = digest
+    snapshot = before if recompute else replace(_snapshot(root), event_head=previous)
+    (root / "state.json").write_bytes(encode_snapshot(snapshot))
+
+
+def _forbid_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(_store: Store) -> None:
+        pytest.fail("merge entered the write lock")
+    monkeypatch.setattr(Store, "write_locked", forbidden)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"event": "CiPolicySet", "payload": {"policy": "strict"}},
+        {"payload": {"name": "y@1", "reason": "old"}},
+        {"actor": "different"},
+        {"run_id": "123"},
+        {"recorded_at": "2026-11-19T00:00:00+00:00"},
+        {"generated": True},
+    ],
+    ids=["kind", "subject", "actor", "run", "time", "generated"],
+)
+def test_a_covered_copy_must_match_each_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: dict[str, object],
+) -> None:
+    ours = _store(tmp_path / "ours")
+    _command(ours, commands.SpecifyUnit("y", "1"))
+    _command(ours, commands.FreezeAcceptance("y", "y-pack/1"))
+    carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
+    _carry_mark(ours, carrier)
+    _rewrite_copy(carrier, change, recompute=True)
+    _forbid_lock(monkeypatch)
+    with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .* disagrees"):
+        merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["", "0" * 63, "0" * 65, "A" * 64, "z" * 64, 42],
+    ids=["empty", "short", "long", "uppercase", "nonhex", "number"],
+)
+def test_malformed_origin_fails_merge_and_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], origin: object,
+) -> None:
+    ours = _store(tmp_path / "ours")
+    carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
+    _carry_mark(ours, carrier)
+    _rewrite_copy(carrier, {"origin": origin}, recompute=False)
+    _forbid_lock(monkeypatch)
+    with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .*origin"):
+        merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
+    assert main(["check", "--root", str(carrier)]) == 1
+    assert any(
+        line.startswith("FAIL") and "check.event-log" in line and "origin" in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "value", "detail"),
+    [
+        ("direct", True, "outside a version-2 merge block"),
+        ("direct", False, "expected true"),
+        ("copy", 1, "expected boolean"),
+        ("copy", "true", "expected boolean"),
+    ],
+    ids=["outside", "outside-false", "integer", "string"],
+)
+def test_invalid_generated_fails_merge_and_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    mode: str, value: object, detail: str,
+) -> None:
+    ours = _store(tmp_path / "ours")
+    theirs = Path(shutil.copytree(ours, tmp_path / "theirs"))
+    if mode == "copy":
+        _carry_mark(ours, theirs)
+        _rewrite_copy(theirs, {"generated": value}, recompute=False)
+    else:
+        _command(theirs, commands.SpecifyUnit("theirs", "1"))
+        snapshot = _snapshot(theirs)
+        objects = theirs / "objects" / "sha256"
+        raw = decode_raw_document((objects / snapshot.event_head).read_bytes())
+        raw["generated"] = value
+        data = encode_document(raw)
+        digest = digest_of(ArtifactKind.EVENT, data)
+        (objects / digest).write_bytes(data)
+        (theirs / "state.json").write_bytes(encode_snapshot(replace(snapshot, event_head=digest)))
+    _forbid_lock(monkeypatch)
+    with pytest.raises(StoreError, match=rf"merge\.theirs-history-invalid: .*generated.*{detail}"):
+        merge_store_roots(str(ours), str(theirs), actor="reviewer", run_id="")
+    assert main(["check", "--root", str(theirs)]) == 1
+    assert any(
+        line.startswith("FAIL") and "check.event-log" in line and "generated" in line and detail in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_a_copied_setting_keeps_the_new_mode_and_later_tier(tmp_path: Path) -> None:
+    ours = _store(tmp_path / "ours", freeze=False)
+    source = Path(shutil.copytree(ours, tmp_path / "source"))
+    carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
+    _command(ours, commands.SpecifyUnit("ours-only", "1"))
+    _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    _command(source, commands.SetAnchorMode(AnchorMode.CI))
+    _command(source, commands.SetTier(Tier.STANDARD))
+    _merge(ours, source)
+    _command(ours, commands.SetAnchorMode(AnchorMode.NONE))
+    _command(ours, commands.SetTier(Tier.HIGH))
+    _command(source, commands.SpecifyUnit("new", "1"))
+    _merge(carrier, source)
+    _merge(ours, carrier)
+    after = _snapshot(ours)
+    assert after.anchor_mode is AnchorMode.NONE and after.tier is Tier.HIGH
+    assert after.unit("new") is not None
+
+
+def test_copied_lifecycle_steps_do_not_run_after_a_refreeze(tmp_path: Path) -> None:
+    ours = _store(tmp_path / "ours", freeze=False)
+    source = Path(shutil.copytree(ours, tmp_path / "source"))
+    carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
+    _command(ours, commands.SpecifyUnit("ours-only", "1"))
+    _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    for command in (
+        commands.FreezeAcceptance("x", "pack/1"),
+        commands.MarkReady("x"),
+        commands.StartWork("x"),
+    ):
+        _command(source, command)
+    _merge(ours, source)
+    for command in (
+        commands.OpenDeviation("dev", DeviationType.PACK_DEFECT, UnitRef("x", "1")),
+        commands.AmendDeviation("dev", "pack/2"),
+        commands.Respecify("x"),
+        commands.FreezeAcceptance("x", "pack/2"),
+    ):
+        _command(ours, command)
+    _command(source, commands.SpecifyUnit("new", "1"))
+    _merge(carrier, source)
+    assert _merge(ours, carrier).incorporated_batches >= 3
+    unit = _snapshot(ours).unit("x")
+    assert unit is not None and unit.acceptance_pack_version == "pack/2"
+    assert unit.status.value == "acceptance-frozen"
+    assert _snapshot(ours).unit("new") is not None
+
+
+def test_an_omitted_companion_root_is_written_and_inherited(tmp_path: Path) -> None:
+    ours = _store(tmp_path / "ours")
+    source = Path(shutil.copytree(ours, tmp_path / "source"))
+    carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
+    _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    _command(ours, commands.OpenDeviation("ours", DeviationType.PACK_DEFECT, UnitRef("x", "1")))
+    _command(source, commands.OpenDeviation("theirs", DeviationType.PACK_DEFECT, UnitRef("x", "1")))
+    omitted, _ = _records(source)[-1]
+    _merge(ours, source)
+    assert _records(ours)[-1][1].satisfied == (omitted,)
+    _merge(carrier, ours)
+    assert _records(carrier)[-1][1].satisfied == (omitted,)
+
+
+def _start_dependent(base: Path) -> None:
+    _command(base, commands.SpecifyUnit("dep", "1", ("x",)))
+    _command(base, commands.FreezeAcceptance("dep", "dep-pack/1"))
+    _command(base, commands.MarkReady("dep"))
+    _command(base, commands.StartWork("dep"))
+
+
+def _amend_primary(primary: Path, *, actor: str = "author") -> None:
+    _command(primary, commands.OpenDeviation("dev", DeviationType.PACK_DEFECT, UnitRef("x", "1")))
+    _command(primary, commands.AmendDeviation("dev", "pack/2"), actor=actor)
+
+
+def _dependent_invalidation(root: Path) -> tuple[str, EventRecord]:
+    return next(
+        (digest, record) for digest, record in _records(root)
+        if isinstance(record.folded_event, UnitInvalidated) and record.folded_event.name == "dep"
+    )
+
+
+def test_a_copy_of_a_copy_retains_the_generated_flag_and_root(tmp_path: Path) -> None:
+    base = _store(tmp_path / "base")
+    primary = Path(shutil.copytree(base, tmp_path / "primary"))
+    carrier = Path(shutil.copytree(base, tmp_path / "carrier"))
+    onward = Path(shutil.copytree(base, tmp_path / "onward"))
+    _start_dependent(base)
+    _amend_primary(primary)
+    _merge(base, primary)
+    root, generated = _dependent_invalidation(base)
+    assert generated.generated and not generated.origin and generated.origin_format is None
+
+    _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    _merge(carrier, base)
+    _command(onward, commands.SpecifyUnit("onward-only", "1"))
+    _merge(onward, carrier)
+    for branch in (carrier, onward):
+        digest, record = _dependent_invalidation(branch)
+        assert digest != root
+        assert record.generated and record.origin == root and record.origin_format == 2
+
+
+def test_skipping_the_amendment_keeps_its_existing_invalidations(tmp_path: Path) -> None:
+    base = _store(tmp_path / "base")
+    primary = Path(shutil.copytree(base, tmp_path / "primary"))
+    carrier = Path(shutil.copytree(base, tmp_path / "carrier"))
+    _start_dependent(base)
+    ours = Path(shutil.copytree(base, tmp_path / "ours"))
+    _amend_primary(primary)
+    _merge(base, primary)
+    _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    _merge(carrier, base)
+    _merge(ours, primary)
+    merge = _merge(ours, carrier)
+    assert merge.incorporated_batches > 0
+    invalidated = [
+        record.folded_event.name for _, record in _records(ours)
+        if isinstance(record.folded_event, UnitInvalidated)
+    ]
+    assert sorted(invalidated) == ["dep", "x"]
+
+
+def test_skipping_a_batch_checks_generated_effect_when_only_copies_survive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _store(tmp_path / "base")
+    primary = Path(shutil.copytree(base, tmp_path / "primary"))
+    ours = Path(shutil.copytree(base, tmp_path / "ours"))
+    theirs = Path(shutil.copytree(base, tmp_path / "theirs"))
+    _start_dependent(base)
+    _amend_primary(primary, actor=base.name)
+    with patch.object(merge_module, "datetime") as clock:
+        clock.datetime.now.return_value = datetime.datetime.fromisoformat(TIME)
+        _merge(base, primary)
+    root, _ = _dependent_invalidation(base)
+    amendment_root = next(
+        digest for digest, record in _records(primary)
+        if isinstance(record.folded_event, DeviationAmended)
+    )
+    for branch in (ours, theirs):
+        _command(branch, commands.SpecifyUnit(branch.name, "1"))
+        _merge(branch, base)
+        digest, companion = _dependent_invalidation(branch)
+        amendment = next(
+            record for _, record in _records(branch)
+            if isinstance(record.folded_event, DeviationAmended)
+        )
+        assert digest != root and companion.origin == root
+        assert amendment.origin == amendment_root
+        assert (amendment.actor, amendment.recorded_at, amendment.run_id) == (
+            companion.actor, companion.recorded_at, companion.run_id,
+        )
+    _command(ours, commands.Respecify("dep"))
+    _forbid_lock(monkeypatch)
+    before = _snapshot(ours)
+    result = merge_store_roots(str(ours), str(theirs), actor="reviewer", run_id="")
+    assert isinstance(result, Refused)
+    assert result.violations[0].code == "merge.conflict"
+    assert "UnitInvalidated name='dep'" in result.violations[0].detail
+    assert _snapshot(ours) == before
+
+
+def test_a_mixed_format_store_fences_the_old_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture = decode_raw_document((FIXTURES / "format6-direct-event.json").read_bytes())
+    state = cast(dict[str, object], fixture["state"])
+    event = encode_document(fixture["event"])
+    root = tmp_path / "store"
+    with Store.init(str(root)) as store, store.write_locked():
+        assert store.put_object(ArtifactKind.EVENT, event) == state["event_head"]
+    (root / "state.json").write_bytes(encode_document(state))
+    (root / "state-format.json").write_text("6\n")
+    assert main(["upgrade", "--root", str(root)]) == 0
+    assert "version-1 merge markers: 0" in capsys.readouterr().out.splitlines()
+    assert decode_raw_document((root / "state.json").read_bytes()) == {**state, "state_format": 7}
+    _command(root, commands.SpecifyUnit("after", "1"))
+    assert [record.event_format for _, record in _records(root)] == [1, 2]
+    before = (root / "state.json").read_bytes()
+    events = {item.name: item.read_bytes() for item in (root / "objects" / "sha256").iterdir()}
+    # Exercise the format-6 writer's D-13 state guard on the normal CLI path.
+    monkeypatch.setattr(codec, "CURRENT_STATE_FORMAT", 6)
+    assert main(["specify", "--root", str(root), "--name", "old", "--version", "1"]) == 2
+    assert "format 7 was written by a newer vouch" in capsys.readouterr().err
+    assert (root / "state.json").read_bytes() == before
+    assert {item.name: item.read_bytes() for item in (root / "objects" / "sha256").iterdir()} == events
+
+
+def _git(project: Path, *args: str, expect: int = 0) -> str:
+    result = subprocess.run(
+        ("git", "-C", str(project), *args), text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == expect, (args, result.stdout, result.stderr)
+    return result.stdout
+
+
+@pytest.mark.parametrize("operation", ["merge", "rebase"])
+def test_git_stage_replay_preserves_the_receiver_clear(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], operation: str,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _git(project, "init", "-b", "main")
+    _git(project, "config", "user.name", "Vouch Test")
+    _git(project, "config", "user.email", "vouch@example.invalid")
+    (project / ".gitignore").write_text(".vouch/.lock\n")
+    root = _store(project / ".vouch")
+    _git(project, "add", "--", ".gitignore", ".vouch")
+    _git(project, "commit", "-m", "Base")
+    source = Path(shutil.copytree(root, tmp_path / "source"))
+    _command(source, commands.MarkOpenInCi("x", "old"), actor="source")
+    _command(source, commands.SpecifyUnit("independent", "1"))
+
+    _git(project, "checkout", "-b", "incoming")
+    _command(root, commands.SpecifyUnit("carrier", "1"))
+    _merge(root, source)
+    _git(project, "add", "--", ".vouch")
+    _git(project, "commit", "-m", "Carry the old mark")
+
+    _git(project, "checkout", "main")
+    _command(root, commands.MarkOpenInCi("x", "old"), actor="source")
+    _command(root, commands.ClearOpenInCi("x"))
+    _git(project, "add", "--", ".vouch")
+    _git(project, "commit", "-m", "Record and clear the mark")
+    ours_prefix = _records(root)
+    if operation == "merge":
+        _git(project, "merge", "--no-edit", "incoming", expect=1)
+    else:
+        _git(project, "checkout", "incoming")
+        _git(project, "rebase", "main", expect=1)
+    index = _git(project, "ls-files", "--stage", "--", ".vouch")
+    assert " 2\t.vouch/state.json" in index and " 3\t.vouch/state.json" in index
+
+    assert main(["merge-git-stages", "--root", str(root), "--actor", "recovery"]) == 0
+    assert "already-incorporated batch(es)" in capsys.readouterr().out
+    assert _git(project, "ls-files", "--stage", "--", ".vouch") == index
+    assert _records(root)[:len(ours_prefix)] == ours_prefix
+    assert sum(isinstance(record.folded_event, OpenInCiMarked) for _, record in _records(root)) == 1
+    after = _snapshot(root)
+    assert not after.ci_exceptions
+    assert {unit.name for unit in after.units} == {"x", "carrier", "independent"}
+
+
+@pytest.mark.parametrize("source_advanced", [False, True], ids=["reverse-block", "origin"])
+def test_merge_json_reports_batches_newly_excluded_by_origin(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], source_advanced: bool,
+) -> None:
+    ours = _store(tmp_path / "ours")
+    source = Path(shutil.copytree(ours, tmp_path / "source"))
+    carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    assert main(["merge", "--root", str(ours), "--other", str(source), "--json"]) == 0
+    normal = json.loads(capsys.readouterr().out)
+    assert "incorporated_batches" not in normal
+    if source_advanced:
+        _command(source, commands.SpecifyUnit("later", "1"))
+    _command(carrier, commands.SpecifyUnit("carrier", "1"))
+    _merge(carrier, source)
+    _command(ours, commands.ClearOpenInCi("x"))
+    assert main(["merge", "--root", str(ours), "--other", str(carrier), "--json"]) == 0
+    filtered = json.loads(capsys.readouterr().out)
+    if source_advanced:
+        assert filtered["incorporated_batches"] == 1
+    else:
+        # Reverse provenance already excludes the mark and its closing marker.
+        assert "incorporated_batches" not in filtered
+    assert filtered["skipped_records"] == 0

@@ -159,7 +159,7 @@ def test_cli_gap_green_keeps_the_earlier_green_when_unchanged_binding_needs_no_n
 def _upgraded_green() -> Snapshot:
     document = json.loads((FIXTURES / "format5-refreeze.json").read_bytes())
     upgraded, steps = upgrade_document(document)
-    assert steps == [(5, 6)]
+    assert steps == [(5, 6), (6, 7)]
     return decode_snapshot(encode_document(upgraded))
 
 
@@ -197,7 +197,8 @@ def test_format5_upgrade_preserves_the_old_green_without_inventing_a_previous_fr
     before = encode_document(original)
     upgraded = UPGRADERS[5](original)
     assert encode_document(original) == before
-    snapshot = decode_snapshot(encode_document(upgraded))
+    assert upgraded["state_format"] == 6
+    snapshot = decode_snapshot(encode_document(UPGRADERS[6](upgraded)))
     assert snapshot.revision == original["revision"]
     unit = _unit(snapshot)
     assert unit.previous_acceptance_pack_digest == ""
@@ -207,17 +208,17 @@ def test_format5_upgrade_preserves_the_old_green_without_inventing_a_previous_fr
     assert not current_pack_evidence_is_green(refrozen, _unit(refrozen))
 
 
-def test_format6_canonical_bytes_match_the_new_golden() -> None:
+def test_upgraded_format5_matches_the_current_golden() -> None:
     original = json.loads((FIXTURES / "format5.golden.json").read_bytes())
     upgraded, steps = upgrade_document(original)
-    assert steps == [(5, 6)]
-    golden = (FIXTURES / "format6.golden.json").read_bytes()
+    assert steps == [(5, 6), (6, 7)]
+    golden = (FIXTURES / "format7.golden.json").read_bytes()
     assert encode_snapshot(decode_snapshot(encode_document(upgraded))) == golden
     assert encode_snapshot(decode_snapshot(golden)) == golden
 
 
 @pytest.mark.parametrize("field", ["previous_acceptance_pack_digest", "refreeze_green_required"])
-def test_format6_requires_both_new_fields(field: str) -> None:
+def test_current_format_requires_both_refreeze_fields(field: str) -> None:
     document = json.loads(encode_snapshot(_upgraded_green()))
     del document["units"][0][field]
     with pytest.raises(DecodeError, match=field):
@@ -228,7 +229,7 @@ def test_format6_requires_both_new_fields(field: str) -> None:
     ("field", "value"),
     [("previous_acceptance_pack_digest", "bad"), ("refreeze_green_required", 1)],
 )
-def test_format6_strictly_validates_the_new_fields(field: str, value: object) -> None:
+def test_current_format_strictly_validates_the_refreeze_fields(field: str, value: object) -> None:
     document = json.loads(encode_snapshot(_upgraded_green()))
     document["units"][0][field] = value
     with pytest.raises(DecodeError, match=field):

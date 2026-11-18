@@ -597,7 +597,12 @@ def test_a_skipped_companion_whose_effect_ours_already_has_merges(tmp_path: Path
     assert "d" in _names(c)
     assert _status(c, "dep") == "invalidated"
     assert _count(c, "DeviationAmended") == 1
-    assert _count(c, "UnitInvalidated") == 1
+    dep_invalidations = [
+        item for item in _chain(c)
+        if isinstance(item.record.folded_event, UnitInvalidated)
+        and item.record.folded_event.name == "dep"
+    ]
+    assert len(dep_invalidations) == 1
 
 
 def _wire(root: Path, digest: str) -> dict[str, object]:
@@ -669,6 +674,7 @@ def test_the_merge_record_lists_exactly_the_facts_it_satisfied(tmp_path: Path) -
     assert _exceptions(third) == {"x@1": "fresh-on-third"}
     # An omitted companion: both sides block u with their own deviation; replay of THEIRS'
     # DeviationOpened no longer produces THEIRS' UnitBlocked.
+    (tmp_path / "omit").mkdir()
     o2, t2 = _base(tmp_path / "omit", "T2")
     _spec(o2, "ours-only")
     _ex(o2, commands.OpenDeviation("ours-d", DeviationType.PACK_DEFECT, UnitRef("x", "1")))
@@ -836,4 +842,24 @@ def test_a_misplaced_or_disagreeing_origin_is_refused(
 
     _rewrite(carrier, copy.digest, disagree)
     _assert_refused_before_lock(monkeypatch, a, carrier, "merge.theirs-history-invalid")
+
+
+def test_a_generated_companion_is_flagged_and_its_copies_name_it(tmp_path: Path) -> None:
+    """R31 (D-41 note on generated companions)."""
+    a, _b, _c, d = _companion_stores(tmp_path)
+    generated = next(
+        item for item in _chain(a)
+        if isinstance(item.record.folded_event, UnitInvalidated)
+        and item.record.folded_event.name == "dep"
+    )
+    wire = _wire(a, generated.digest)
+    assert wire["generated"] is True and "origin" not in wire
+    copy = next(
+        item for item in _chain(d)
+        if isinstance(item.record.folded_event, UnitInvalidated)
+        and item.record.folded_event.name == "dep"
+    )
+    wire = _wire(d, copy.digest)
+    assert wire["generated"] is True
+    assert wire["origin"] == generated.digest and wire["origin_format"] == 2
 
