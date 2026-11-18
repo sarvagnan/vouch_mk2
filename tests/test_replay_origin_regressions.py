@@ -18,7 +18,7 @@ from vouch_mk2.cli import main
 from vouch_mk2.core import commands
 from vouch_mk2.core.decide import Accepted, Refused, apply, decide
 from vouch_mk2.core.events import (
-    DeviationAmended, EventRecord, OpenInCiMarked, UnitBlocked, UnitInvalidated,
+    DeviationAmended, EventRecord, MergeRecorded, OpenInCiMarked, UnitBlocked, UnitInvalidated,
 )
 from vouch_mk2.core.model import AnchorMode, DeviationType, Snapshot, Tier, UnitRef
 from vouch_mk2.store import ArtifactKind, Store, StoreError, decode_event_record, digest_of
@@ -120,6 +120,19 @@ def _forbid_lock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _store_bytes(root: Path) -> dict[Path, bytes]:
     return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def _assert_position_refusal(
+    ours: Path, theirs: Path, monkeypatch: pytest.MonkeyPatch, *,
+    branch: str, field: str, digest: str, source_head: str,
+) -> None:
+    before = (_store_bytes(ours), _store_bytes(theirs))
+    _forbid_lock(monkeypatch)
+    with pytest.raises(
+        StoreError, match=rf"merge\.{branch}-history-invalid: .*{field} {digest}.*{source_head}",
+    ):
+        merge_store_roots(str(ours), str(theirs), actor="reviewer", run_id="")
+    assert (_store_bytes(ours), _store_bytes(theirs)) == before
 
 
 @pytest.mark.parametrize(
@@ -265,9 +278,131 @@ def test_a_satisfied_entry_cannot_name_an_unrelated_specification(
         for line in capsys.readouterr().out.splitlines()
     )
     ours, theirs = (carrier, source) if resolution == "source-chain" else (source, carrier)
+    branch = "ours" if resolution == "source-chain" else "theirs"
     _forbid_lock(monkeypatch)
-    with pytest.raises(StoreError, match=rf"merge\.theirs-history-invalid: .*satisfied.*{unrelated}"):
+    with pytest.raises(StoreError, match=rf"merge\.{branch}-history-invalid: .*satisfied.*{unrelated}"):
         merge_store_roots(str(ours), str(theirs), actor="reviewer", run_id="")
+
+
+@pytest.mark.parametrize("branch", ["ours", "theirs"])
+def test_a_satisfied_entry_cannot_name_a_clear_after_the_source_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, branch: str,
+) -> None:
+    carrier = _store(tmp_path / "carrier")
+    _command(carrier, commands.MarkOpenInCi("x", "old"))
+    source = Path(shutil.copytree(carrier, tmp_path / "source"))
+    _command(carrier, commands.SpecifyUnit("a", "1"))
+    _command(source, commands.SpecifyUnit("b", "1"))
+    source_head = _snapshot(source).event_head
+    _merge(carrier, source)
+    marker = _records(carrier)[-1][1]
+    assert isinstance(marker.folded_event, MergeRecorded)
+    assert marker.folded_event.theirs_head == source_head and not marker.satisfied
+    original_exceptions = _snapshot(carrier).ci_exceptions
+    assert original_exceptions
+    control = Path(shutil.copytree(carrier, tmp_path / "control"))
+
+    _command(source, commands.ClearOpenInCi("x"))
+    clear, clear_record = _records(source)[-1]
+    assert clear_record.prev == source_head
+    assert not _merge(control, source).snapshot.ci_exceptions
+
+    _rewrite_record(carrier, {"satisfied": [clear]}, recompute=True, offset=1)
+    ours, theirs = (carrier, source) if branch == "ours" else (source, carrier)
+    _assert_position_refusal(
+        ours, theirs, monkeypatch, branch=branch, field="satisfied entry",
+        digest=clear, source_head=source_head,
+    )
+    assert _snapshot(carrier).ci_exceptions == original_exceptions
+
+
+@pytest.mark.parametrize("branch", ["ours", "theirs"])
+def test_an_origin_cannot_name_a_matching_mark_after_its_block_source_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, branch: str,
+) -> None:
+    source = _store(tmp_path / "source")
+    carrier = Path(shutil.copytree(source, tmp_path / "carrier"))
+    _carry_mark(source, carrier)
+    source_head, original = _records(source)[-1]
+    control = Path(shutil.copytree(carrier, tmp_path / "control"))
+
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    later, later_record = _records(source)[-1]
+    assert later_record.prev == source_head
+    assert later_record == replace(original, prev=source_head, revision=original.revision + 1)
+    assert _merge(control, source).replayed_records == 1
+
+    _rewrite_record(carrier, {"origin": later}, recompute=True)
+    ours, theirs = (carrier, source) if branch == "ours" else (source, carrier)
+    _assert_position_refusal(
+        ours, theirs, monkeypatch, branch=branch, field="origin",
+        digest=later, source_head=source_head,
+    )
+
+
+@pytest.mark.parametrize("field", ["satisfied", "origin"])
+def test_check_event_log_refuses_a_claim_past_a_same_chain_source_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], field: str,
+) -> None:
+    source = _store(tmp_path / "source")
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    shared_head = _snapshot(source).event_head
+    carrier = Path(shutil.copytree(source, tmp_path / "carrier"))
+    if field == "satisfied":
+        _command(carrier, commands.ClearOpenInCi("x"))
+        _command(source, commands.SpecifyUnit("b", "1"))
+    else:
+        _command(carrier, commands.SpecifyUnit("a", "1"))
+        _command(carrier, commands.MarkOpenInCi("x", "old"))
+        _command(source, commands.MarkOpenInCi("x", "old"))
+    target = _snapshot(carrier).event_head
+    _merge(carrier, source)
+    marker = _records(carrier)[-1][1].folded_event
+    assert isinstance(marker, MergeRecorded)
+    changes: dict[str, object] = {
+        "payload": {"ours_head": marker.ours_head, "theirs_head": shared_head},
+    }
+    if field == "satisfied":
+        changes["satisfied"] = [target]
+    else:
+        _rewrite_record(carrier, {"origin": target}, recompute=True)
+    _rewrite_record(carrier, changes, recompute=True, offset=1)
+
+    assert main(["check", "--root", str(carrier)]) == 1
+    assert any(
+        line.startswith("FAIL") and "check.event-log" in line
+        and field in line and target in line and shared_head in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+    _assert_position_refusal(
+        source, carrier, monkeypatch, branch="theirs",
+        field="satisfied entry" if field == "satisfied" else field,
+        digest=target, source_head=shared_head,
+    )
+
+
+def test_a_d37_skip_and_inherited_satisfaction_merge_when_the_clear_resolves(
+    tmp_path: Path,
+) -> None:
+    source = _store(tmp_path / "source")
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    ours = Path(shutil.copytree(source, tmp_path / "ours"))
+    carrier = Path(shutil.copytree(source, tmp_path / "carrier"))
+    _command(ours, commands.SpecifyUnit("a", "1"))
+    _command(ours, commands.ClearOpenInCi("x"))
+    _command(source, commands.ClearOpenInCi("x"))
+    clear = _snapshot(source).event_head
+    assert _merge(ours, source).skipped_records == 1
+    assert _records(ours)[-1][1].satisfied == (clear,)
+
+    _command(carrier, commands.SpecifyUnit("c", "1"))
+    assert not _merge(carrier, ours).snapshot.ci_exceptions
+    assert _records(carrier)[-1][1].satisfied == (clear,)
+    _command(carrier, commands.MarkOpenInCi("x", "fresh"))
+    _command(source, commands.SpecifyUnit("new", "1"))
+    result = _merge(carrier, source)
+    assert result.snapshot.unit("new") is not None
+    assert tuple(item.reason for item in result.snapshot.ci_exceptions) == ("fresh",)
 
 
 def test_a_satisfied_entry_cannot_name_a_companion_copy(

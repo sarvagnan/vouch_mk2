@@ -113,13 +113,22 @@ def _artifact_reference_key(
     return item[0].value, item[1]
 
 
+def _validate_branch_replay_claims(
+    history: ReplayHistory, targets: ReplayHistory, branch: str,
+) -> None:
+    try:
+        validate_replay_claims(history, targets)
+    except StoreError as error:
+        raise StoreError(f"merge.{branch}-history-invalid: {error}") from error
+
+
 def _read_verified_chain(
     store: Store, snapshot: Snapshot, branch: str
 ) -> tuple[tuple[_SourceFact, ...], ReplayHistory]:
     """Load and fold a chain in chronological order, retaining the context of each fact."""
     if not snapshot.event_head:
         if snapshot == Snapshot():
-            return (), {}
+            return (), ReplayHistory({}, {})
         raise StoreError(f"merge.{branch}-history-invalid: non-empty snapshot has no event head")
 
     reverse_chain: list[_LoggedEvent] = []
@@ -148,15 +157,16 @@ def _read_verified_chain(
 
     chain = tuple(reversed(reverse_chain))
     try:
-        validate_replay_placement(tuple((item.digest, item.record) for item in chain))
+        source_heads = validate_replay_placement(tuple((item.digest, item.record) for item in chain))
     except StoreError as error:
         raise StoreError(f"merge.{branch}-history-invalid: {error}") from error
     replay = Snapshot()
     facts: list[_SourceFact] = []
-    history: ReplayHistory = {}
+    history = ReplayHistory({}, source_heads)
     for item in chain:
         facts.append(_SourceFact(item, replay))
-        history[item.digest] = (item.record, event_unit_references(replay, item.record.folded_event))
+        units = event_unit_references(replay, item.record.folded_event)
+        history.records[item.digest] = (item.record, units)
         try:
             replay = apply(
                 replay,
@@ -175,10 +185,7 @@ def _read_verified_chain(
         raise StoreError(
             f"merge.{branch}-history-invalid: event chain does not replay to snapshot"
         )
-    try:
-        validate_replay_claims(history, history)
-    except StoreError as error:
-        raise StoreError(f"merge.{branch}-history-invalid: {error}") from error
+    _validate_branch_replay_claims(history, history, branch)
     return tuple(facts), history
 
 
@@ -653,6 +660,8 @@ def merge_store_roots(
         theirs = theirs_store.read_snapshot()
         ours_facts, ours_history = _read_verified_chain(ours_store, ours, "ours")
         theirs_facts, theirs_history = _read_verified_chain(theirs_store, theirs, "theirs")
+        _validate_branch_replay_claims(theirs_history, ours_history, "theirs")
+        _validate_branch_replay_claims(ours_history, theirs_history, "ours")
         ours_chain = tuple(fact.item for fact in ours_facts)
         theirs_chain = tuple(fact.item for fact in theirs_facts)
 
@@ -671,13 +680,6 @@ def merge_store_roots(
             return ours_positions[item.digest]
 
         ancestor = max(shared, key=ours_position)
-
-        try:
-            validate_replay_claims(theirs_history, ours_history)
-            # Our coverage can refer to records only their chain holds.
-            validate_replay_claims(ours_history, theirs_history)
-        except StoreError as error:
-            raise StoreError(f"merge.theirs-history-invalid: {error}") from error
 
         if ancestor.digest == theirs.event_head:
             return MergeOutcome("no-op", ours, 0)

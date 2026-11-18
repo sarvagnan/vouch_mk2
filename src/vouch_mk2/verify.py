@@ -170,14 +170,15 @@ def _check_event_log(store: Store, snapshot: Snapshot) -> CheckResult:
 
     chain = tuple(reversed(reverse_chain))
     try:
-        validate_replay_placement(chain)
+        source_heads = validate_replay_placement(chain)
     except StoreError as error:
         return CheckResult(mk2.CHECK_EVENT_LOG, Verdict.FAIL, str(error))
 
     replay = Snapshot()
-    history: ReplayHistory = {}
+    history = ReplayHistory({}, source_heads)
     for record_digest, record in chain:
-        history[record_digest] = (record, event_unit_references(replay, record.folded_event))
+        units = event_unit_references(replay, record.folded_event)
+        history.records[record_digest] = (record, units)
         try:
             replay = apply(
                 replay,

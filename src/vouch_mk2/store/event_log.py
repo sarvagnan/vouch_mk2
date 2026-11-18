@@ -6,7 +6,7 @@ import datetime
 import getpass
 import os
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from vouch_mk2.core import events
 from vouch_mk2.core.decide import apply
@@ -34,7 +34,13 @@ from vouch_mk2.store.errors import StoreError
 from vouch_mk2.store.store import Store
 
 
-type ReplayHistory = dict[str, tuple[EventRecord, tuple[UnitRef, ...]]]
+@dataclass(frozen=True, slots=True)
+class ReplayHistory:
+    """Physical chain records, their resolved subjects, and the bounds of their claims."""
+
+    records: dict[str, tuple[EventRecord, tuple[UnitRef, ...]]]
+    source_heads: dict[str, str]
+
 
 _COMPANION_KINDS = (UnitBlocked, UnitInvalidated, UnitReleaseBound, ReleaseInvalidated)
 
@@ -257,11 +263,13 @@ def _validate_replay_block(block: Sequence[tuple[str, EventRecord]]) -> None:
         index = end
 
 
-def validate_replay_placement(chain: Sequence[tuple[str, EventRecord]]) -> None:
-    """Check replay provenance and companions against the physically appended blocks."""
+def validate_replay_placement(chain: Sequence[tuple[str, EventRecord]]) -> dict[str, str]:
+    """Check physical replay blocks and return the source head that bounds each claim."""
     positions = {digest: index for index, (digest, _record) in enumerate(chain)}
+    source_heads: dict[str, str] = {}
     block_end = -1
     block_start = len(chain)
+    block_source_head = ""
     for index in range(len(chain) - 1, -1, -1):
         digest, record = chain[index]
         event = record.folded_event
@@ -272,10 +280,14 @@ def validate_replay_placement(chain: Sequence[tuple[str, EventRecord]]) -> None:
             if not record.origin:
                 block_end = index
                 block_start = boundary + 1
+                block_source_head = event.theirs_head
                 _validate_replay_block(chain[block_start:block_end])
         if (record.origin or record.generated) and not block_start <= index < block_end:
             field = "generated" if record.generated else "origin"
             raise StoreError(f"{field} on event {digest} is outside a version-2 merge block")
+        if record.origin or record.satisfied:
+            source_heads[digest] = block_source_head
+    return source_heads
 
 
 def _origin_claims(record: EventRecord, units: tuple[UnitRef, ...]) -> tuple[object, ...]:
@@ -295,16 +307,24 @@ def _origin_claims(record: EventRecord, units: tuple[UnitRef, ...]) -> tuple[obj
 
 def validate_replay_claims(history: ReplayHistory, targets: ReplayHistory) -> None:
     """Check provenance claims whose digests occur on the target's physical chain."""
-    for digest, (record, units) in history.items():
-        origin = targets.get(record.origin)
+    for digest, source_head in reversed(history.source_heads.items()):
+        record, units = history.records[digest]
+        # Revisions are comparable when the claimed record and the bound share a chain.
+        bound = targets.records.get(source_head)
+        bound_revision = None if bound is None else bound[0].revision
+        origin = targets.records.get(record.origin)
         if origin is not None:
             original, original_units = origin
             if original.origin:
                 raise StoreError(f"event {digest} names origin {record.origin}, which is itself a copy")
             if _origin_claims(record, units) != _origin_claims(original, original_units):
                 raise StoreError(f"event {digest} disagrees with origin {record.origin}")
+            if bound_revision is not None and original.revision > bound_revision:
+                raise StoreError(
+                    f"event {digest} names origin {record.origin} after source head {source_head}"
+                )
         for entry in record.satisfied:
-            target = targets.get(entry)
+            target = targets.records.get(entry)
             if target is None:
                 continue
             satisfied, _ = target
@@ -314,6 +334,10 @@ def validate_replay_claims(history: ReplayHistory, targets: ReplayHistory) -> No
                 raise StoreError(
                     f"event {digest} has satisfied entry {entry} that must name a first "
                     "occurrence of an open-in-CI clear or companion event"
+                )
+            if bound_revision is not None and satisfied.revision > bound_revision:
+                raise StoreError(
+                    f"event {digest} has satisfied entry {entry} after source head {source_head}"
                 )
 
 
