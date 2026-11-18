@@ -1572,3 +1572,58 @@ unit, `refreeze-green@1`. Amends D-17.
   Recording the gap as won't-fix: Vouch would keep accepting values it cannot then use. Rendering
   options as `--flag=value`: rejected in D-35 for the same reasons.
 
+## D-41 — A replayed record carries its origin, and a merge skips work it already holds by origin (2026-11-18)
+
+**Status:** decided 2026-11-18 by the user, choosing Fable's option O over Sol's receipt design
+(`design-bd4.4.18`) after independent design reviews by Astra and Fable. Settles
+`vouch_mk2-bd4.4.18`. Ships with D-38 in one unit, `nested-merge-boundary@1`.
+
+- **The finding.** Replay re-envelopes records, so a copy has a new digest, and a merge cannot tell
+  a copy of a record it already holds from new work. Any command `decide()` accepts twice then
+  replays a second time: an open-in-CI mark restores an exception the receiver cleared, a copied
+  clear removes a later mark, and settings and repeated lifecycle steps are exposed the same way.
+  Fable reproduced this on `main` without a nested merge (three stores, and an ordinary two-branch
+  flow whose receiver had never merged), so it is a defect of the released merge, not of D-38 alone.
+  A related defect: a merge that skips a block whose source replay generated a companion leaves the
+  two stores disagreeing (one unit `invalidated`, the other `in-progress`).
+- **Decision.**
+  - New event envelopes are version 2. A record written by merge replay carries `origin`: the EVENT
+    digest of the first-authored occurrence of that fact; a copy of a copy inherits it unchanged. A
+    record authored directly has no `origin`. The merge's own final record carries `satisfied`: the
+    origins of source facts the merge accounted for without writing a record (D-37's skipped clears,
+    omitted D-33 companions), plus those inherited from the source chain. The `MergeRecorded`
+    payload, the snapshot and the artifact kinds do not change; nothing extra is stored or retained.
+  - A chain's coverage is every record digest, every `origin` and every `satisfied` entry on it.
+    After the existing exact-digest and D-38 exclusions, a merge drops each source command batch
+    whose primary record's root (its `origin`, else its own digest) is in OURS' coverage. The
+    decision is per batch, never a prefix cut, so earlier independent work on THEIRS still replays.
+  - When a batch dropped this way carried a companion that THEIRS' replay generated, OURS must
+    already show that companion's effect once the preceding work is staged; otherwise the merge
+    refuses with `merge.conflict` naming the fact.
+  - `origin` must be a well-formed digest and appear only on records inside a version-2 merge block;
+    where OURS holds its own counterpart of an origin, the two must agree on kind, subject, actor,
+    run claim and recorded time. A violation refuses with `merge.theirs-history-invalid`, and
+    `check.event-log` reports it.
+  - **History written before the change (version 1).** After the exact-digest exclusions, a merge
+    refuses with `merge.ancestry-unproven`, before any lock and writing nothing, if (a) any remaining
+    source batch lies inside a version-1 merge block, or (b) any remaining source batch has a
+    version-1 root and OURS has a version-1 merge marker after the exact shared cut. A copy records
+    whether its origin was a version-1 or version-2 record, so (b) needs no source object. A store
+    with no version-1 merges, or whose version-1 merges all lie in the shared prefix, merges as
+    before. The refusal is final in this unit: the refused branch's work is re-recorded on the merged
+    side. An operator assertion to override it is a separate later decision. `upgrade` reports how
+    many version-1 merge markers a store holds.
+  - The state format moves from 6 to 7 (D-13), so an older binary gives a clear "run upgrade"
+    refusal instead of appending version-1 records to a version-2 chain. The upgrader changes only
+    the format number.
+  - Trust: `origin` and `satisfied` are claims written by the merging tool, at the same level as the
+    `theirs_head` a merge already trusts. A hand-edited store could label new work as a copy and have
+    a receiver skip it, as it can already forge a merge record or omit work. `docs/claim-boundary.md`
+    states this.
+- **Rejected.** Sol's option A (a receipt per merge, retained source records and a verifier that
+  re-runs historical merges): the verifier re-judges history with today's `decide()`, which
+  reproduces only 646 of mk2's 759 recorded command batches; two correct receipts can give identical
+  replay bytes different origins (Astra); and it adds a new artifact kind, archive, sweep and
+  verification path. Astra's option B (an immediate source pointer plus the archive and a replay
+  check): the same verifier problem and machinery, for protection only against hand-edited stores.
+  Refusing on suspicion alone: it would leave legitimate four-store merges failing.
