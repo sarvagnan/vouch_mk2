@@ -1627,3 +1627,15 @@ unit, `refreeze-green@1`. Amends D-17.
   verification path. Astra's option B (an immediate source pointer plus the archive and a replay
   check): the same verifier problem and machinery, for protection only against hand-edited stores.
   Refusing on suspicion alone: it would leave legitimate four-store merges failing.
+- **Note (2026-11-18, owner, writing `nested-merge-boundary@1` pack/3).** The companion rule above
+  says "a batch dropped this way", meaning by origin. Fable's reproduction drops the block through
+  the existing provenance filter, by exact digest. The rule applies to every source batch a merge
+  excludes as already incorporated, whether by exact digest, a D-38 block or origin.
+
+- **Note (2026-11-18, owner, from Fable's audit of the pilot's merges).** D-41's selection rules and
+  its version-1 rules (a) and (b) govern replay only. A fast-forward, where OURS' head is an ancestor
+  of THEIRS' and OURS adopts THEIRS' verified chain verbatim, replays nothing and so cannot apply a
+  fact twice; it is unaffected, including when THEIRS' suffix holds version-1 merge blocks. Exact
+  no-ops are unaffected too. The audit found the pilot's history clean: no replayed record copied a
+  command its receiver already held, and its next ordinary merge passes rules (a) and (b).
+
