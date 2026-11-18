@@ -285,6 +285,124 @@ def test_a_satisfied_entry_cannot_name_an_unrelated_specification(
 
 
 @pytest.mark.parametrize("branch", ["ours", "theirs"])
+def test_a_satisfied_entry_must_come_from_the_complete_source_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, branch: str,
+) -> None:
+    carrier = _store(tmp_path / "carrier")
+    _command(carrier, commands.MarkOpenInCi("x", "old"))
+    source = Path(shutil.copytree(carrier, tmp_path / "source"))
+    _command(carrier, commands.ClearOpenInCi("x"))
+    clear = _snapshot(carrier).event_head
+    _command(source, commands.SpecifyUnit("b", "1"))
+    source_head = _snapshot(source).event_head
+    _merge(carrier, source)
+    _, marker = _records(carrier)[-1]
+    assert isinstance(marker.folded_event, MergeRecorded)
+    assert marker.folded_event.theirs_head == source_head and not marker.satisfied
+    assert merge_store_roots(str(carrier), str(source), actor="reviewer", run_id="") == (
+        MergeOutcome("no-op", _snapshot(carrier), 0)
+    )
+
+    _rewrite_record(carrier, {"satisfied": [clear]}, recompute=True, offset=1)
+    ours, theirs = (carrier, source) if branch == "ours" else (source, carrier)
+    _assert_position_refusal(
+        ours, theirs, monkeypatch, branch=branch, field="satisfied entry",
+        digest=clear, source_head=source_head,
+    )
+
+
+def test_an_origin_must_come_from_the_complete_source_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    carrier = _store(tmp_path / "carrier")
+    source = Path(shutil.copytree(carrier, tmp_path / "source"))
+    _command(carrier, commands.MarkOpenInCi("x", "old"))
+    same_claim, independent = _records(carrier)[-1]
+    _command(source, commands.SpecifyUnit("b", "1"))
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    source_head, original = _records(source)[-1]
+    assert same_claim != source_head
+    assert replace(independent, prev=original.prev, revision=original.revision) == original
+    _merge(carrier, source)
+    assert _records(carrier)[-2][1].origin == source_head
+
+    _rewrite_record(carrier, {"origin": same_claim}, recompute=True)
+    _assert_position_refusal(
+        carrier, source, monkeypatch, branch="ours", field="origin",
+        digest=same_claim, source_head=source_head,
+    )
+
+
+@pytest.mark.parametrize("field", ["satisfied", "origin"])
+def test_a_complete_source_history_rejects_an_unresolved_claim_before_a_no_op(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str,
+) -> None:
+    ours = _store(tmp_path / "ours")
+    _command(ours, commands.MarkOpenInCi("x", "old"))
+    source = Path(shutil.copytree(ours, tmp_path / "source"))
+    _command(ours, commands.SpecifyUnit("a", "1"))
+    _command(source, commands.SpecifyUnit("b", "1"))
+    source_head = _snapshot(source).event_head
+    _merge(ours, source)
+    _, copied = _records(ours)[-2]
+    _, marker = _records(ours)[-1]
+    assert copied.origin == source_head
+    assert isinstance(marker.folded_event, MergeRecorded)
+    assert marker.folded_event.theirs_head == source_head and not marker.satisfied
+    assert merge_store_roots(str(ours), str(source), actor="reviewer", run_id="") == (
+        MergeOutcome("no-op", _snapshot(ours), 0)
+    )
+
+    unavailable = "0" * 64
+    assert all(unavailable not in dict(_records(root)) for root in (ours, source))
+    if field == "satisfied":
+        _rewrite_record(ours, {"satisfied": [unavailable]}, recompute=True, offset=1)
+    else:
+        _rewrite_record(ours, {"origin": unavailable}, recompute=True)
+
+    _assert_position_refusal(
+        ours, source, monkeypatch, branch="ours",
+        field="satisfied entry" if field == "satisfied" else field,
+        digest=unavailable, source_head=source_head,
+    )
+
+
+@pytest.mark.parametrize("parent_available", [True, False], ids=["complete", "missing-parent"])
+def test_satisfaction_checks_source_ancestry_through_merge_parents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parent_available: bool,
+) -> None:
+    carrier = _store(tmp_path / "carrier")
+    _command(carrier, commands.MarkOpenInCi("x", "old"))
+    source = Path(shutil.copytree(carrier, tmp_path / "source"))
+    parent = carrier if parent_available else Path(shutil.copytree(carrier, tmp_path / "parent"))
+    _command(parent, commands.SpecifyUnit("a", "1"))
+    _command(source, commands.SpecifyUnit("b", "1"))
+    _merge(source, parent)
+    source_head, source_marker = _records(source)[-1]
+    assert isinstance(source_marker.folded_event, MergeRecorded)
+    parent_head = source_marker.folded_event.theirs_head
+    assert parent_head not in dict(_records(source))
+    assert (parent_head in dict(_records(carrier))) == parent_available
+
+    _command(carrier, commands.ClearOpenInCi("x"))
+    clear = _snapshot(carrier).event_head
+    _merge(carrier, source)
+    _rewrite_record(carrier, {"satisfied": [clear]}, recompute=True, offset=1)
+    if parent_available:
+        _assert_position_refusal(
+            carrier, source, monkeypatch, branch="ours", field="satisfied entry",
+            digest=clear, source_head=source_head,
+        )
+    else:
+        before = (_store_bytes(carrier), _store_bytes(source))
+        _forbid_lock(monkeypatch)
+        assert merge_store_roots(str(carrier), str(source), actor="reviewer", run_id="") == (
+            MergeOutcome("no-op", _snapshot(carrier), 0)
+        )
+        assert (_store_bytes(carrier), _store_bytes(source)) == before
+
+
+@pytest.mark.parametrize("branch", ["ours", "theirs"])
 def test_a_satisfied_entry_cannot_name_a_clear_after_the_source_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, branch: str,
 ) -> None:
@@ -418,8 +536,10 @@ def test_an_origin_cannot_name_a_mark_authored_after_incorporating_the_source_he
 
 
 @pytest.mark.parametrize("field", ["satisfied", "origin"])
-def test_check_event_log_refuses_a_claim_past_a_same_chain_source_head(
+@pytest.mark.parametrize("resolves", [True, False], ids=["resolves", "unresolved"])
+def test_check_event_log_requires_claims_in_complete_same_chain_source_history(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], field: str,
+    resolves: bool,
 ) -> None:
     source = _store(tmp_path / "source")
     _command(source, commands.MarkOpenInCi("x", "old"))
@@ -432,7 +552,7 @@ def test_check_event_log_refuses_a_claim_past_a_same_chain_source_head(
         _command(carrier, commands.SpecifyUnit("a", "1"))
         _command(carrier, commands.MarkOpenInCi("x", "old"))
         _command(source, commands.MarkOpenInCi("x", "old"))
-    target = _snapshot(carrier).event_head
+    target = _snapshot(carrier).event_head if resolves else "0" * 64
     _merge(carrier, source)
     marker = _records(carrier)[-1][1].folded_event
     assert isinstance(marker, MergeRecorded)
@@ -513,6 +633,41 @@ def test_a_d37_skip_keeps_a_clear_that_predates_the_source_head(tmp_path: Path) 
     assert _merge(ours, source).snapshot.unit("c") is not None
 
 
+def test_a_third_store_can_verify_inherited_satisfaction_with_the_original_locally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    skipper = _store(tmp_path / "skipper")
+    _command(skipper, commands.MarkOpenInCi("x", "old"))
+    source = Path(shutil.copytree(skipper, tmp_path / "source"))
+    _command(source, commands.ClearOpenInCi("x"))
+    clear = _snapshot(source).event_head
+    third = Path(shutil.copytree(source, tmp_path / "third"))
+
+    _command(skipper, commands.SpecifyUnit("a", "1"))
+    _command(skipper, commands.ClearOpenInCi("x"))
+    assert _merge(skipper, source).skipped_records == 1
+    assert _records(skipper)[-1][1].satisfied == (clear,)
+    assert clear not in dict(_records(skipper))
+
+    _command(third, commands.SpecifyUnit("c", "1"))
+    result = _merge(third, skipper)
+    assert result.snapshot.unit("a") is not None and not result.snapshot.ci_exceptions
+    assert clear in _records(third)[-1][1].satisfied
+    assert main(["check", "--root", str(third)]) == 0
+    assert any(
+        line.startswith("PASS") and "check.event-log" in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+
+    # Now both stores together resolve the third store's source and its inherited clear.
+    before = (_store_bytes(third), _store_bytes(skipper))
+    _forbid_lock(monkeypatch)
+    assert merge_store_roots(str(third), str(skipper), actor="reviewer", run_id="") == (
+        MergeOutcome("no-op", result.snapshot, 0)
+    )
+    assert (_store_bytes(third), _store_bytes(skipper)) == before
+
+
 def test_a_satisfied_entry_cannot_name_a_companion_copy(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -533,8 +688,9 @@ def test_a_satisfied_entry_cannot_name_a_companion_copy(
     )
 
 
-def test_an_origin_unavailable_on_both_chains_is_accepted(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+@pytest.mark.parametrize("field", ["satisfied", "origin"])
+def test_an_unresolved_claim_is_accepted_when_source_history_is_unavailable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], field: str,
 ) -> None:
     source = _store(tmp_path / "source")
     ours = Path(shutil.copytree(source, tmp_path / "ours"))
@@ -542,8 +698,14 @@ def test_an_origin_unavailable_on_both_chains_is_accepted(
     _command(ours, commands.SpecifyUnit("ours-only", "1"))
     _carry_mark(source, carrier)
     unavailable = "0" * 64
-    assert unavailable not in {digest for root in (ours, carrier) for digest, _ in _records(root)}
-    _rewrite_record(carrier, {"origin": unavailable}, recompute=True)
+    source_head = _snapshot(source).event_head
+    for root in (ours, carrier):
+        records = dict(_records(root))
+        assert unavailable not in records and source_head not in records
+    if field == "satisfied":
+        _rewrite_record(carrier, {"satisfied": [unavailable]}, recompute=True, offset=1)
+    else:
+        _rewrite_record(carrier, {"origin": unavailable}, recompute=True)
 
     assert main(["check", "--root", str(carrier)]) == 0
     assert any(
@@ -551,7 +713,11 @@ def test_an_origin_unavailable_on_both_chains_is_accepted(
         for line in capsys.readouterr().out.splitlines()
     )
     assert _merge(ours, carrier).snapshot.unit("carrier") is not None
-    assert any(record.origin == unavailable for _, record in _records(ours))
+    records = _records(ours)
+    if field == "satisfied":
+        assert unavailable in records[-1][1].satisfied
+    else:
+        assert any(record.origin == unavailable for _, record in records)
 
 
 @pytest.mark.parametrize(
@@ -835,8 +1001,9 @@ def _git(project: Path, *args: str, expect: int = 0) -> str:
 
 
 @pytest.mark.parametrize("operation", ["merge", "rebase"])
+@pytest.mark.parametrize("generations", [1, 5])
 def test_git_stage_replay_preserves_the_receiver_clear(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], operation: str,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], operation: str, generations: int,
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -849,9 +1016,20 @@ def test_git_stage_replay_preserves_the_receiver_clear(
     _git(project, "commit", "-m", "Base")
     source = Path(shutil.copytree(root, tmp_path / "source"))
     _command(source, commands.MarkOpenInCi("x", "old"), actor="source")
+    origin = _snapshot(source).event_head
     _command(source, commands.SpecifyUnit("independent", "1"))
 
     _git(project, "checkout", "-b", "incoming")
+    intermediate_units = {f"carrier-{generation}" for generation in range(1, generations)}
+    for name in sorted(intermediate_units):
+        carrier = Path(shutil.copytree(root, tmp_path / name))
+        _command(carrier, commands.SpecifyUnit(name, "1"))
+        _merge(carrier, source)
+        assert [
+            record.origin for _, record in _records(carrier)
+            if isinstance(record.folded_event, OpenInCiMarked)
+        ] == [origin]
+        source = carrier
     _command(root, commands.SpecifyUnit("carrier", "1"))
     _merge(root, source)
     _git(project, "add", "--", ".vouch")
@@ -878,7 +1056,12 @@ def test_git_stage_replay_preserves_the_receiver_clear(
     assert sum(isinstance(record.folded_event, OpenInCiMarked) for _, record in _records(root)) == 1
     after = _snapshot(root)
     assert not after.ci_exceptions
-    assert {unit.name for unit in after.units} == {"x", "carrier", "independent"}
+    assert {unit.name for unit in after.units} == {"x", "carrier", "independent"} | intermediate_units
+    assert main(["check", "--root", str(root)]) == 0
+    assert any(
+        line.startswith("PASS") and "check.event-log" in line
+        for line in capsys.readouterr().out.splitlines()
+    )
 
 
 @pytest.mark.parametrize("source_advanced", [False, True], ids=["reverse-block", "origin"])

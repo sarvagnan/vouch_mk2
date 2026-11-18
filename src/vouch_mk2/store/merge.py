@@ -27,7 +27,7 @@ from vouch_mk2.store.event_log import (
     event_batch_length,
     event_fact_key,
     event_unit_references,
-    replay_provenance_positions,
+    index_replay_provenance,
     validate_replay_claims,
     validate_replay_placement,
 )
@@ -113,15 +113,6 @@ def _artifact_reference_key(
     item: tuple[ArtifactKind, str],
 ) -> tuple[str, str]:
     return item[0].value, item[1]
-
-
-def _validate_branch_replay_claims(
-    history: ReplayHistory, targets: ReplayHistory, incorporated: dict[str, int], branch: str,
-) -> None:
-    try:
-        validate_replay_claims(history, targets, incorporated)
-    except StoreError as error:
-        raise StoreError(f"merge.{branch}-history-invalid: {error}") from error
 
 
 def _read_verified_chain(
@@ -637,12 +628,16 @@ def merge_store_roots(
         theirs = theirs_store.read_snapshot()
         ours_facts, ours_history = _read_verified_chain(ours_store, ours, "ours")
         theirs_facts, theirs_history = _read_verified_chain(theirs_store, theirs, "theirs")
-        ours_incorporated = replay_provenance_positions(ours_history, theirs_history)
-        theirs_incorporated = replay_provenance_positions(theirs_history, ours_history)
-        _validate_branch_replay_claims(ours_history, ours_history, ours_incorporated, "ours")
-        _validate_branch_replay_claims(theirs_history, theirs_history, theirs_incorporated, "theirs")
-        _validate_branch_replay_claims(theirs_history, ours_history, ours_incorporated, "theirs")
-        _validate_branch_replay_claims(ours_history, theirs_history, theirs_incorporated, "ours")
+        records = theirs_history.records | ours_history.records
+        ours_provenance = index_replay_provenance(ours_history, records)
+        theirs_provenance = index_replay_provenance(theirs_history, records)
+        provenance = (ours_provenance, theirs_provenance)
+        for branch, history in (("ours", ours_history), ("theirs", theirs_history)):
+            try:
+                validate_replay_claims(history, records, provenance)
+            except StoreError as error:
+                raise StoreError(f"merge.{branch}-history-invalid: {error}") from error
+        ours_incorporated = ours_provenance.incorporated
         ours_chain = tuple(fact.item for fact in ours_facts)
         theirs_chain = tuple(fact.item for fact in theirs_facts)
 

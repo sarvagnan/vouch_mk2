@@ -34,13 +34,34 @@ from vouch_mk2.store.errors import StoreError
 from vouch_mk2.store.store import Store
 
 
+type _ReplayRecords = dict[str, tuple[EventRecord, tuple[UnitRef, ...]]]
+
+
 @dataclass(frozen=True, slots=True)
 class ReplayHistory:
     """Physical chain records, their resolved subjects, and the bounds of their claims."""
 
     # In physical chain order, oldest first.
-    records: dict[str, tuple[EventRecord, tuple[UnitRef, ...]]]
+    records: _ReplayRecords
     source_heads: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayProvenance:
+    """First positions of exact and carried digests, and heads with complete ancestry."""
+
+    incorporated: dict[str, int]
+    carried: dict[str, int]
+    complete_heads: dict[str, int]
+
+    def excludes(self, source_head: str, digest: str) -> bool:
+        through = self.complete_heads.get(source_head)
+        if through is None:
+            return False
+        return (
+            self.incorporated.get(digest, through + 1) > through
+            and self.carried.get(digest, through + 1) > through
+        )
 
 
 _COMPANION_KINDS = (UnitBlocked, UnitInvalidated, UnitReleaseBound, ReleaseInvalidated)
@@ -306,65 +327,73 @@ def _origin_claims(record: EventRecord, units: tuple[UnitRef, ...]) -> tuple[obj
     )
 
 
-def replay_provenance_positions(
-    history: ReplayHistory, other: ReplayHistory | None = None,
-) -> dict[str, int]:
-    """Index when each digest first became reachable from this physical chain."""
-    records = history.records if other is None else other.records | history.records
+def index_replay_provenance(history: ReplayHistory, records: _ReplayRecords) -> ReplayProvenance:
+    """Extend each prefix's coverage through exact predecessors and merge parents."""
     incorporated: dict[str, int] = {}
-    for digest, (physical, _) in history.records.items():
-        # Extend the preceding prefix's ancestry. Each digest's parents are visited once.
+    carried: dict[str, int] = {}
+    complete_heads: dict[str, int] = {}
+    complete = True
+    for position, digest in enumerate(history.records):
+        # Each ancestor contributes once, at the first prefix that reaches it.
         pending = [digest]
         while pending:
             ancestor = pending.pop()
             if not ancestor or ancestor == "GENESIS" or ancestor in incorporated:
                 continue
-            incorporated[ancestor] = physical.revision
+            incorporated[ancestor] = position
             entry = records.get(ancestor)
             if entry is None:
+                # Subsequent prefixes still depend on this unavailable parent.
+                complete = False
                 continue
             record, _ = entry
+            if record.origin:
+                carried.setdefault(record.origin, position)
+            for satisfied in record.satisfied:
+                carried.setdefault(satisfied, position)
             pending.append(record.prev)
             event = record.folded_event
             if isinstance(event, MergeRecorded):
                 pending.extend((event.ours_head, event.theirs_head))
-    return incorporated
+        if complete:
+            complete_heads[digest] = position
+    return ReplayProvenance(incorporated, carried, complete_heads)
 
 
 def validate_replay_claims(
-    history: ReplayHistory, targets: ReplayHistory, incorporated: dict[str, int],
+    history: ReplayHistory, records: _ReplayRecords, provenance: Sequence[ReplayProvenance],
 ) -> None:
-    """Check provenance claims whose digests occur on the target's physical chain."""
-    for digest, source_head in reversed(history.source_heads.items()):
+    """Check known originals and require all claims to occur in complete source histories."""
+    # Placement visits each closing marker before the copies it bounds.
+    for digest, source_head in history.source_heads.items():
         record, units = history.records[digest]
-        # Both revisions are local to the chain holding the claimed record.
-        bound_revision = incorporated.get(source_head)
-        origin = targets.records.get(record.origin)
+        origin = records.get(record.origin)
         if origin is not None:
             original, original_units = origin
             if original.origin:
                 raise StoreError(f"event {digest} names origin {record.origin}, which is itself a copy")
             if _origin_claims(record, units) != _origin_claims(original, original_units):
                 raise StoreError(f"event {digest} disagrees with origin {record.origin}")
-            if bound_revision is not None and original.revision > bound_revision:
-                raise StoreError(
-                    f"event {digest} names origin {record.origin} after source head {source_head}"
-                )
+        if record.origin and any(index.excludes(source_head, record.origin) for index in provenance):
+            raise StoreError(
+                f"event {digest} names origin {record.origin} absent from the history "
+                f"through source head {source_head}"
+            )
         for entry in record.satisfied:
-            target = targets.records.get(entry)
-            if target is None:
-                continue
-            satisfied, _ = target
-            if satisfied.origin or not isinstance(
-                satisfied.folded_event, (events.OpenInCiCleared, *_COMPANION_KINDS)
-            ):
+            target = records.get(entry)
+            if target is not None:
+                satisfied, _ = target
+                if satisfied.origin or not isinstance(
+                    satisfied.folded_event, (events.OpenInCiCleared, *_COMPANION_KINDS)
+                ):
+                    raise StoreError(
+                        f"event {digest} has satisfied entry {entry} that must name a first "
+                        "occurrence of an open-in-CI clear or companion event"
+                    )
+            if any(index.excludes(source_head, entry) for index in provenance):
                 raise StoreError(
-                    f"event {digest} has satisfied entry {entry} that must name a first "
-                    "occurrence of an open-in-CI clear or companion event"
-                )
-            if bound_revision is not None and satisfied.revision > bound_revision:
-                raise StoreError(
-                    f"event {digest} has satisfied entry {entry} after source head {source_head}"
+                    f"event {digest} has satisfied entry {entry} absent from the history "
+                    f"through source head {source_head}"
                 )
 
 
@@ -452,6 +481,7 @@ def commit_pre_log_checkpoint(
 
 __all__ = [
     "ReplayHistory",
+    "ReplayProvenance",
     "build_event_records",
     "build_pre_log_checkpoint",
     "ci_run_id",
@@ -462,7 +492,7 @@ __all__ = [
     "event_fact_key",
     "event_pack_digest",
     "event_unit_references",
-    "replay_provenance_positions",
+    "index_replay_provenance",
     "validate_replay_claims",
     "validate_replay_placement",
 ]
