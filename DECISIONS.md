@@ -1519,6 +1519,14 @@ unit, `refreeze-green@1`. Amends D-17.
   what the existing field can carry. Resolving the original boundary from source provenance on read:
   replay does not copy source event objects, so the boundary often exists in neither store.
 
+- **Note (2026-11-18, Astra's review of `nested-merge-boundary@1`).** With the boundary rule in
+  place, a merge can silently re-apply work a store already merged and then undid: B merges C's
+  open-in-CI mark and clears it; D replays C's later history; B<-D replays D's copy of the old mark
+  and restores the exception. B knows C's older head, D names C's newer one, and neither chain links
+  them, so the provenance filter cannot tell D's copies from new work. Before D-38 the first nested
+  merge in that chain was refused. The user paused the unit: ancestry that survives replay copies
+  (`vouch_mk2-bd4.4.18`) is decided first, and both ship as one unit.
+
 ## D-39 — Rebind continuity is checked within a pack generation, from history (2026-11-16)
 
 **Status:** decided 2026-11-16 by the user, from Sol's design (`design-0tc`). Settles
