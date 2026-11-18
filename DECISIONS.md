@@ -1664,3 +1664,11 @@ unit, `refreeze-green@1`. Amends D-17.
   record at or before the `theirs_head` of the merge block that holds the copy. A resolving entry
   authored later than that head is locally disprovable and refuses like any other.
 
+- **Note (2026-11-18, user decision after Astra's round-4 re-check): position across stores.** The
+  position rule also applies when the entry and the merge's `theirs_head` resolve on different chains.
+  If the chain holding a resolving `satisfied` entry (or the record an `origin` names) had already
+  incorporated that `theirs_head`, through its own merge provenance, before the entry was authored, the
+  head's history cannot contain the entry, and the claim refuses like any other. Order is judged only
+  through recorded provenance (exact digests and merge markers), never by comparing revision numbers or
+  times across stores.
+
