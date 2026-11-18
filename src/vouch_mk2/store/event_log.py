@@ -13,11 +13,18 @@ from vouch_mk2.core.events import (
     AcceptanceFrozen,
     AcceptancePackBound,
     AcceptancePackRebound,
+    DeviationAmended,
+    DeviationOpened,
     Event,
     EventRecord,
     EvidenceRecorded,
     MergeRecorded,
     PreLogHistoryRecorded,
+    ReleaseInvalidated,
+    ReleasePrepared,
+    UnitBlocked,
+    UnitInvalidated,
+    UnitReleaseBound,
 )
 from vouch_mk2.core.model import Snapshot
 from vouch_mk2.store.codec import encode_event_record
@@ -129,8 +136,72 @@ def build_event_records(
     return current, tuple(objects), tuple(records)
 
 
+def event_batch_length(events: Sequence[Event], index: int) -> int:
+    """Count a command's primary and the consecutive companions it emitted."""
+    event = events[index]
+    if isinstance(event, DeviationOpened):
+        companion = events[index + 1] if index + 1 < len(events) else None
+        if isinstance(companion, UnitBlocked):
+            if companion.name != event.unit.name:
+                raise StoreError("open-deviation event batch blocks a different unit")
+            return 2
+        return 1
+    if isinstance(event, DeviationAmended):
+        length = 1 + len(event.impact_set) + len(event.release_impact_set)
+        if index + length > len(events):
+            raise StoreError("amendment event batch is truncated")
+        companions = events[index + 1 : index + length]
+        unit_count = len(event.impact_set)
+        actual_units = tuple(
+            item.name
+            for item in companions[:unit_count]
+            if isinstance(item, UnitInvalidated)
+            and item.trigger_deviation_id == event.deviation_id
+        )
+        if actual_units != tuple(event.impact_set):
+            raise StoreError("amendment event batch has invalid unit companions")
+        actual_releases = tuple(
+            item.release_id
+            for item in companions[unit_count:]
+            if isinstance(item, ReleaseInvalidated)
+        )
+        if actual_releases != tuple(event.release_impact_set):
+            raise StoreError("amendment event batch has invalid release companions")
+        return length
+    if isinstance(event, ReleasePrepared):
+        length = 1
+        included = {reference.name for reference in event.includes}
+        while index + length < len(events):
+            companion = events[index + length]
+            if not isinstance(companion, UnitReleaseBound):
+                break
+            if companion.name not in included:
+                raise StoreError("release preparation has an unrelated bound-unit companion")
+            length += 1
+        return length
+    return 1
+
+
+def _validate_replay_block(block: Sequence[tuple[str, EventRecord]]) -> None:
+    events = tuple(record.folded_event for _, record in block)
+    index = 0
+    while index < len(block):
+        digest, primary = block[index]
+        if isinstance(events[index], (UnitBlocked, UnitInvalidated, UnitReleaseBound, ReleaseInvalidated)):
+            raise StoreError(f"companion event {digest} has no command primary in its merge block")
+        if primary.generated:
+            raise StoreError(f"generated on event {digest} is invalid for a command primary")
+        if not primary.origin:
+            raise StoreError(f"command primary {digest} in a version-2 merge block requires an origin")
+        end = index + event_batch_length(events, index)
+        for digest, companion in block[index + 1 : end]:
+            if not companion.origin and not companion.generated:
+                raise StoreError(f"replayed companion {digest} requires an origin or generated flag")
+        index = end
+
+
 def validate_replay_placement(chain: Sequence[tuple[str, EventRecord]]) -> None:
-    """Require origin and generated to lie inside physically appended version-2 blocks."""
+    """Check replay provenance and companions against the physically appended blocks."""
     positions = {digest: index for index, (digest, _record) in enumerate(chain)}
     block_end = -1
     block_start = len(chain)
@@ -144,6 +215,7 @@ def validate_replay_placement(chain: Sequence[tuple[str, EventRecord]]) -> None:
             if not record.origin:
                 block_end = index
                 block_start = boundary + 1
+                _validate_replay_block(chain[block_start:block_end])
         if (record.origin or record.generated) and not block_start <= index < block_end:
             field = "generated" if record.generated else "origin"
             raise StoreError(f"{field} on event {digest} is outside a version-2 merge block")
@@ -238,5 +310,7 @@ __all__ = [
     "commit_events",
     "commit_pre_log_checkpoint",
     "default_actor",
+    "event_batch_length",
     "event_pack_digest",
+    "validate_replay_placement",
 ]

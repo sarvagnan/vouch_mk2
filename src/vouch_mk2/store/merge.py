@@ -20,7 +20,11 @@ from vouch_mk2.store.codec import (
 )
 from vouch_mk2.store.digests import ArtifactKind, digest_of
 from vouch_mk2.store.errors import StoreError
-from vouch_mk2.store.event_log import build_event_records, validate_replay_placement
+from vouch_mk2.store.event_log import (
+    build_event_records,
+    event_batch_length,
+    validate_replay_placement,
+)
 from vouch_mk2.store.store import Store
 
 
@@ -116,14 +120,13 @@ def _replay_conflict(item: _LoggedEvent, detail: str) -> Refused:
     ),))
 
 
-def _source_batches(
-    chain: tuple[_LoggedEvent, ...], facts: tuple[_SourceFact, ...],
-) -> tuple[tuple[_SourceFact, ...], ...]:
+def _source_batches(facts: tuple[_SourceFact, ...]) -> tuple[tuple[_SourceFact, ...], ...]:
     """Derive context and command boundaries before any provenance filtering."""
+    source_events = tuple(fact.item.record.folded_event for fact in facts)
     batches: list[tuple[_SourceFact, ...]] = []
     index = 0
-    while index < len(chain):
-        length = _source_batch_length(chain, index)
+    while index < len(facts):
+        length = event_batch_length(source_events, index)
         batches.append(facts[index:index + length])
         index += length
     return tuple(batches)
@@ -243,15 +246,21 @@ def _validate_origin_claims(
     shared_revision: int,
 ) -> None:
     known: dict[str, set[tuple[object, ...]]] = {}
+    copies: set[str] = set()
     for fact in ours:
         claims = _origin_claims(fact)
         known.setdefault(fact.item.root, set()).add(claims)
         if fact.item.record.origin:
-            known.setdefault(fact.item.digest, set()).add(claims)
+            copies.add(fact.item.digest)
     for fact in theirs:
         item = fact.item
         if item.record.revision <= shared_revision:
             continue
+        if item.record.origin in copies:
+            raise StoreError(
+                f"merge.theirs-history-invalid: event {item.digest} names origin "
+                f"{item.root}, which our history holds as a copy"
+            )
         counterparts = known.get(item.root)
         if counterparts and counterparts != {_origin_claims(fact)}:
             raise StoreError(
@@ -413,60 +422,6 @@ def _command_for_event(
             raise StoreError(
                 f"event {_event_label(event)} is not a command-leading event"
             )
-
-
-def _source_batch_length(chain: tuple[_LoggedEvent, ...], index: int) -> int:
-    """Skip companion facts emitted by the source command's one decision."""
-    event = chain[index].record.folded_event
-    if isinstance(event, events.DeviationOpened):
-        companion = (
-            None
-            if index + 1 >= len(chain)
-            else chain[index + 1].record.folded_event
-        )
-        if isinstance(companion, events.UnitBlocked):
-            if companion.name != event.unit.name:
-                raise StoreError("open-deviation event batch blocks a different unit")
-            return 2
-        return 1
-    if isinstance(event, events.DeviationAmended):
-        length = 1 + len(event.impact_set) + len(event.release_impact_set)
-        if index + length > len(chain):
-            raise StoreError("amendment event batch is truncated")
-        companions = tuple(
-            item.record.folded_event for item in chain[index + 1 : index + length]
-        )
-        unit_count = len(event.impact_set)
-        expected_units = tuple(event.impact_set)
-        actual_units = tuple(
-            item.name
-            for item in companions[:unit_count]
-            if isinstance(item, events.UnitInvalidated)
-            and item.trigger_deviation_id == event.deviation_id
-        )
-        if actual_units != expected_units:
-            raise StoreError("amendment event batch has invalid unit companions")
-        expected_releases = tuple(event.release_impact_set)
-        actual_releases = tuple(
-            item.release_id
-            for item in companions[unit_count:]
-            if isinstance(item, events.ReleaseInvalidated)
-        )
-        if actual_releases != expected_releases:
-            raise StoreError("amendment event batch has invalid release companions")
-        return length
-    if isinstance(event, events.ReleasePrepared):
-        length = 1
-        included = {reference.name for reference in event.includes}
-        while index + length < len(chain):
-            companion = chain[index + length].record.folded_event
-            if not isinstance(companion, events.UnitReleaseBound):
-                break
-            if companion.name not in included:
-                raise StoreError("release preparation has an unrelated bound-unit companion")
-            length += 1
-        return length
-    return 1
 
 
 def _provenance_ancestors(
@@ -804,10 +759,10 @@ def merge_store_roots(
 
         ancestor = max(shared, key=ours_position)
 
+        _validate_origin_claims(ours_facts, theirs_facts, ancestor.record.revision)
         if ancestor.digest == theirs.event_head:
             return MergeOutcome("no-op", ours, 0)
 
-        _validate_origin_claims(ours_facts, theirs_facts, ancestor.record.revision)
         skipped = 0
         incorporated_batches = 0
         if ancestor.digest == ours.event_head:
@@ -827,7 +782,9 @@ def merge_store_roots(
             replayed = 0
         else:
             incorporated = _provenance_ancestors(ours.event_head, ours_chain, theirs_chain)
-            source_batches = _source_batches(theirs_chain, theirs_facts)
+            if theirs.event_head in incorporated:
+                return MergeOutcome("no-op", ours, 0)
+            source_batches = _source_batches(theirs_facts)
             source_suffix = _source_records_to_replay(theirs_chain, incorporated, source_batches)
             selected = {item.digest for item in source_suffix}
             legacy_refusal = _legacy_ancestry_refusal(
@@ -953,8 +910,6 @@ def merge_store_roots(
                 last_source = batch[-1].item.digest
                 boundaries[last_source] = replayed_digests.get(last_source, current.event_head)
 
-            if theirs.event_head in incorporated:
-                return MergeOutcome("no-op", ours, 0)
             for item in theirs_chain:
                 satisfied.update(dict.fromkeys(item.record.satisfied))
 

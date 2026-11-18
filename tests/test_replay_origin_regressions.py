@@ -18,7 +18,7 @@ from vouch_mk2.cli import main
 from vouch_mk2.core import commands
 from vouch_mk2.core.decide import Accepted, Refused, apply, decide
 from vouch_mk2.core.events import (
-    DeviationAmended, EventRecord, MergeRecorded, OpenInCiMarked, UnitInvalidated,
+    DeviationAmended, EventRecord, OpenInCiMarked, UnitBlocked, UnitInvalidated,
 )
 from vouch_mk2.core.model import AnchorMode, DeviationType, Snapshot, Tier, UnitRef
 from vouch_mk2.store import ArtifactKind, Store, StoreError, decode_event_record, digest_of
@@ -31,7 +31,9 @@ TIME = "2026-11-18T00:00:00+00:00"
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "state-format"
 
 
-def _command(root: Path, command: commands.Command, *, actor: str = "author") -> None:
+def _command(
+    root: Path, command: commands.Command | commands.RecordMerge, *, actor: str = "author",
+) -> None:
     with Store.open(str(root)) as store, store.write_locked():
         before = store.read_snapshot()
         decision = decide(before, command)
@@ -78,10 +80,11 @@ def _carry_mark(ours: Path, carrier: Path) -> None:
 
 def _rewrite_copy(
     root: Path, changes: dict[str, object], *, recompute: bool,
+    remove: tuple[str, ...] = (), offset: int = 2,
 ) -> None:
-    """Rewrite a copy and its final marker with valid artifact hashes."""
+    """Rewrite a copy and rechain its successors with valid artifact hashes."""
     chain = _records(root)
-    target = len(chain) - 2
+    target = len(chain) - offset
     before = Snapshot()
     previous = "GENESIS"
     objects = root / "objects" / "sha256"
@@ -91,8 +94,9 @@ def _rewrite_copy(
             if index == target:
                 assert record.origin
                 raw.update(changes)
+                for field in remove:
+                    del raw[field]
             else:
-                assert isinstance(record.folded_event, MergeRecorded)
                 raw["prev"] = previous
             data = encode_document(raw)
             digest = digest_of(ArtifactKind.EVENT, data)
@@ -115,6 +119,10 @@ def _forbid_lock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Store, "write_locked", forbidden)
 
 
+def _store_bytes(root: Path) -> dict[Path, bytes]:
+    return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -123,9 +131,8 @@ def _forbid_lock(monkeypatch: pytest.MonkeyPatch) -> None:
         {"actor": "different"},
         {"run_id": "123"},
         {"recorded_at": "2026-11-19T00:00:00+00:00"},
-        {"generated": True},
     ],
-    ids=["kind", "subject", "actor", "run", "time", "generated"],
+    ids=["kind", "subject", "actor", "run", "time"],
 )
 def test_a_covered_copy_must_match_each_claim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: dict[str, object],
@@ -139,6 +146,75 @@ def test_a_covered_copy_must_match_each_claim(
     _forbid_lock(monkeypatch)
     with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .* disagrees"):
         merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
+
+
+def test_a_covered_companion_must_match_its_generated_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ours = _store(tmp_path / "ours")
+    carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
+    _command(ours, commands.OpenDeviation("dev", DeviationType.PACK_DEFECT, UnitRef("x", "1")))
+    _command(carrier, commands.SpecifyUnit("carrier", "1"))
+    _merge(carrier, ours)
+    root, original = _records(ours)[-1]
+    copy = _records(carrier)[-2][1]
+    assert isinstance(original.folded_event, UnitBlocked) and not original.generated
+    assert copy.origin == root and not copy.generated
+    _rewrite_copy(carrier, {"generated": True}, recompute=True)
+    _forbid_lock(monkeypatch)
+    with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .* disagrees"):
+        merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
+
+
+@pytest.mark.parametrize("exact_no_op", [False, True], ids=["origin-covered", "exact-no-op"])
+def test_an_incoming_origin_cannot_name_a_known_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exact_no_op: bool,
+) -> None:
+    source = _store(tmp_path / "source")
+    ours = Path(shutil.copytree(source, tmp_path / "ours"))
+    theirs = Path(shutil.copytree(source, tmp_path / "theirs"))
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    for branch in (ours, theirs):
+        _command(branch, commands.SpecifyUnit(branch.name, "1"))
+        _merge(branch, source)
+    digest, copy = _records(ours)[-2]
+    assert isinstance(copy.folded_event, OpenInCiMarked)
+    assert copy.origin and copy.origin != digest
+    _rewrite_copy(theirs, {"origin": digest}, recompute=True)
+    if exact_no_op:
+        _command(ours, commands.RecordMerge(_snapshot(ours).event_head, _snapshot(theirs).event_head))
+    _forbid_lock(monkeypatch)
+    before = (_store_bytes(ours), _store_bytes(theirs))
+    with pytest.raises(StoreError, match=rf"merge\.theirs-history-invalid: .*origin {digest}.*copy"):
+        merge_store_roots(str(ours), str(theirs), actor="reviewer", run_id="")
+    assert (_store_bytes(ours), _store_bytes(theirs)) == before
+
+
+def test_a_replayed_mark_cannot_lose_its_origin_and_restore_a_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _store(tmp_path / "source")
+    carrier = Path(shutil.copytree(source, tmp_path / "carrier"))
+    _command(source, commands.MarkOpenInCi("x", "old"))
+    ours = Path(shutil.copytree(source, tmp_path / "ours"))
+    _command(ours, commands.ClearOpenInCi("x"))
+    _command(source, commands.SpecifyUnit("source-only", "1"))
+    _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    _merge(carrier, source)
+    honest = Path(shutil.copytree(ours, tmp_path / "honest"))
+    assert not _merge(honest, carrier).snapshot.ci_exceptions
+
+    _rewrite_copy(carrier, {}, recompute=True, remove=("origin", "origin_format"), offset=3)
+    assert main(["check", "--root", str(carrier)]) == 1
+    assert any(
+        line.startswith("FAIL") and "check.event-log" in line and "origin" in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+    _forbid_lock(monkeypatch)
+    before = (_store_bytes(ours), _store_bytes(carrier))
+    with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .*origin"):
+        merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
+    assert (_store_bytes(ours), _store_bytes(carrier)) == before
 
 
 @pytest.mark.parametrize(
@@ -171,8 +247,9 @@ def test_malformed_origin_fails_merge_and_check(
         ("direct", False, "expected true"),
         ("copy", 1, "expected boolean"),
         ("copy", "true", "expected boolean"),
+        ("copy", True, "command primary"),
     ],
-    ids=["outside", "outside-false", "integer", "string"],
+    ids=["outside", "outside-false", "integer", "string", "command-primary"],
 )
 def test_invalid_generated_fails_merge_and_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
@@ -182,7 +259,7 @@ def test_invalid_generated_fails_merge_and_check(
     theirs = Path(shutil.copytree(ours, tmp_path / "theirs"))
     if mode == "copy":
         _carry_mark(ours, theirs)
-        _rewrite_copy(theirs, {"generated": value}, recompute=False)
+        _rewrite_copy(theirs, {"generated": value}, recompute=value is True)
     else:
         _command(theirs, commands.SpecifyUnit("theirs", "1"))
         snapshot = _snapshot(theirs)
@@ -282,6 +359,27 @@ def _dependent_invalidation(root: Path) -> tuple[str, EventRecord]:
         (digest, record) for digest, record in _records(root)
         if isinstance(record.folded_event, UnitInvalidated) and record.folded_event.name == "dep"
     )
+
+
+def test_an_exact_repeat_merge_is_a_no_op_after_respecifying_a_dependent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _store(tmp_path / "base")
+    primary = Path(shutil.copytree(base, tmp_path / "primary"))
+    ours = Path(shutil.copytree(base, tmp_path / "ours"))
+    _start_dependent(base)
+    _amend_primary(primary)
+    _merge(base, primary)
+    assert _dependent_invalidation(base)[1].generated
+    _command(ours, commands.SpecifyUnit("ours-only", "1"))
+    _merge(ours, base)
+    _command(ours, commands.Respecify("dep"))
+
+    _forbid_lock(monkeypatch)
+    before = (_store_bytes(ours), _store_bytes(base))
+    result = merge_store_roots(str(ours), str(base), actor="reviewer", run_id="")
+    assert result == MergeOutcome("no-op", _snapshot(ours), 0)
+    assert (_store_bytes(ours), _store_bytes(base)) == before
 
 
 def test_a_copy_of_a_copy_retains_the_generated_flag_and_root(tmp_path: Path) -> None:
