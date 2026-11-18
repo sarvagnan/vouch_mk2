@@ -1694,3 +1694,9 @@ unit, `refreeze-green@1`. Amends D-17.
   record only a third store holds) is D-41's stated trust limit and goes to the follow-up bead
   `vouch_mk2-22a` on the threat model for hand-edited stores, not to a unit.
 
+- **Note (2026-11-18, user decision, after Astra's final review of `nested-merge-boundary@1`).** Stop
+  rule (a) covers behaviour this unit introduces or changes. Astra's randomized test found honest stores
+  left disagreeing after two-way merges when both sides changed the same CI policy or exception; the
+  released merge on `main` does the same, so it predates D-38 and D-41. It is decided and fixed separately
+  under `vouch_mk2-oa2`, and does not block this unit.
+
