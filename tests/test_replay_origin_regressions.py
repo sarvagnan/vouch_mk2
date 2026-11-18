@@ -78,11 +78,11 @@ def _carry_mark(ours: Path, carrier: Path) -> None:
     _merge(carrier, ours)
 
 
-def _rewrite_copy(
+def _rewrite_record(
     root: Path, changes: dict[str, object], *, recompute: bool,
     remove: tuple[str, ...] = (), offset: int = 2,
 ) -> None:
-    """Rewrite a copy and rechain its successors with valid artifact hashes."""
+    """Rewrite a record and rechain its successors with valid artifact hashes."""
     chain = _records(root)
     target = len(chain) - offset
     before = Snapshot()
@@ -92,7 +92,6 @@ def _rewrite_copy(
         if index >= target:
             raw = decode_raw_document((objects / digest).read_bytes())
             if index == target:
-                assert record.origin
                 raw.update(changes)
                 for field in remove:
                     del raw[field]
@@ -142,7 +141,7 @@ def test_a_covered_copy_must_match_each_claim(
     _command(ours, commands.FreezeAcceptance("y", "y-pack/1"))
     carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
     _carry_mark(ours, carrier)
-    _rewrite_copy(carrier, change, recompute=True)
+    _rewrite_record(carrier, change, recompute=True)
     _forbid_lock(monkeypatch)
     with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .* disagrees"):
         merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
@@ -160,7 +159,7 @@ def test_a_covered_companion_must_match_its_generated_claim(
     copy = _records(carrier)[-2][1]
     assert isinstance(original.folded_event, UnitBlocked) and not original.generated
     assert copy.origin == root and not copy.generated
-    _rewrite_copy(carrier, {"generated": True}, recompute=True)
+    _rewrite_record(carrier, {"generated": True}, recompute=True)
     _forbid_lock(monkeypatch)
     with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .* disagrees"):
         merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
@@ -180,7 +179,7 @@ def test_an_incoming_origin_cannot_name_a_known_copy(
     digest, copy = _records(ours)[-2]
     assert isinstance(copy.folded_event, OpenInCiMarked)
     assert copy.origin and copy.origin != digest
-    _rewrite_copy(theirs, {"origin": digest}, recompute=True)
+    _rewrite_record(theirs, {"origin": digest}, recompute=True)
     if exact_no_op:
         _command(ours, commands.RecordMerge(_snapshot(ours).event_head, _snapshot(theirs).event_head))
     _forbid_lock(monkeypatch)
@@ -190,8 +189,10 @@ def test_an_incoming_origin_cannot_name_a_known_copy(
     assert (_store_bytes(ours), _store_bytes(theirs)) == before
 
 
-def test_a_replayed_mark_cannot_lose_its_origin_and_restore_a_clear(
+@pytest.mark.parametrize("change", ["strip-origin", "unrelated-origin"])
+def test_a_replayed_mark_cannot_restore_a_clear_with_invalid_origin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    change: str,
 ) -> None:
     source = _store(tmp_path / "source")
     carrier = Path(shutil.copytree(source, tmp_path / "carrier"))
@@ -200,11 +201,15 @@ def test_a_replayed_mark_cannot_lose_its_origin_and_restore_a_clear(
     _command(ours, commands.ClearOpenInCi("x"))
     _command(source, commands.SpecifyUnit("source-only", "1"))
     _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    unrelated = _snapshot(carrier).event_head
     _merge(carrier, source)
     honest = Path(shutil.copytree(ours, tmp_path / "honest"))
     assert not _merge(honest, carrier).snapshot.ci_exceptions
 
-    _rewrite_copy(carrier, {}, recompute=True, remove=("origin", "origin_format"), offset=3)
+    if change == "strip-origin":
+        _rewrite_record(carrier, {}, recompute=True, remove=("origin", "origin_format"), offset=3)
+    else:
+        _rewrite_record(carrier, {"origin": unrelated}, recompute=True, offset=3)
     assert main(["check", "--root", str(carrier)]) == 1
     assert any(
         line.startswith("FAIL") and "check.event-log" in line and "origin" in line
@@ -215,6 +220,95 @@ def test_a_replayed_mark_cannot_lose_its_origin_and_restore_a_clear(
     with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .*origin"):
         merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
     assert (_store_bytes(ours), _store_bytes(carrier)) == before
+    assert not _snapshot(ours).ci_exceptions
+
+
+def test_an_origin_cannot_name_a_same_chain_mark_for_another_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    ours = _store(tmp_path / "ours")
+    carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
+    _command(carrier, commands.SpecifyUnit("y", "1"))
+    _command(carrier, commands.FreezeAcceptance("y", "pack/1"))
+    _command(carrier, commands.MarkOpenInCi("y", "old"))
+    wrong_subject = _snapshot(carrier).event_head
+    _carry_mark(ours, carrier)
+    _rewrite_record(carrier, {"origin": wrong_subject}, recompute=True)
+
+    assert main(["check", "--root", str(carrier)]) == 1
+    assert any(
+        line.startswith("FAIL") and "check.event-log" in line and wrong_subject in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+    _forbid_lock(monkeypatch)
+    with pytest.raises(StoreError, match=rf"merge\.theirs-history-invalid: .*{wrong_subject}"):
+        merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
+
+
+@pytest.mark.parametrize("resolution", ["same-chain", "receiver-chain", "source-chain"])
+def test_a_satisfied_entry_cannot_name_an_unrelated_specification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    resolution: str,
+) -> None:
+    source = _store(tmp_path / "source")
+    carrier = Path(shutil.copytree(source, tmp_path / "carrier"))
+    _command(source, commands.SpecifyUnit("source-only", "1"))
+    _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    unrelated = _snapshot(carrier if resolution == "same-chain" else source).event_head
+    _merge(carrier, source)
+    _rewrite_record(carrier, {"satisfied": [unrelated]}, recompute=True, offset=1)
+
+    main(["check", "--root", str(carrier)])
+    verdict = "FAIL" if resolution == "same-chain" else "PASS"
+    assert any(
+        line.startswith(verdict) and "check.event-log" in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+    ours, theirs = (carrier, source) if resolution == "source-chain" else (source, carrier)
+    _forbid_lock(monkeypatch)
+    with pytest.raises(StoreError, match=rf"merge\.theirs-history-invalid: .*satisfied.*{unrelated}"):
+        merge_store_roots(str(ours), str(theirs), actor="reviewer", run_id="")
+
+
+def test_a_satisfied_entry_cannot_name_a_companion_copy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _store(tmp_path / "source")
+    carrier = Path(shutil.copytree(source, tmp_path / "carrier"))
+    _command(carrier, commands.SpecifyUnit("carrier-only", "1"))
+    _command(source, commands.OpenDeviation("dev", DeviationType.PACK_DEFECT, UnitRef("x", "1")))
+    _merge(carrier, source)
+    digest, copy = _records(carrier)[-2]
+    assert isinstance(copy.folded_event, UnitBlocked) and copy.origin
+    _rewrite_record(carrier, {"satisfied": [digest]}, recompute=True, offset=1)
+
+    assert main(["check", "--root", str(carrier)]) == 1
+    assert any(
+        line.startswith("FAIL") and "check.event-log" in line
+        and "satisfied" in line and digest in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_an_origin_unavailable_on_both_chains_is_accepted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _store(tmp_path / "source")
+    ours = Path(shutil.copytree(source, tmp_path / "ours"))
+    carrier = Path(shutil.copytree(source, tmp_path / "carrier"))
+    _command(ours, commands.SpecifyUnit("ours-only", "1"))
+    _carry_mark(source, carrier)
+    unavailable = "0" * 64
+    assert unavailable not in {digest for root in (ours, carrier) for digest, _ in _records(root)}
+    _rewrite_record(carrier, {"origin": unavailable}, recompute=True)
+
+    assert main(["check", "--root", str(carrier)]) == 0
+    assert any(
+        line.startswith("PASS") and "check.event-log" in line
+        for line in capsys.readouterr().out.splitlines()
+    )
+    assert _merge(ours, carrier).snapshot.unit("carrier") is not None
+    assert any(record.origin == unavailable for _, record in _records(ours))
 
 
 @pytest.mark.parametrize(
@@ -229,7 +323,7 @@ def test_malformed_origin_fails_merge_and_check(
     ours = _store(tmp_path / "ours")
     carrier = Path(shutil.copytree(ours, tmp_path / "carrier"))
     _carry_mark(ours, carrier)
-    _rewrite_copy(carrier, {"origin": origin}, recompute=False)
+    _rewrite_record(carrier, {"origin": origin}, recompute=False)
     _forbid_lock(monkeypatch)
     with pytest.raises(StoreError, match=r"merge\.theirs-history-invalid: .*origin"):
         merge_store_roots(str(ours), str(carrier), actor="reviewer", run_id="")
@@ -259,7 +353,7 @@ def test_invalid_generated_fails_merge_and_check(
     theirs = Path(shutil.copytree(ours, tmp_path / "theirs"))
     if mode == "copy":
         _carry_mark(ours, theirs)
-        _rewrite_copy(theirs, {"generated": value}, recompute=value is True)
+        _rewrite_record(theirs, {"generated": value}, recompute=value is True)
     else:
         _command(theirs, commands.SpecifyUnit("theirs", "1"))
         snapshot = _snapshot(theirs)

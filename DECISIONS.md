@@ -1649,3 +1649,12 @@ unit, `refreeze-green@1`. Amends D-17.
   D-13's "written by a newer vouch" message; the "run upgrade" message is what a format-7 binary
   prints for a format-6 store.
 
+- **Note (2026-11-18, owner, after Astra's re-check of `nested-merge-boundary@1`): the validation
+  bound.** Every `origin` (and `satisfied` entry) that resolves to a record on either chain, OURS' or
+  THEIRS' own, is validated against that record: it must be a first occurrence (carry no `origin`
+  itself), agree on kind and subject, and agree on actor, run claim and recorded time; `check.event-log`
+  applies the same rule to origins resolving within a single store. An `origin` naming a digest held by
+  neither store is accepted as a claim, at D-41's trust level. A hand edit that invents such a digest,
+  or forges a whole consistent history, is outside what this rule detects and is not a defect of it;
+  a locally disprovable `origin` is.
+

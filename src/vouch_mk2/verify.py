@@ -75,11 +75,14 @@ from vouch_mk2.store import (
 from vouch_mk2.store.codec import decode_raw_document
 from vouch_mk2.store.upgrade import UpgradeRefused, upgrade_document
 from vouch_mk2.store.event_log import (
+    ReplayHistory,
     build_event_records,
     build_pre_log_checkpoint,
     ci_run_id,
     commit_events,
     default_actor,
+    event_unit_references,
+    validate_replay_claims,
     validate_replay_placement,
 )
 
@@ -172,7 +175,9 @@ def _check_event_log(store: Store, snapshot: Snapshot) -> CheckResult:
         return CheckResult(mk2.CHECK_EVENT_LOG, Verdict.FAIL, str(error))
 
     replay = Snapshot()
+    history: ReplayHistory = {}
     for record_digest, record in chain:
+        history[record_digest] = (record, event_unit_references(replay, record.folded_event))
         try:
             replay = apply(
                 replay,
@@ -192,6 +197,11 @@ def _check_event_log(store: Store, snapshot: Snapshot) -> CheckResult:
                 Verdict.FAIL,
                 f"revision {record.revision}: replay produced revision {replay.revision}",
             )
+
+    try:
+        validate_replay_claims(history, history)
+    except StoreError as error:
+        return CheckResult(mk2.CHECK_EVENT_LOG, Verdict.FAIL, str(error))
 
     replay_without_head = encode_snapshot(replace(replay, event_head=""))
     committed_without_head = encode_snapshot(replace(snapshot, event_head=""))

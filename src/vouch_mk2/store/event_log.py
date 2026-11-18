@@ -8,6 +8,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import replace
 
+from vouch_mk2.core import events
 from vouch_mk2.core.decide import apply
 from vouch_mk2.core.events import (
     AcceptanceFrozen,
@@ -26,12 +27,16 @@ from vouch_mk2.core.events import (
     UnitInvalidated,
     UnitReleaseBound,
 )
-from vouch_mk2.core.model import Snapshot
+from vouch_mk2.core.model import Snapshot, UnitRef
 from vouch_mk2.store.codec import encode_event_record
 from vouch_mk2.store.digests import ArtifactKind, digest_of
 from vouch_mk2.store.errors import StoreError
 from vouch_mk2.store.store import Store
 
+
+type ReplayHistory = dict[str, tuple[EventRecord, tuple[UnitRef, ...]]]
+
+_COMPANION_KINDS = (UnitBlocked, UnitInvalidated, UnitReleaseBound, ReleaseInvalidated)
 
 _CI_RUN_ID_VARIABLES = (
     "GITHUB_RUN_ID",
@@ -136,6 +141,58 @@ def build_event_records(
     return current, tuple(objects), tuple(records)
 
 
+def event_unit_references(snapshot: Snapshot, event: events.Event) -> tuple[UnitRef, ...]:
+    """Resolve operation targets only; by-name dependency lookups stay unpinned."""
+    match event:
+        case events.UnitSpecified(name=name, version=version):
+            return (UnitRef(name, version),)
+        case events.DeviationOpened(unit=ref):
+            return (ref,)
+        case events.EvidenceRecorded(event=evidence):
+            return (evidence.unit,)
+        case events.ReleasePrepared(includes=includes):
+            return includes
+        case events.AnchorAdvanced(unit_name=name, unit_version=version):
+            if version:
+                return (UnitRef(name, version),)
+        case (
+            events.AcceptanceFrozen(name=name)
+            | events.AcceptancePackBound(name=name)
+            | events.AcceptancePackRebound(name=name)
+            | events.UnitMarkedReady(name=name)
+            | events.WorkStarted(name=name)
+            | events.UnitMarkedDone(name=name)
+            | events.UnitPublished(name=name)
+            | events.UnitSuperseded(name=name)
+            | events.UnitRespecified(name=name)
+            | events.ReverificationStarted(name=name)
+            | events.UnitBlocked(name=name)
+            | events.UnitInvalidated(name=name)
+            | events.UnitReleaseBound(name=name)
+        ):
+            pass
+        case _:
+            return ()
+    unit = snapshot.unit(name)
+    return () if unit is None else (unit.ref(),)
+
+
+def event_fact_key(event: events.Event) -> tuple[str, tuple[str, ...]]:
+    """Identify correspondence within one decision, independently of ordering."""
+    if isinstance(event, events.MergeRecorded):
+        subject = (event.ours_head, event.theirs_head)
+    elif isinstance(event, events.EvidenceRecorded):
+        subject = (event.event.unit.label(),)
+    else:
+        subject = ()
+        for field in ("name", "deviation_id", "release_id", "unit_name"):
+            value = getattr(event, field, None)
+            if isinstance(value, str):
+                subject = (value,)
+                break
+    return type(event).__name__, subject
+
+
 def event_batch_length(events: Sequence[Event], index: int) -> int:
     """Count a command's primary and the consecutive companions it emitted."""
     event = events[index]
@@ -187,7 +244,7 @@ def _validate_replay_block(block: Sequence[tuple[str, EventRecord]]) -> None:
     index = 0
     while index < len(block):
         digest, primary = block[index]
-        if isinstance(events[index], (UnitBlocked, UnitInvalidated, UnitReleaseBound, ReleaseInvalidated)):
+        if isinstance(events[index], _COMPANION_KINDS):
             raise StoreError(f"companion event {digest} has no command primary in its merge block")
         if primary.generated:
             raise StoreError(f"generated on event {digest} is invalid for a command primary")
@@ -219,6 +276,45 @@ def validate_replay_placement(chain: Sequence[tuple[str, EventRecord]]) -> None:
         if (record.origin or record.generated) and not block_start <= index < block_end:
             field = "generated" if record.generated else "origin"
             raise StoreError(f"{field} on event {digest} is outside a version-2 merge block")
+
+
+def _origin_claims(record: EventRecord, units: tuple[UnitRef, ...]) -> tuple[object, ...]:
+    event = record.folded_event
+    # The receiving boundary changes in every copy. The source head does not.
+    if isinstance(event, MergeRecorded):
+        subject = (event.theirs_head,)
+    elif isinstance(event, events.FormalCertificateRecorded):
+        subject = (event.certificate_digest,)
+    else:
+        _, subject = event_fact_key(event)
+    return (
+        type(event), subject, units, record.actor, record.run_id, record.recorded_at,
+        record.origin_format or record.event_format, record.generated,
+    )
+
+
+def validate_replay_claims(history: ReplayHistory, targets: ReplayHistory) -> None:
+    """Check provenance claims whose digests occur on the target's physical chain."""
+    for digest, (record, units) in history.items():
+        origin = targets.get(record.origin)
+        if origin is not None:
+            original, original_units = origin
+            if original.origin:
+                raise StoreError(f"event {digest} names origin {record.origin}, which is itself a copy")
+            if _origin_claims(record, units) != _origin_claims(original, original_units):
+                raise StoreError(f"event {digest} disagrees with origin {record.origin}")
+        for entry in record.satisfied:
+            target = targets.get(entry)
+            if target is None:
+                continue
+            satisfied, _ = target
+            if satisfied.origin or not isinstance(
+                satisfied.folded_event, (events.OpenInCiCleared, *_COMPANION_KINDS)
+            ):
+                raise StoreError(
+                    f"event {digest} has satisfied entry {entry} that must name a first "
+                    "occurrence of an open-in-CI clear or companion event"
+                )
 
 
 def commit_events(
@@ -304,6 +400,7 @@ def commit_pre_log_checkpoint(
 
 
 __all__ = [
+    "ReplayHistory",
     "build_event_records",
     "build_pre_log_checkpoint",
     "ci_run_id",
@@ -311,6 +408,9 @@ __all__ = [
     "commit_pre_log_checkpoint",
     "default_actor",
     "event_batch_length",
+    "event_fact_key",
     "event_pack_digest",
+    "event_unit_references",
+    "validate_replay_claims",
     "validate_replay_placement",
 ]
