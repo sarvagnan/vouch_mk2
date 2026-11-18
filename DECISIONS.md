@@ -1672,3 +1672,14 @@ unit, `refreeze-green@1`. Amends D-17.
   through recorded provenance (exact digests and merge markers), never by comparing revision numbers or
   times across stores.
 
+- **Note (2026-11-18, user decision after Astra's round-5 re-check): the general rule, and when review
+  stops.** The position notes above are special cases of one rule. When the source history through a
+  merge's `theirs_head` is fully available (on either chain, through exact digests and merge
+  provenance), every resolving `satisfied` entry the merge lists, and every resolving `origin` on a
+  copy in its block, must be found in that history: as the record itself, as a copy's `origin`, or as
+  an inherited `satisfied` entry. Otherwise the claim refuses before any lock, and `check.event-log`
+  reports it when one store suffices. Where the history is not fully available, D-41's trust level
+  holds. **Stop rule for this unit's reviews:** from here, a review finding blocks only if it drops or
+  duplicates honest work, or shows actual loss caused by a forged claim. Other forged-provenance findings
+  go to a follow-up bead.
+
