@@ -1683,3 +1683,14 @@ unit, `refreeze-green@1`. Amends D-17.
   duplicates honest work, or shows actual loss caused by a forged claim. Other forged-provenance findings
   go to a follow-up bead.
 
+- **Note (2026-11-18, user decision, from Astra's and Fable's opinions on the recurring findings,
+  `d41-forgery-loop_*.OUT.md`).** Two changes to the note above. (1) When the source history through a
+  merge's `theirs_head` is fully available, every `satisfied` entry and every `origin` in its block must be
+  found in it, whether or not the entry resolves on a chain. (2) The stop rule is reworded: a finding
+  blocks only if (a) histories written only by the tool, with no hand edit, are dropped, duplicated,
+  wrongly refused or left disagreeing, or (b) the implementation accepts a claim the general rule, as
+  written, requires it to refuse. Loss that needs a forged claim the general rule does not cover (for
+  example a merge record whose `theirs_head` is rewritten to a later source head, or an entry naming a
+  record only a third store holds) is D-41's stated trust limit and goes to the follow-up bead
+  `vouch_mk2-22a` on the threat model for hand-edited stores, not to a unit.
+
