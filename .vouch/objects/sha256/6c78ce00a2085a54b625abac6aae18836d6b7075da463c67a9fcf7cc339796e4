@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"rebind-generations@1","reason":"D-32: unit branch open until its PR merges and CI on main anchors it"},"prev":"79a03d8560759be8a29ccf34e760fc18badf0169d0841de9a0cb64e83a3d8bda","recorded_at":"2026-11-19T10:29:30+00:00","revision":1197,"run_id":""}
