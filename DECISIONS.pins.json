@@ -210,6 +210,11 @@
       "key": "D-41",
       "bytes": 10821,
       "sha256": "4e9c0a4a89c80bb1130dc50e24ee9b2be49616ef60bf7a0e130744518e8e1f43"
+    },
+    {
+      "key": "D-42",
+      "bytes": 2148,
+      "sha256": "e8723eedc399ec9fd4825d99fb01ba5aa0c60ef787482dae40119a62f9aaf59b"
     }
   ]
 }
