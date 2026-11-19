@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_option_safe_labels.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"7727d2da08d34e9773c6615d8b22a1180f11d4d9d9bbd5c7f905a81d2445d356","parent":"GENESIS","recorded_at":"2026-11-19T12:58:09+00:00","sequence":1,"unit":{"name":"option-safe-labels","version":"1"}}

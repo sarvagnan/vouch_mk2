@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"option-safe-labels@1","reason":"D-32: unit branch open until its PR merges and CI on main anchors it"},"prev":"7d5d7bab1287e48b6d848b6c0e6a161e1fc611587c10c1dd9000184a099ecd64","recorded_at":"2026-11-19T12:58:10+00:00","revision":1213,"run_id":""}
