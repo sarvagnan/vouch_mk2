@@ -240,7 +240,6 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                 "rebind.history-missing",
                 f"units[{index}] has rebound binding without rebound history",
             )
-        previous_rebound_digest = ""
         previous_rebound_sequence = -1
         for rebound_index, rebound in enumerate(unit.rebound_history):
             for field_name, rebound_digest in (
@@ -270,15 +269,6 @@ def validate_snapshot(snapshot: Snapshot) -> tuple[Violation, ...]:
                     f"units[{index}].rebound_history[{rebound_index}] evidence "
                     "sequence precedes the prior rebound",
                 )
-            if previous_rebound_digest and (
-                rebound.old_inventory_digest != previous_rebound_digest
-            ):
-                add(
-                    "rebind.history-disconnected",
-                    f"units[{index}].rebound_history[{rebound_index}] old inventory "
-                    "does not equal the prior new inventory",
-                )
-            previous_rebound_digest = rebound.new_inventory_digest
             previous_rebound_sequence = rebound.evidence_head_sequence
         if unit.rebound_history:
             latest = unit.rebound_history[-1]

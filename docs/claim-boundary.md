@@ -130,7 +130,8 @@ Label, status and evidence chain are kept. No bound path may be removed and no e
 demoted. Vouch does not verify the reason's truth and does not verify the adequacy of the new test content.
 Afterwards `check.evidence-chains` requires a fresh GREEN for the new test-set digest at every
 tier (no RED needed), and `check.pack-bound` names rebound units and enforces that GREEN at
-`high`.
+`high`. Each rebind must name the unit's current inventory and test set. A re-freeze starts a
+new pack generation, so the first rebind after it does not continue an earlier generation's rebinds.
 
 ## CI policy
 
