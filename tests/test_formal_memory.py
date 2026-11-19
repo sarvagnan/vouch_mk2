@@ -10,7 +10,7 @@ from __future__ import annotations
 import gc
 import tracemalloc
 from collections.abc import Iterator
-from typing import SupportsIndex, override
+from typing import Self, SupportsIndex, overload, override
 
 import pytest
 
@@ -31,6 +31,9 @@ _RECORDED_RELATION_DIGESTS = {
     "history-v1": "eff8e3a3ec66ad0a4b543bff6a80bdb48cd65416f7076e7ad0137eda46929c39",
     "tier-v1": "5822a72ba21a762f5b1531949bdd1d814509bfaeeaaf0066805b37d4d9ad422e",
 }
+
+# The digest of that whole recorded certificate.
+_RECORDED_CERTIFICATE_DIGEST = "7b3919fd45fb169c16863f2ae5164287a7e3393df5a5f3db912a9cc357fd689c"
 
 _AWKWARD = (
     'quote " backslash \\ slash /',
@@ -137,11 +140,31 @@ class _Tripwire[T](tuple[T, ...]):
             raise AssertionError("the relation was read again")
         return super().__iter__()
 
+    @overload
+    def __getitem__(self, index: SupportsIndex) -> T: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> tuple[T, ...]: ...
+
     @override
-    def __getitem__(self, index: SupportsIndex) -> T:  # pyrefly: ignore[bad-override]
+    def __getitem__(self, index: SupportsIndex | slice) -> T | tuple[T, ...]:
         if self.armed:
             raise AssertionError("the relation was read again")
         return super().__getitem__(index)
+
+
+class _Released(tuple[str, ...]):
+    """A tuple that records when it is freed."""
+
+    log: list[str]
+
+    def __new__(cls, items: tuple[str, ...], log: list[str]) -> Self:
+        instance = super().__new__(cls, items)
+        instance.log = log
+        return instance
+
+    def __del__(self) -> None:
+        self.log.append("released")
 
 
 def test_a_relation_already_hashed_is_not_read_again() -> None:
@@ -186,6 +209,21 @@ def test_distinct_relations_keep_their_own_digests() -> None:
         del relation
         gc.collect()
     assert len(seen) == 30
+    # The memo is bounded: once eight newer relations have been hashed, the oldest is released.
+    released: list[str] = []
+    oldest = Relation(
+        states=_Released(_AWKWARD, released),
+        transitions=(),
+        initial=_AWKWARD[0],
+        representatives=(),
+    )
+    assert verify_module.formal_relation_digest(oldest) == _legacy_digest(oldest)
+    del oldest
+    newer = [_synthetic_relation(_AWKWARD, rows) for rows in range(31, 39)]
+    for relation in newer:
+        assert verify_module.formal_relation_digest(relation) == _legacy_digest(relation)
+    gc.collect()
+    assert released == ["released"]
 
 
 def test_explored_transitions_share_each_state_string() -> None:
@@ -203,5 +241,6 @@ def test_explored_transitions_share_each_state_string() -> None:
 
 def test_the_formal_run_certifies_the_recorded_relation_digests() -> None:
     run = run_formal()
-    certificate, _data = build_certificate(run)
+    certificate, data = build_certificate(run)
     assert {row[0]: row[1] for row in certificate.universes} == _RECORDED_RELATION_DIGESTS
+    assert digest_of(ArtifactKind.FORMAL_CERTIFICATE, data) == _RECORDED_CERTIFICATE_DIGEST

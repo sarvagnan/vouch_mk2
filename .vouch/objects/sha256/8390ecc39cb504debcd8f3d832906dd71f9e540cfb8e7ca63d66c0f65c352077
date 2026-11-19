@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitInvalidated","event_format":2,"pack_digest":"","payload":{"name":"formal-memory","trigger_deviation_id":"DEV-fm-03"},"prev":"13ab31fff3223d89052809169d4ab6a940169d106ec305ee0051f4bad2f86a7b","recorded_at":"2026-11-19T07:23:24+00:00","revision":1178,"run_id":""}

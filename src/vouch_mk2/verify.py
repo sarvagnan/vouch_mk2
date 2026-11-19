@@ -7,9 +7,12 @@ This CI/verify layer loads the claimed bytes and proves their content addressing
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from threading import Lock
 from typing import assert_never
 
 from vouch_mk2.bundle import build_pack_inventory, parse_effects_file, read_pack_file
@@ -42,7 +45,7 @@ from vouch_mk2.core import (
 )
 from vouch_mk2.core.events import MergeRecorded
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
-from vouch_mk2.formal.explore import emit_tables
+from vouch_mk2.formal.explore import Relation, emit_tables
 from vouch_mk2.formal.invariants import INVARIANTS
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.formal.universe import UNIVERSES
@@ -67,7 +70,6 @@ from vouch_mk2.store import (
     encode_document,
     encode_evidence_event,
     encode_formal_certificate,
-    encode_formal_relation,
     encode_formal_tables,
     encode_snapshot,
     encode_system_map,
@@ -853,6 +855,58 @@ def _check_pack_files_match(
     )
 
 
+_FORMAL_RELATION_DIGEST_LIMIT = 8
+_formal_relation_digests: OrderedDict[int, tuple[Relation, str]] = OrderedDict()
+_formal_relation_digest_lock = Lock()
+
+
+def formal_relation_digest(relation: Relation) -> str:
+    """Stream the digest once while the relation is in the identity cache."""
+    key = id(relation)
+    with _formal_relation_digest_lock:
+        cached = _formal_relation_digests.get(key)
+    if cached is not None and cached[0] is relation:
+        return cached[1]
+
+    # Iterate the relation outside the lock (D-42 note, DEV-fm-02).
+    digest = _stream_formal_relation_digest(relation)
+    # Evicted entries are released only after the lock, so no finalizer runs under it.
+    evicted: list[tuple[int, tuple[Relation, str]]] = []
+    with _formal_relation_digest_lock:
+        if key not in _formal_relation_digests:
+            while len(_formal_relation_digests) >= _FORMAL_RELATION_DIGEST_LIMIT:
+                evicted.append(_formal_relation_digests.popitem(last=False))
+            # Keep the relation alive so its id cannot be reused while cached.
+            _formal_relation_digests[key] = (relation, digest)
+    evicted.clear()
+    return digest
+
+
+def _stream_formal_relation_digest(relation: Relation) -> str:
+    """Hash the canonical relation document one state or transition at a time."""
+    label = ArtifactKind.FORMAL_RELATION.value.encode("ascii")
+    digest = hashlib.sha256(b"vouch-mk2/" + label + b"\x00")
+    encode = json.JSONEncoder(
+        ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode
+
+    # Match the codec's sorted keys, array separators and trailing newline.
+    digest.update(b'{"initial":')
+    digest.update(encode(relation.initial).encode("utf-8"))
+    for prefix, rows in (
+        (b',"states":[', relation.states),
+        (b',"transitions":[', relation.transitions),
+    ):
+        digest.update(prefix)
+        for index, row in enumerate(rows):
+            if index:
+                digest.update(b",")
+            digest.update(encode(row).encode("utf-8"))
+        digest.update(b"]")
+    digest.update(b"}\n")
+    return digest.hexdigest()
+
+
 def build_certificate(run: FormalRun) -> tuple[FormalCertificate, bytes]:
     tables_digest = digest_of(
         ArtifactKind.FORMAL_TABLES, encode_formal_tables(run.tables)
@@ -864,10 +918,7 @@ def build_certificate(run: FormalRun) -> tuple[FormalCertificate, bytes]:
             sorted(
                 (
                     universe.universe_name,
-                    digest_of(
-                        ArtifactKind.FORMAL_RELATION,
-                        encode_formal_relation(universe.relation),
-                    ),
+                    formal_relation_digest(universe.relation),
                     universe.state_count,
                     universe.transition_count,
                 )

@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationAmended","event_format":2,"pack_digest":"","payload":{"amendment_version":"formal-memory-pack/4@919bacfea5c4096c","deviation_id":"DEV-fm-03","impact_set":["formal-memory"],"release_impact_set":[]},"prev":"784bbed83f49be8c19abb6f9a792413b03729dc24518adfab14d76edb13365d6","recorded_at":"2026-11-19T07:23:24+00:00","revision":1177,"run_id":""}

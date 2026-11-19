@@ -336,10 +336,15 @@ def test_formal_artifact_encodings_are_stable_and_certificate_is_strict(
     assert encode_formal_tables(formal_run.tables) == encode_formal_tables(
         formal_run.tables
     )
+    relation_digests = {row[0]: row[1] for row in certificate.universes}
     for universe in formal_run.universes:
-        assert encode_formal_relation(
-            universe.relation
-        ) == encode_formal_relation(universe.relation)
+        if universe.universe_name in (TIER_V1.name, "effects-v1"):
+            assert encode_formal_relation(
+                universe.relation
+            ) == encode_formal_relation(universe.relation)
+        assert relation_digests[universe.universe_name] == (
+            verify_module.formal_relation_digest(universe.relation)
+        )
     assert {row[0] for row in certificate.universes} == {
         CORE_V1.name,
         HISTORY_V1.name,

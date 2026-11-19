@@ -1736,3 +1736,11 @@ do it by adding import-contract exceptions. Rather than weaken D-1, the verifica
 identity, holding a reference), so a run's relations are still hashed once per process and the
 formal layer and both import contracts are unchanged.
 
+**2026-11-19 note: the memo's promise is bounded (DEV-fm-02).** Astra's review: a relation pushed
+out of the 8-entry memo is hashed again, so the claim is "not hashed again while it is among the
+last 8 relation objects hashed", not "once per process". The memo supports relations whose tuples
+yield the same content on every read, which every explored relation does; a tuple subclass that
+changes its content or calls back into the digest is outside it, and the digest does not iterate a
+relation while holding a lock. Pack/3 also pins the whole recorded certificate digest and checks
+that the memo releases its oldest relation.
+

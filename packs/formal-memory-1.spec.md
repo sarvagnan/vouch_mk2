@@ -9,13 +9,20 @@
 the formal layer is pure (D-1's import contract forbids `hashlib`, `json` and the store there), so
 the digest could only be attached by weakening that contract. Pack/2 keeps the formal layer pure:
 the verification layer remembers the digests of relation objects it has already hashed.
+**Pack/3** (DEV-fm-02), from Astra's review: the Promise said "at most once per process" although
+the memo is bounded; the supported inputs were not stated; R5 did not catch an unbounded memo and
+R7 did not pin the whole certificate.
+**Pack/4** (DEV-fm-03): pack/3's test file silenced a Pyrefly override error with a
+`pyrefly: ignore` comment, which `tests/test_strict_types.py` forbids in every source and test
+file; the tripwire tuple now declares both `__getitem__` overloads instead. No requirement changes.
 
 ## Promise
 
 Recording a formal certificate no longer builds each explored relation's encoded bytes to hash
 them: the relation digest is computed from the same bytes, streamed. The explorer keeps one string
-object per distinct state, and the verification layer hashes a relation object at most once per
-process, so repeated certificate builds of the same run do not hash it again. Every state count, transition count, invariant verdict, witness
+object per distinct state, and the verification layer does not hash a relation object again while
+it is among the last 8 relation objects it hashed, so repeated certificate builds of the same run
+hash each relation once. Every state count, transition count, invariant verdict, witness
 verdict, relation digest and certificate digest is unchanged.
 
 ## Common rules for every scenario
@@ -57,7 +64,9 @@ verdict, relation digest and certificate digest is unchanged.
   `test_distinct_relations_keep_their_own_digests`. Alternating calls on the tier-v1 and effects-v1
   relations each return that relation's legacy digest; so does each of 30 synthetic relations of
   different content, each dropped (and garbage-collected) before the next is built so a new
-  relation can reuse an earlier one's object id. The 30 digests are distinct.
+  relation can reuse an earlier one's object id. The 30 digests are distinct. A relation whose
+  `states` tuple records when it is freed is hashed and dropped; after 8 newer relations are
+  hashed and garbage is collected, it has been freed (the memo is bounded).
 - **R6 — One string object per state.** `test_explored_transitions_share_each_state_string`.
   For `explore` of tier-v1, effects-v1 and history-v1: the states are distinct, and `initial`,
   every transition's source and target, and every representative's key are the very object
@@ -65,7 +74,8 @@ verdict, relation digest and certificate digest is unchanged.
 - **R7 — The formal run certifies the recorded digests.** `# guard:`
   `test_the_formal_run_certifies_the_recorded_relation_digests` (passes before the change too, at
   about 8 GB). `build_certificate(run_formal())`
-  puts the four recorded relation digests in its rows.
+  puts the four recorded relation digests in its rows, and the digest of its encoded certificate
+  equals the recorded certificate's digest (`7b3919fd…689c`).
 
 ## Ground rules
 
@@ -77,6 +87,10 @@ verdict, relation digest and certificate digest is unchanged.
 - `formal_relation_digest` remembers the digests of the last few relation objects it hashed (at
   most 8), keyed by object identity and holding a reference to each, so a remembered entry can never
   be served to a different object that reuses its id. Entries beyond the bound are dropped.
+- Supported inputs: a relation's `states` and `transitions` yield the same content every time they
+  are read, as every relation `explore` builds does. A tuple subclass whose iteration changes its
+  content, or calls back into `formal_relation_digest`, is outside what the memo supports.
+  `formal_relation_digest` does not iterate a relation while holding a lock.
 - `build_certificate` takes each row's digest from `formal_relation_digest`. It never calls
   `encode_formal_relation`.
 - The formal layer stays pure: `UniverseRun`, `FormalRun` and `run_formal` are unchanged, and both
