@@ -5,13 +5,17 @@
 **Decision:** D-42 (settles `vouch_mk2-7dr`).
 **Effects:** none. No store action and no state, event, object or certificate format changes
 (`packs/formal-memory-1.effects.json` declares an empty list).
+**Pack/2** (DEV-fm-01): pack/1 had `run_formal` carry each relation's digest on `UniverseRun`, but
+the formal layer is pure (D-1's import contract forbids `hashlib`, `json` and the store there), so
+the digest could only be attached by weakening that contract. Pack/2 keeps the formal layer pure:
+the verification layer remembers the digests of relation objects it has already hashed.
 
 ## Promise
 
 Recording a formal certificate no longer builds each explored relation's encoded bytes to hash
 them: the relation digest is computed from the same bytes, streamed. The explorer keeps one string
-object per distinct state, and a formal run carries each relation's digest so a certificate build
-does not hash a relation again. Every state count, transition count, invariant verdict, witness
+object per distinct state, and the verification layer hashes a relation object at most once per
+process, so repeated certificate builds of the same run do not hash it again. Every state count, transition count, invariant verdict, witness
 verdict, relation digest and certificate digest is unchanged.
 
 ## Common rules for every scenario
@@ -42,23 +46,26 @@ verdict, relation digest and certificate digest is unchanged.
   `test_certificate_hashes_relations_without_encoding_them`. With
   `vouch_mk2.store.codec.encode_formal_relation` (and any `vouch_mk2.verify` binding of it) replaced
   by a function that raises, `build_certificate` on a run of the tier-v1 and effects-v1 relations
-  with no carried digest succeeds, and each certificate row's digest is the legacy digest.
-- **R4 — A certificate uses the digest a run carries.**
-  `test_certificate_uses_the_digest_a_run_carries`. `UniverseRun` has a `relation_digest` field;
-  `build_certificate` on a run whose tier-v1 `UniverseRun` carries `"a" * 64` puts exactly that
-  digest in the certificate row, with the run's counts.
-- **R5 — A run without a carried digest still certifies.**
-  `test_a_universe_run_without_a_carried_digest_still_certifies`. A `UniverseRun` built without
-  `relation_digest` has `relation_digest == ""`, and `build_certificate` then computes the digest:
-  the tier-v1 row equals the recorded tier-v1 digest.
+  succeeds, and each certificate row's digest is the legacy digest.
+- **R4 — A relation already hashed is not read again.**
+  `test_a_relation_already_hashed_is_not_read_again`. The explored tier-v1 relation is rebuilt with
+  `states` and `transitions` as tuples that raise when iterated or indexed once armed. After one
+  `formal_relation_digest` call (equal to the recorded tier-v1 digest) both are armed; a second call
+  returns the same digest, and `build_certificate` on a run of that relation puts it in the row with
+  the run's counts, without reading either tuple.
+- **R5 — Distinct relations keep their own digests.**
+  `test_distinct_relations_keep_their_own_digests`. Alternating calls on the tier-v1 and effects-v1
+  relations each return that relation's legacy digest; so does each of 30 synthetic relations of
+  different content, each dropped (and garbage-collected) before the next is built so a new
+  relation can reuse an earlier one's object id. The 30 digests are distinct.
 - **R6 — One string object per state.** `test_explored_transitions_share_each_state_string`.
   For `explore` of tier-v1, effects-v1 and history-v1: the states are distinct, and `initial`,
   every transition's source and target, and every representative's key are the very object
   (`is`) of the equal string in `states`.
-- **R7 — A formal run carries the recorded digests.**
-  `test_formal_run_carries_the_recorded_relation_digests`. `run_formal()`'s universes carry
-  `relation_digest` values equal to the four recorded digests, and `build_certificate` of that run
-  puts the same four digests in its rows.
+- **R7 — The formal run certifies the recorded digests.** `# guard:`
+  `test_the_formal_run_certifies_the_recorded_relation_digests` (passes before the change too, at
+  about 8 GB). `build_certificate(run_formal())`
+  puts the four recorded relation digests in its rows.
 
 ## Ground rules
 
@@ -67,10 +74,13 @@ verdict, relation digest and certificate digest is unchanged.
   to SHA-256 in pieces: the same bytes `encode_formal_relation` produces, in the same order, with
   the same escaping, separators and trailing newline. It never holds the whole encoding.
   `encode_formal_relation` and `digest_of` stay as they are.
-- `build_certificate` takes each row's digest from `UniverseRun.relation_digest` when it is
-  non-empty, otherwise from `formal_relation_digest`. It never calls `encode_formal_relation`.
-- `UniverseRun.relation_digest: str = ""` is added as the last field, so existing constructors keep
-  working. `run_formal` fills it for every universe with `formal_relation_digest`.
+- `formal_relation_digest` remembers the digests of the last few relation objects it hashed (at
+  most 8), keyed by object identity and holding a reference to each, so a remembered entry can never
+  be served to a different object that reuses its id. Entries beyond the bound are dropped.
+- `build_certificate` takes each row's digest from `formal_relation_digest`. It never calls
+  `encode_formal_relation`.
+- The formal layer stays pure: `UniverseRun`, `FormalRun` and `run_formal` are unchanged, and both
+  import contracts in `pyproject.toml` are unchanged (no new `ignore_imports`).
 - `explore` keeps one string per distinct state: a transition's target reuses the string already
   keyed in its state map. Fingerprints stay strings with today's exact content; no hashes, integer
   ids or other encodings replace them anywhere a `Relation` exposes them.

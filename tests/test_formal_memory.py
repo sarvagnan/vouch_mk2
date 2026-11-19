@@ -1,15 +1,16 @@
 """Acceptance tests for formal-memory@1 (D-42, settles vouch_mk2-7dr).
 
 The formal certificate hashes each explored relation without building its encoded bytes, the
-explorer keeps one string object per state, and a formal run carries each relation's digest so a
-certificate build does not hash a relation again. Every count, verdict and digest is unchanged.
+explorer keeps one string object per state, and the verification layer hashes a relation object at
+most once per process. Every count, verdict and digest is unchanged.
 """
 
 from __future__ import annotations
 
 import gc
 import tracemalloc
-from dataclasses import replace
+from collections.abc import Iterator
+from typing import SupportsIndex, override
 
 import pytest
 
@@ -125,30 +126,66 @@ def test_certificate_hashes_relations_without_encoding_them(
     assert {row[0]: row[1] for row in certificate.universes} == expected
 
 
-def test_certificate_uses_the_digest_a_run_carries() -> None:
+class _Tripwire[T](tuple[T, ...]):
+    """A tuple that fails when it is read after being armed."""
+
+    armed: bool = False
+
+    @override
+    def __iter__(self) -> Iterator[T]:
+        if self.armed:
+            raise AssertionError("the relation was read again")
+        return super().__iter__()
+
+    @override
+    def __getitem__(self, index: SupportsIndex) -> T:  # pyrefly: ignore[bad-override]
+        if self.armed:
+            raise AssertionError("the relation was read again")
+        return super().__getitem__(index)
+
+
+def test_a_relation_already_hashed_is_not_read_again() -> None:
     tier = explore(TIER_V1)
-    carried = "a" * 64
+    states = _Tripwire[str](tier.states)
+    transitions = _Tripwire[tuple[str, str, str]](tier.transitions)
+    relation = Relation(
+        states=states,
+        transitions=transitions,
+        initial=tier.initial,
+        representatives=(),
+    )
+    first = verify_module.formal_relation_digest(relation)
+    assert first == _RECORDED_RELATION_DIGESTS["tier-v1"]
+    states.armed = True
+    transitions.armed = True
+    assert verify_module.formal_relation_digest(relation) == first
     run = FormalRun(
-        universes=(replace(_universe_run("tier-v1", tier), relation_digest=carried),),
+        universes=(_universe_run("tier-v1", relation),),
         witnesses=(),
         tables=emit_tables(),
     )
     certificate, _data = build_certificate(run)
     assert certificate.universes == (
-        ("tier-v1", carried, len(tier.states), len(tier.transitions)),
+        ("tier-v1", first, len(tier.states), len(tier.transitions)),
     )
 
 
-def test_a_universe_run_without_a_carried_digest_still_certifies() -> None:
+def test_distinct_relations_keep_their_own_digests() -> None:
     tier = explore(TIER_V1)
-    run = FormalRun(
-        universes=(_universe_run("tier-v1", tier),),
-        witnesses=(),
-        tables=emit_tables(),
-    )
-    assert _universe_run("tier-v1", tier).relation_digest == ""
-    certificate, _data = build_certificate(run)
-    assert certificate.universes[0][1] == _RECORDED_RELATION_DIGESTS["tier-v1"]
+    effects = explore(EFFECTS_V1)
+    for relation in (tier, effects, tier, effects):
+        assert verify_module.formal_relation_digest(relation) == _legacy_digest(relation)
+    # Each synthetic relation is dropped before the next is built, so a new relation may reuse
+    # an earlier one's object id. Every one must still get its own digest.
+    seen: set[str] = set()
+    for rows in range(1, 31):
+        relation = _synthetic_relation(_AWKWARD, rows)
+        digest = verify_module.formal_relation_digest(relation)
+        assert digest == _legacy_digest(relation)
+        seen.add(digest)
+        del relation
+        gc.collect()
+    assert len(seen) == 30
 
 
 def test_explored_transitions_share_each_state_string() -> None:
@@ -164,10 +201,7 @@ def test_explored_transitions_share_each_state_string() -> None:
             assert state is canonical[state]
 
 
-def test_formal_run_carries_the_recorded_relation_digests() -> None:
+def test_the_formal_run_certifies_the_recorded_relation_digests() -> None:
     run = run_formal()
-    assert {
-        universe.universe_name: universe.relation_digest for universe in run.universes
-    } == _RECORDED_RELATION_DIGESTS
     certificate, _data = build_certificate(run)
     assert {row[0]: row[1] for row in certificate.universes} == _RECORDED_RELATION_DIGESTS

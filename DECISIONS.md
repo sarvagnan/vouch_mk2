@@ -1728,3 +1728,11 @@ after D-41 and on the Fable and Astra reviews it asked for. Settles `vouch_mk2-7
   seconds) runs alone, and a CI split are a follow-up unit once this one's measured suite time is
   known.
 
+**2026-11-19 note: the digest is remembered in the verification layer, not carried on the run
+(DEV-fm-01).** Pack/1 had `run_formal` attach each relation's digest to its `UniverseRun`. The formal
+layer is pure (D-1: its import contract forbids `hashlib`, `json` and the store), so Sol could only
+do it by adding import-contract exceptions. Rather than weaken D-1, the verification layer's
+`formal_relation_digest` remembers the digests of the last few relation objects it hashed (keyed by
+identity, holding a reference), so a run's relations are still hashed once per process and the
+formal layer and both import contracts are unchanged.
+
