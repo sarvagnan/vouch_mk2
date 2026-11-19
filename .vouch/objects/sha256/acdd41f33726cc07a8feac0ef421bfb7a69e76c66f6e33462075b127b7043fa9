@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_formal_memory.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"12a365dc9075f13ff3490c20e45d95c1085ce5bb0dfccd26815fe65e50eda5d4","parent":"GENESIS","recorded_at":"2026-11-19T06:38:54+00:00","sequence":1,"unit":{"name":"formal-memory","version":"1"}}
