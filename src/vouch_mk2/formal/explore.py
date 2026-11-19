@@ -187,6 +187,7 @@ def explore(universe: Universe) -> Relation:
     initial_snapshot = universe.initial
     initial = state_fingerprint(initial_snapshot)
     representatives: dict[str, Snapshot] = {initial: initial_snapshot}
+    canonical_states = {initial: initial}
     frontier = [initial]
     cursor = 0
     transitions: set[tuple[str, str, str]] = set()
@@ -200,6 +201,7 @@ def explore(universe: Universe) -> Relation:
                 continue
             target_snapshot = apply(snapshot, decision.events)
             target = state_fingerprint(target_snapshot)
+            target = canonical_states.setdefault(target, target)
             transitions.add((source, command.ir_command, target))
             if target in representatives:
                 continue

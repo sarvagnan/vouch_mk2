@@ -1700,3 +1700,47 @@ unit, `refreeze-green@1`. Amends D-17.
   released merge on `main` does the same, so it predates D-38 and D-41. It is decided and fixed separately
   under `vouch_mk2-oa2`, and does not block this unit.
 
+## D-42 — A formal certificate hashes each relation as a stream, and the explorer keeps one string per state (2026-11-19)
+
+**Status:** decided 2026-11-19 by the planner, on the user's instruction to do `vouch_mk2-7dr`
+after D-41 and on the Fable and Astra reviews it asked for. Settles `vouch_mk2-7dr` in one unit,
+`formal-memory@1`.
+
+- **The finding.** A full test run peaks above 8 GB, so it cannot run on an 8 GB machine without
+  swap, and takes 15 to 39 minutes. About 7 GB of the peak is `build_certificate` serialising each
+  explored relation to one JSON blob (2.4 GB for core-v1, held about three times over while
+  encoding and framing) only to hash it. The blob is never stored. Most of the rest is duplicate
+  copies of state fingerprint strings: each transition's target is a fresh string equal to one the
+  explorer already holds. One test outside every pack builds two core-v1 blobs at once.
+- **Decision.** The certificate's relation digest is computed by feeding the same canonical bytes
+  to SHA-256 in pieces, so no digest, count, verdict or certificate changes and `CHECKER_VERSION`
+  stays. The explorer reuses the state string it already holds for each transition target.
+  A formal run carries each relation's digest, computed once, and a certificate build uses it. The
+  test that built two blobs compares encodings only for the two small universes and checks every
+  relation through its streamed digest.
+- **Rejected.** Replacing fingerprints with hashes or integer ids in a `Relation`: the strings are
+  what the relation digest covers, and frozen tests read them. Compacting `Snapshot`
+  representatives (about 5% of the memory), releasing or reshaping the `run_formal` cache, and
+  parallel exploration: small gains for frozen-shape risk. Symmetry or partial-order reduction:
+  they change the counts and the digest. An on-disk exploration cache: a certificate would then
+  attest a reuse, not a fresh exploration.
+- **Later.** The witness re-sorts, a `formal` pytest marker so the non-formal suite (about 90
+  seconds) runs alone, and a CI split are a follow-up unit once this one's measured suite time is
+  known.
+
+**2026-11-19 note: the digest is remembered in the verification layer, not carried on the run
+(DEV-fm-01).** Pack/1 had `run_formal` attach each relation's digest to its `UniverseRun`. The formal
+layer is pure (D-1: its import contract forbids `hashlib`, `json` and the store), so Sol could only
+do it by adding import-contract exceptions. Rather than weaken D-1, the verification layer's
+`formal_relation_digest` remembers the digests of the last few relation objects it hashed (keyed by
+identity, holding a reference), so a run's relations are still hashed once per process and the
+formal layer and both import contracts are unchanged.
+
+**2026-11-19 note: the memo's promise is bounded (DEV-fm-02).** Astra's review: a relation pushed
+out of the 8-entry memo is hashed again, so the claim is "not hashed again while it is among the
+last 8 relation objects hashed", not "once per process". The memo supports relations whose tuples
+yield the same content on every read, which every explored relation does; a tuple subclass that
+changes its content or calls back into the digest is outside it, and the digest does not iterate a
+relation while holding a lock. Pack/3 also pins the whole recorded certificate digest and checks
+that the memo releases its oldest relation.
+
