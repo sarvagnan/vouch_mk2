@@ -17,8 +17,8 @@ from vouch_mk2.bundle import build_pack_inventory, pack_test_set_digest
 from vouch_mk2.cli import main
 from vouch_mk2.core import Accepted, BindPack, FreezeAcceptance, decide
 from vouch_mk2.core.events import AcceptancePackRebound
-from vouch_mk2.store import ArtifactKind, Store, digest_of, encode_pack_inventory
-from vouch_mk2.store.event_log import commit_events
+from vouch_mk2.store import ArtifactKind, Store, digest_of, encode_pack_inventory, encode_snapshot
+from vouch_mk2.store.event_log import build_event_records, commit_events
 
 
 def _run(project: Path, verb: str, *args: str) -> tuple[int, str]:
@@ -320,7 +320,24 @@ def test_a_broken_rebind_chain_is_reported(tmp_path: Path, broken_at: str) -> No
             new_test_set_digest=old_unit.acceptance_test_set_digest,
             reason="crafted broken ancestry", evidence_head_sequence=2,
         )
-        commit_events(store, snapshot, (rebound,), actor="crafted", run_id="")
+        # D-39 refuses this record at commit. Plant the history that the effects check reads.
+        unit = snapshot.unit("u")
+        assert unit is not None
+        stale_unit = replace(
+            unit,
+            acceptance_pack_digest=rebound.old_pack_digest,
+            acceptance_test_set_digest=rebound.old_test_set_digest,
+        )
+        stale = replace(
+            snapshot,
+            units=tuple(stale_unit if item.ref() == unit.ref() else item for item in snapshot.units),
+        )
+        candidate, event_objects, _ = build_event_records(
+            stale, (rebound,), actor="crafted", run_id="",
+        )
+        for kind, payload in event_objects:
+            store.put_object(kind, payload)
+        (project / ".vouch" / "state.json").write_bytes(encode_snapshot(candidate))
 
     row = _effects_row(project)
     assert row.startswith("FAIL") and "effects binding history unavailable" in row

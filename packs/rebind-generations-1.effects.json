@@ -1,0 +1,3 @@
+{"effects_format": 1, "effects": [
+  {"kind": "action", "name": "rebind-generation-continuity", "system": "the project's Vouch store (its event log and state.json)", "outcome": "confirmed", "detail": "rebind-pack after a respecify and re-freeze commits its record and keeps every earlier rebind row; a commit, an event-log replay or a merge source chain holding an AcceptancePackRebound whose old inventory or old test set is not the unit's current value immediately before it is refused with rebind.history-disconnected and writes nothing; event, log and snapshot formats are unchanged"}
+]}

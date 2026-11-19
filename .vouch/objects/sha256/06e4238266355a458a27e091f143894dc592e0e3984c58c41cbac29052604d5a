@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_rebind_generations.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"2c76f3c8dcefd68a68ffb147d99edb7a1f8caca018d976ae88f35bf3a9938f87","parent":"GENESIS","recorded_at":"2026-11-19T10:29:30+00:00","sequence":1,"unit":{"name":"rebind-generations","version":"1"}}

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from collections.abc import Callable, Mapping
+from itertools import pairwise
 from typing import assert_never
 
 from vouch_mk2.core.commands import (
@@ -1663,6 +1664,15 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
             raise ValueError("pre-log history can only be replayed from the empty snapshot")
         if event.baseline.event_head:
             raise ValueError("pre-log baseline must have an empty event head")
+        # Without lifecycle events, the baseline must retain inventory continuity.
+        for unit in event.baseline.units:
+            for index, (previous, rebound) in enumerate(pairwise(unit.rebound_history), 1):
+                if rebound.old_inventory_digest != previous.new_inventory_digest:
+                    raise ValueError(
+                        f"rebind.history-disconnected: unit {unit.ref().label()!r} "
+                        f"baseline rebound_history[{index}] old inventory does not "
+                        "equal the prior new inventory"
+                    )
         return event.baseline
     units = snapshot.units
     deviations = snapshot.deviations
@@ -1747,7 +1757,16 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
             reason=reason,
             evidence_head_sequence=evidence_head_sequence,
         ):
-            unit = _existing(snapshot, name)
+            unit = snapshot.unit(name)
+            if (
+                unit is None
+                or old_pack_digest != unit.acceptance_pack_digest
+                or old_test_set_digest != unit.acceptance_test_set_digest
+            ):
+                raise ValueError(
+                    f"rebind.history-disconnected: rebind for {name!r} must name "
+                    "the unit's current inventory and test set"
+                )
             units = _with_unit(
                 units,
                 name,

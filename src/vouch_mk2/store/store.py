@@ -13,7 +13,8 @@ from contextlib import contextmanager
 from dataclasses import replace
 from typing import Iterator
 
-from vouch_mk2.core.events import EventRecord, PreLogHistoryRecorded
+from vouch_mk2.core.decide import apply
+from vouch_mk2.core.events import AcceptancePackRebound, EventRecord, PreLogHistoryRecorded
 from vouch_mk2.core.invariants import validate_snapshot
 from vouch_mk2.core.model import Snapshot
 from vouch_mk2.store.codec import (
@@ -62,6 +63,15 @@ STATE_FORMAT_HIGH_WATER_FILE = "state-format.json"
 
 def _encode_state_format_high_water(state_format: int) -> bytes:
     return f"{state_format}\n".encode("ascii")
+
+
+def _raw_event_head(document: dict[str, object]) -> str:
+    """The event head a raw document carries; formats before 4 have none (D-16)."""
+    state_format = document.get("state_format", 0)
+    head = document.get("event_head", "")
+    if type(state_format) is not int or state_format < 4 or not isinstance(head, str):
+        return ""
+    return head
 
 
 class Store:
@@ -990,6 +1000,10 @@ class Store:
                 "revision: format upgrade must preserve current raw revision "
                 f"{current_revision}, got {upgraded.revision}"
             )
+        if upgraded.event_head != _raw_event_head(current_document):
+            raise StoreError(
+                "event_head: format upgrade must preserve the current raw event head"
+            )
         self._replace_state_bytes(data)
 
     def _begin_merge_transaction(
@@ -1203,9 +1217,13 @@ class Store:
                 if type(current_revision) is not int:
                     raise StoreError("revision: current raw document must declare an integer")
                 current_snapshot: Snapshot | None = None
+                on_disk_head = _raw_event_head(raw)
+                can_checkpoint = not on_disk_head
             else:
                 current_snapshot = self.read_snapshot()
                 current_revision = current_snapshot.revision
+                on_disk_head = current_snapshot.event_head
+                can_checkpoint = current_snapshot == Snapshot()
             expected = (
                 snapshot.revision - 1
                 if expected_revision is None
@@ -1228,6 +1246,20 @@ class Store:
                     snapshot,
                     objects,
                 )
+            elif snapshot.revision < current_revision:
+                raise StoreError(
+                    f"revision {snapshot.revision}: a commit cannot move the store back "
+                    f"from revision {current_revision}"
+                )
+            elif snapshot.event_head != on_disk_head:
+                # A revision-preserving commit keeps the on-disk head, except a first
+                # checkpoint, which can keep the revision at genesis or during upgrade.
+                if not (can_checkpoint and snapshot.event_head and objects):
+                    raise StoreError(
+                        f"revision {snapshot.revision}: a commit that keeps the revision "
+                        "must keep the on-disk event head"
+                    )
+                self._require_event_extension(Snapshot(), snapshot, objects)
 
             for kind, payload in objects:
                 self.put_object(kind, payload)
@@ -1249,7 +1281,7 @@ class Store:
         candidate: Snapshot,
         objects: Sequence[tuple[ArtifactKind, bytes]],
     ) -> None:
-        """Require supplied records to extend the current head through candidate."""
+        """Require supplied records to extend the current head and preserve rebind continuity."""
         supplied: dict[str, EventRecord] = {}
         event_object_count = 0
         for kind, payload in objects:
@@ -1283,9 +1315,12 @@ class Store:
                 and baseline_record.folded_event.baseline
                 == replace(candidate, event_head="")
             ):
+                Store._require_rebind_continuity(
+                    current, ((candidate.event_head, baseline_record),)
+                )
                 return
 
-        used: set[str] = set()
+        reverse_extension: list[tuple[str, EventRecord]] = []
         digest = candidate.event_head
         for revision in range(candidate.revision, current.revision, -1):
             record = supplied.get(digest)
@@ -1300,7 +1335,7 @@ class Store:
                     f"revision {candidate.revision}: supplied event record "
                     f"{digest!r} declares revision {actual_revision}, expected {revision}"
                 )
-            used.add(digest)
+            reverse_extension.append((digest, record))
             digest = record.prev
 
         expected_prev = current.event_head or "GENESIS"
@@ -1309,8 +1344,33 @@ class Store:
                 f"revision {candidate.revision}: supplied event records do not "
                 f"extend on-disk head {expected_prev!r}"
             )
-        if len(used) != len(supplied) or event_object_count != len(supplied):
+        if len(reverse_extension) != len(supplied) or event_object_count != len(supplied):
             raise StoreError(
                 f"revision {candidate.revision}: supplied EVENT objects must be "
                 "exactly the matching event chain extension"
             )
+        reverse_extension.reverse()
+        Store._require_rebind_continuity(current, reverse_extension)
+
+    @staticmethod
+    def _require_rebind_continuity(
+        current: Snapshot, extension: Sequence[tuple[str, EventRecord]],
+    ) -> None:
+        """Fold the supplied history from the on-disk pack state before writing."""
+        if not any(
+            isinstance(record.folded_event, (AcceptancePackRebound, PreLogHistoryRecorded))
+            for _, record in extension
+        ):
+            return
+        for digest, record in extension:
+            try:
+                current = apply(
+                    current,
+                    (record.folded_event,),
+                    event_digests=(digest,),
+                    event_run_ids=(record.run_id,),
+                )
+            except (LookupError, ValueError) as error:
+                raise StoreError(
+                    f"revision {record.revision}: could not fold supplied event: {error}"
+                ) from error
