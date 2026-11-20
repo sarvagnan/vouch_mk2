@@ -1782,3 +1782,16 @@ and 4 of five). One unit, `ci-runs-once@1`.
   rule above. Dropping `push` entirely: anchoring needs default-branch pushes. Two report items
   (pull requests skip the walkthrough and dogfood check; the anchor bot's push triggers no run)
   stay as documented.
+
+**Implemented 2026-11-20 (`ci-runs-once@1`).** Astra's review approved with fixes. MEDIUM, fixed in
+README § Gates: run as a script, the block did not stop at a failing command, and a pipeline hid a
+failing `check --ci --json`; the lead now says to run it with `bash -eo pipefail`, as CI does. Two
+LOW findings accepted without a pack change. (1) "Once per change" (the title, the decision and the
+pack's Promise) means: an ordinary feature-branch pull request no longer gets a second, push-run
+gates job, and a push to `main` runs `formal` once. GitHub can still run CI again for the same
+commit (a reopened pull request, a re-run) or once for several pushed commits (one `synchronize`
+event for the tip), a pull request from `main` into another branch gets both runs, and retrying only
+a failed publish job runs `formal` zero times in that attempt. (2) The frozen tests pin command text
+and order, not execution: an extra README invocation or a commented-out planner `formal` would pass
+them; review of the diff covers that. The `push` filter names `main` literally; renaming the
+default branch needs this filter updated or anchoring stops.

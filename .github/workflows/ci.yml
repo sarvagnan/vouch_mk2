@@ -2,6 +2,7 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -197,6 +198,8 @@ jobs:
       - name: CI check generated scratch map
         run: uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
       - name: Formal checking
+        # D-43: The anchor planner runs formal when its job condition holds.
+        if: ${{ !(github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.repository.fork == false) }}
         run: uv run vouch-mk2 formal
       - name: Build reproducible lock (twice — byte-identical)
         shell: bash
