@@ -315,6 +315,15 @@ on top of OURS:
   with no shared record are refused (`merge.unrelated-histories`). Any single refused replay is a
   `merge.conflict` that leaves OURS unchanged.
 
+A merge refuses with `merge.conflict` when both sides changed the same setting or open-in-CI
+exception to different values. This covers CI policy, anchor mode, assurance tier, the recorded
+formal certificate, and each unit's open-in-CI reason or its absence. A write that has already
+reached the other side through a merge is shared. Replay also refuses if it would undo a value
+both sides agree on. To resolve different values, align one side with an ordinary command and
+merge again. Every incoming command must still replay legally, so the direction can matter: if A
+published a unit while B re-marked its exception and then cleared it to match, B's re-mark cannot
+replay onto A's published unit, so merge A into B instead.
+
 **Replayed merge boundaries and deduplication:**
 - A replayed merge record names, as its OURS head, the record on the receiving chain where its
   replayed block begins. It keeps the original THEIRS head. If replay filtered out the original
@@ -325,8 +334,8 @@ on top of OURS:
   origin separately from redundant clears.
 - An incoming clear of an open-in-CI exception that OURS has already cleared is skipped without
   writing a record, provided the clear would resolve to the same exact unit reference. The merge
-  reports how many redundant clears it skipped; THEIRS' later commands still replay, so a later
-  re-mark leaves the exception open.
+  reports how many redundant clears it skipped. If OURS cleared it and THEIRS cleared and marked
+  it again, the merge refuses with `merge.conflict`.
 
 #### Recovering from a Git merge or rebase conflict
 
@@ -363,7 +372,12 @@ Recovery refuses if any of the following hold:
 - A path escapes the root
 - The repository, root, or a publication ancestor is a symlink
 
-A semantic `merge.conflict` also leaves the working store and the index unchanged.
+A semantic `merge.conflict` also leaves the working store and the index unchanged. For conflicting
+settings or exceptions, abort the Git merge or rebase, record the alignment, and retry the Git
+operation so recovery can read fresh index stages. For a merge, a commit at either branch tip is
+enough. A rebase replays the topic branch one commit at a time and stops at the conflicting commit
+before it reaches a later one, so put the alignment in that commit (or an earlier one), or merge
+instead of rebasing.
 
 ## 7. A release
 

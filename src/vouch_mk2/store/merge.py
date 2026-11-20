@@ -10,6 +10,7 @@ from vouch_mk2.core import commands as commands
 from vouch_mk2.core import events as events
 from vouch_mk2.core.decide import Accepted, Refused, apply, decide
 from vouch_mk2.core.model import PackInventory, Snapshot, UnitRef
+from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Violation
 from vouch_mk2.store.codec import (
     decode_bundle_inventory,
@@ -23,6 +24,7 @@ from vouch_mk2.store.digests import ArtifactKind, digest_of
 from vouch_mk2.store.errors import StoreError
 from vouch_mk2.store.event_log import (
     ReplayHistory,
+    ReplayProvenance,
     build_event_records,
     event_batch_length,
     event_fact_key,
@@ -64,6 +66,119 @@ class _LoggedEvent:
 class _SourceFact:
     item: _LoggedEvent
     before: Snapshot
+
+
+@dataclass(frozen=True, slots=True)
+class _SettingWrite:
+    item: _LoggedEvent
+    verb: str
+
+    def is_shared_with(self, other: ReplayProvenance) -> bool:
+        return (
+            self.item.digest in other.incorporated
+            or self.item.root in other.incorporated
+            or self.item.root in other.carried
+        )
+
+
+def _settings(snapshot: Snapshot) -> dict[str, str | None]:
+    return {
+        "ci-policy": snapshot.ci_policy.value,
+        "anchor-mode": snapshot.anchor_mode.value,
+        "tier": snapshot.tier.value,
+        "formal-certificate": snapshot.formal_certificate_digest or None,
+        **{item.unit_name: item.reason for item in snapshot.ci_exceptions if "@" in item.unit_name},
+    }
+
+
+def _setting_writes(
+    item: _LoggedEvent, before: Snapshot, after: Snapshot,
+) -> dict[str, _SettingWrite]:
+    """Read a command's explicit writes and the exception removals it actually caused."""
+    match item.record.folded_event:
+        case events.CiPolicySet():
+            return {"ci-policy": _SettingWrite(item, mk2.CMD_SET_CI_POLICY)}
+        case events.AnchorModeSet():
+            return {"anchor-mode": _SettingWrite(item, mk2.CMD_SET_ANCHOR_MODE)}
+        case events.TierSet():
+            return {"tier": _SettingWrite(item, mk2.CMD_SET_TIER)}
+        case events.FormalCertificateRecorded():
+            return {"formal-certificate": _SettingWrite(item, mk2.CMD_RECORD_FORMAL_CERTIFICATE)}
+        case events.OpenInCiMarked(name=name) if "@" in name:
+            return {name: _SettingWrite(item, mk2.CMD_MARK_OPEN_IN_CI)}
+        case events.OpenInCiCleared(name=name) if "@" in name:
+            return {name: _SettingWrite(item, mk2.CMD_CLEAR_OPEN_IN_CI)}
+        case events.UnitPublished():
+            verb = mk2.CMD_PUBLISH
+        case events.UnitSuperseded():
+            verb = mk2.CMD_SUPERSEDE
+        case events.UnitRespecified():
+            verb = mk2.CMD_RESPECIFY
+        case events.ReleasePrepared():
+            verb = mk2.CMD_PREPARE_RELEASE
+        case _:
+            return {}
+    remaining = {exception.unit_name for exception in after.ci_exceptions}
+    return {
+        exception.unit_name: _SettingWrite(item, verb)
+        for exception in before.ci_exceptions
+        if "@" in exception.unit_name and exception.unit_name not in remaining
+    }
+
+
+def _latest_setting_writes(
+    batches: tuple[tuple[_SourceFact, ...], ...], tip: Snapshot,
+) -> dict[str, _SettingWrite]:
+    latest: dict[str, _SettingWrite] = {}
+    for index, batch in enumerate(batches):
+        first = batch[0]
+        after = batches[index + 1][0].before if index + 1 < len(batches) else tip
+        latest.update(_setting_writes(first.item, first.before, after))
+    return latest
+
+
+def _setting_conflict(
+    key: str,
+    ours: _SettingWrite | None,
+    theirs: _SettingWrite | None,
+    ours_value: str | None,
+    theirs_value: str | None,
+) -> Refused:
+    def describe(write: _SettingWrite | None, value: str | None) -> str:
+        result = "absent" if value is None else value
+        if write is None:
+            return f"with no recorded write → {result}"
+        return f"{write.verb} at revision {write.item.record.revision} → {result}"
+
+    return Refused((Violation(
+        "merge.conflict",
+        f"{key} differs (OURS {describe(ours, ours_value)}, "
+        f"THEIRS {describe(theirs, theirs_value)})",
+    ),))
+
+
+def _expected_settings(
+    ours: dict[str, str | None],
+    theirs: dict[str, str | None],
+    ours_writes: dict[str, _SettingWrite],
+    theirs_writes: dict[str, _SettingWrite],
+    ours_provenance: ReplayProvenance,
+    theirs_provenance: ReplayProvenance,
+) -> dict[str, str | None] | Refused:
+    expected: dict[str, str | None] = {}
+    for key in sorted(ours.keys() | theirs.keys() | ours_writes.keys() | theirs_writes.keys()):
+        ours_value, theirs_value = ours.get(key), theirs.get(key)
+        if ours_value == theirs_value:
+            expected[key] = ours_value
+            continue
+        ours_write, theirs_write = ours_writes.get(key), theirs_writes.get(key)
+        ours_changed = ours_write is not None and not ours_write.is_shared_with(theirs_provenance)
+        theirs_changed = theirs_write is not None and not theirs_write.is_shared_with(ours_provenance)
+        # Shared latest writes can also disagree if an older merge applied them in a different order.
+        if ours_changed == theirs_changed:
+            return _setting_conflict(key, ours_write, theirs_write, ours_value, theirs_value)
+        expected[key] = ours_value if ours_changed else theirs_value
+    return expected
 
 
 def _replay_conflict(item: _LoggedEvent, detail: str) -> Refused:
@@ -690,6 +805,16 @@ def merge_store_roots(
             if legacy_refusal is not None:
                 return legacy_refusal
 
+            ours_settings, theirs_settings = _settings(ours), _settings(theirs)
+            ours_writes = _latest_setting_writes(_source_batches(ours_facts), ours)
+            theirs_writes = _latest_setting_writes(source_batches, theirs)
+            expected_settings = _expected_settings(
+                ours_settings, theirs_settings, ours_writes, theirs_writes,
+                ours_provenance, theirs_provenance,
+            )
+            if isinstance(expected_settings, Refused):
+                return expected_settings
+
             coverage = {
                 digest for item in ours_chain
                 for digest in (item.digest, item.root, *item.record.satisfied)
@@ -697,6 +822,7 @@ def merge_store_roots(
             current = ours
             boundaries: dict[str, str] = {}
             staged: list[_LoggedEvent] = []
+            staged_writes: dict[str, _SettingWrite] = {}
             satisfied: dict[str, None] = {}
             recorded_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
             for batch in source_batches:
@@ -785,9 +911,10 @@ def merge_store_roots(
                         raise _invalid_merge_boundary(item)
                     replayed_batch = (replace(source_event, ours_head=boundary),)
 
-                boundary_head = current.event_head
+                before = current
+                boundary_head = before.event_head
                 current, staged_batch = _stage_events(
-                    current, replayed_batch, actor=actor, run_id=run_id,
+                    before, replayed_batch, actor=actor, run_id=run_id,
                     recorded_at=recorded_at,
                     counterparts=tuple(
                         (source.digest, source.record) if source is not None else None
@@ -795,6 +922,7 @@ def merge_store_roots(
                     ),
                 )
                 staged.extend(staged_batch)
+                staged_writes.update(_setting_writes(item, before, current))
                 replayed_digests = {
                     source.digest: record.digest
                     for source, record in zip(counterparts, staged_batch, strict=True)
@@ -805,6 +933,26 @@ def merge_store_roots(
                     boundaries[fact.item.digest] = boundary_head
                 last_source = batch[-1].item.digest
                 boundaries[last_source] = replayed_digests.get(last_source, current.event_head)
+
+            staged_settings = _settings(current)
+            for key, expected in expected_settings.items():
+                actual = staged_settings.get(key)
+                if actual == expected:
+                    continue
+                ours_value, theirs_value = ours_settings.get(key), theirs_settings.get(key)
+                ours_write, theirs_write = ours_writes.get(key), theirs_writes.get(key)
+                incoming = staged_writes.get(key)
+                if ours_value == theirs_value:
+                    return _setting_conflict(key, ours_write or theirs_write, incoming, expected, actual)
+                if "@" in key and expected is not None and actual is None:
+                    # A one-sided mark cannot survive ordinary lifecycle cleanup
+                    # if its exact unit can no longer be marked open.
+                    decision = decide(current, commands.MarkOpenInCi(key.split("@", 1)[0], expected))
+                    if isinstance(decision, Refused) or decision.events != (
+                        events.OpenInCiMarked(key, expected),
+                    ):
+                        continue
+                return _setting_conflict(key, ours_write, theirs_write, ours_value, theirs_value)
 
             for item in theirs_chain:
                 satisfied.update(dict.fromkeys(item.record.satisfied))

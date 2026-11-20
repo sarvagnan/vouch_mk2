@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitSpecified","event_format":2,"pack_digest":"","payload":{"depends_on":[],"name":"merge-concurrent-settings","version":"1"},"prev":"da11c9afa00749e1d0b794e824b284648adceab913059ad9b0de43705ade3860","recorded_at":"2026-11-20T20:31:16+00:00","revision":1232,"run_id":""}

@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"merge-concurrent-settings@1","reason":"in progress on unit/merge-concurrent-settings-1; CI anchors its evidence after the merge (D-32)"},"prev":"c37c3d8abe3c0fd2261c2e3360bbc1ac26d07953ab12735209c49696a3ecd050","recorded_at":"2026-11-20T20:50:06+00:00","revision":1248,"run_id":""}

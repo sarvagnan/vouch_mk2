@@ -223,8 +223,13 @@
     },
     {
       "key": "D-44",
-      "bytes": 2642,
-      "sha256": "050162ab9339fd8355951f6c6597c5f90d7bf3073a634b5d2d75e50259bd8857"
+      "bytes": 2643,
+      "sha256": "ae9577b8e19caa1765b7a559d0ab56c1f53e784170f8a7074363d08e4f8928fc"
+    },
+    {
+      "key": "D-45",
+      "bytes": 2963,
+      "sha256": "3ed0a6c9a817215d0fa4bcb507114aa89f1cb2485ebcb22c29185cb9db7c7a11"
     }
   ]
 }

@@ -86,6 +86,13 @@ def test_skipped_clear_writes_no_record_and_the_chain_derives_the_snapshot(
 
     result = _merge(ours, theirs)
 
+    if remark:
+        # D-45 (2026-11-21): OURS' clear against THEIRS' clear and re-mark ends absent against
+        # present, so the merge refuses and OURS is unchanged.
+        assert isinstance(result, Refused), result
+        assert [item.code for item in result.violations] == ["merge.conflict"]
+        assert _snapshot(ours) == before
+        return
     assert isinstance(result, MergeOutcome)
     assert result.mode == "replayed"
     assert result.skipped_records == 1
@@ -114,25 +121,26 @@ def test_skipped_clear_writes_no_record_and_the_chain_derives_the_snapshot(
 
 
 def test_skip_does_not_shift_claims_on_later_leading_or_companion_records(tmp_path: Path) -> None:
+    """D-45 (2026-11-21): the re-mark that used to follow the clear now conflicts with OURS'
+    clear, so the leading and companion records after the skip are a deviation and its block."""
     ours, theirs = _branches(tmp_path)
     _execute(theirs, commands.ClearOpenInCi("u"), actor="clearer")
-    _execute(theirs, commands.MarkOpenInCi("u", "new reason"), actor="marker")
     _execute(
         theirs, commands.OpenDeviation("d", DeviationType.PACK_DEFECT, UnitRef("u", "1")),
         actor="deviation-author",
     )
-    source = [record for _, record in _chain(theirs)[-3:]]
+    source = [record for _, record in _chain(theirs)[-2:]]
     assert [type(record.folded_event).__name__ for record in source] == [
-        "OpenInCiMarked", "DeviationOpened", "UnitBlocked",
+        "DeviationOpened", "UnitBlocked",
     ]
     before_count = len(_chain(ours))
 
     result = _merge(ours, theirs)
 
     assert isinstance(result, MergeOutcome)
-    assert (result.skipped_records, result.replayed_records) == (1, 3)
+    assert (result.skipped_records, result.replayed_records) == (1, 2)
     added = [record for _, record in _chain(ours)[before_count:]]
-    assert len(added) == 4
+    assert len(added) == 3
     for original, replayed in zip(source, added[:-1], strict=True):
         assert replayed.folded_event == original.folded_event
         assert (replayed.actor, replayed.run_id, replayed.recorded_at) == (
