@@ -1827,3 +1827,38 @@ roles of D-27 and the freeze of D-11 and D-17 are unchanged.
   not have caught DEV-fm-01); the skill's "you can't test everything" economy (most review findings
   in a policy engine are untested interactions); recording this as housekeeping only, since it
   gives the user, Sol and Astra new obligations.
+
+## D-45 — A merge refuses concurrent changes to the same setting or exception that end with different values (2026-11-21)
+
+**Status:** decided 2026-11-21 by the user (three answers: refuse only when the values differ;
+refuse a replay that would undo an agreed value; include the formal certificate). Settles
+`vouch_mk2-oa2` in one unit, `merge-concurrent-settings@1`. Design memo: `design-oa2.OUT.md`
+(Sol).
+
+- **The finding** (Astra's randomized review of nested-merge-boundary@1). Two stores that each
+  changed the same store-wide setting or the same unit's open-in-CI exception merged both ways
+  without refusal and ended with opposite values that later merges preserve: replay applies the
+  incoming change after one's own. Reproduced on the pre-change tree for the CI policy (A `strict`,
+  B `ledger`: A ends `ledger`, B `strict`) and for an exception (A clears; B clears and re-marks:
+  only B keeps it). Sol found a third case: two stores that both end `strict` after each merged a
+  third store's explicit `strict` split again when one replays the other's older `ledger`.
+- **Decision.** A divergent merge refuses with `merge.conflict`, writing nothing to either store or
+  the Git index, when (1) both sides changed the same governed key since their common history and
+  their resulting values differ, or (2) its replay would leave OURS with a value for a key other
+  than the one both sides already agree on. Governed keys: CI policy, anchor mode, assurance tier,
+  the recorded formal certificate, and each `NAME@VERSION` open-in-CI exception, whose value is its
+  absence or its exact reason. An explicit write of the same value counts as a change; equal
+  results merge. A write that reached the other side through an earlier merge is shared, not
+  independent (D-38, D-41 provenance). The refusal names each side's command and resulting value;
+  the operator aligns one side with an ordinary command and merges again. `decide()` and `apply()`
+  do not change; the check lives in the shared divergent-merge path, so `merge` and
+  `merge-git-stages` both get it; fast-forward and no-op merges are unchanged.
+- **Consequences.** D-37's re-mark promise narrows: a clear against a clear and re-mark now refuses
+  (absent against present), while two clears still merge with the incoming clear skipped. D-41's
+  R17 (an independent mark reopening after a concurrent clear) refuses likewise. Their frozen tests
+  are adapted by the owner and rebound. Two branches that each run `formal --record` on different
+  code refuse until one side records the other's certificate or both re-record.
+- **Rejected.** A last-writer or fixed-winner rule (silent: one side's change is dropped).
+  Refusing whenever both sides changed a key even to equal values (needless refusals). Automatic
+  reconciliation of the split case (needs an ordering policy for history already written).
+  Release criteria, bundle bindings and evidence anchors stay under their own rules.
