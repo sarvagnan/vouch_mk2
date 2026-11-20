@@ -36,14 +36,34 @@ Beads is the task list and `docs/usage-log.md` the cost ledger; nothing lives on
 ## 1. The pack (planner), frozen before implementation
 
 1. Write `tests/test_<unit>.py` and `packs/<unit>-<v>.spec.md`: requirements R1…Rn, each bound
-   to a test name, ground rules, and what is out of scope.
+   to a test name and the reason it fails before the change (a guard: why it already passes),
+   ground rules, and what is out of scope. Ask the user the behaviour questions the unit raises
+   (what Vouch should promise), not where to test.
 2. Check every API name the tests use against the real tree (an `inspect.signature` sweep);
    unit #1's pack-author defects were of this kind. Mark tests that already pass `# guard:`.
 3. Confirm the split: `pytest -q tests/test_<unit>.py | grep -c ^FAILED` gives the RED count,
-   and `pyrefly check tests/test_<unit>.py` errors only on names not yet implemented.
-4. Freeze in the dogfood store: `specify → freeze <pack> → mark-ready → start`, with pack
+   and `pyrefly check tests/test_<unit>.py` errors only on names not yet implemented. Read each
+   failure and each guard's pass: it must be for the reason the spec states (D-44).
+   Also run `tests/test_strict_types.py` and `tests/test_doc_binding.py` on the pack.
+4. Check test quality before the freeze (D-44):
+   - Test at the standing seams (below). Adding a seam, crossing a purity boundary (D-1) or
+     testing an internal is a question for the user.
+   - Expected values come from an independent source (a literal, a worked example, the spec),
+     never recomputed the way the code computes them.
+   - No mocks of mk2's own modules. Fixtures for legacy behaviour come from `origin/main`'s source.
+   - Pin no global fact (state format, universe sizes, certificate digest) unless the unit changes
+     it; such pins force rebinds in later units.
+   - Exercise every pack helper on a scenario that works today.
+   - Probe a non-trivial pack: run a throwaway draft implementation against it and revert, or have
+     Astra read the draft pack before the freeze.
+
+**Standing seams.** `decide()` and `apply()` on a snapshot (`core/`); the formal explorer
+(`formal/`, pure); `Store` and its strict codec (commit, merge, upgrade, the event log); checks,
+`verify` and projections; transports (the CLI, the lock, the generated and the dogfood CI
+workflows).
+5. Freeze in the dogfood store: `specify → freeze <pack> → mark-ready → start`, with pack
    version `"<unit>-pack/<n>@" + sha256(b"vouch-mk2/pack\0"+spec+b"\0"+tests)[:16]`.
-5. Record RED #1 through the harness: `record-evidence … --kind red -- pytest
+6. Record RED #1 through the harness: `record-evidence … --kind red -- pytest
    tests/test_<unit>.py -q`. Then `mark-open-in-ci --name <unit> --reason …` (the store's
    strict CI policy fails `check.ci-policy` for an unfinished unit without one, and `publish`
    clears it), `advance-anchor`, `generate`, and `check --ci`. The store's anchor mode is `ci`,
@@ -51,7 +71,7 @@ Beads is the task list and `docs/usage-log.md` the cost ledger; nothing lives on
    or NOT-APPLICABLE except `check.evidence-anchors`, which reports NOT-CHECKED (organizational
    rows are always NOT-CHECKED), so `check --ci` exits 1 on the branch until CI anchors on `main`
    (§6 step 6).
-6. Commit "`<unit>@<v>`: pack frozen, RED recorded, in progress" on the unit branch. The user
+7. Commit "`<unit>@<v>`: pack frozen, RED recorded, in progress" on the unit branch. The user
    pushes the branch and opens the pull request. Its CI stays red until GREEN, and the red run
    shows less than it seems: the gates job stops at its first failing step, usually the type
    check on names the frozen tests use, so the later gates never run on that commit and an
@@ -69,8 +89,10 @@ id) and pass its text to one T3 `delegate_task`: provider `codex`, model `gpt-6.
 - the pack may not be edited; on a contradiction, stop on that requirement, write
   `<unit>.DEVIATION.md`, and implement the rest;
 - leave `.vouch/`, the README count and git alone;
+- work the frozen tests in any order, grouping those that share a fix; a test Sol adds sits at a
+  seam the pack names (D-44);
 - which gates must be green;
-- write `<unit>.DONE.md`, then `bd close <bead>`.
+- write `<unit>.DONE.md`, listing every test added or changed, then `bd close <bead>`.
 
 Quote `bd create --description` in single quotes, since descriptions contain backticks.
 
@@ -106,13 +128,16 @@ The DONE file is not evidence.
   unit bumps the state format (D-13; no invented state), `formal --record`, `generate`, and the
   README test count.
 - Record GREEN through the harness, `advance-anchor`, and `check --ci`, with every mechanical row
-  PASS or NOT-APPLICABLE except `check.evidence-anchors` (NOT-CHECKED until CI anchors on `main`, §1 step 5).
+  PASS or NOT-APPLICABLE except `check.evidence-anchors` (NOT-CHECKED until CI anchors on `main`, §1 step 6).
 
 ## 5. Review (Astra, T3 delegated task, read-only)
 
 The brief (provider `codex`, model `gpt-6.2-astra`) lists defect classes in priority order: false
 refusals, fail-opens, honesty of `NOT_CHECKED` rows, formal vacuity, projection and transport
-gaps, codec strictness. Then it asks for novel attacks on the riskiest surface, and ends:
+gaps, codec strictness. It applies the test anti-patterns (implementation-coupled, tautological,
+mocks of mk2's own modules, pinned global facts) to the pack and to the tests Sol added or
+changed, and names at least one plausible defect that would pass every test (D-44); refactors are
+non-blocking suggestions. Then it asks for novel attacks on the riskiest surface, and ends:
 "Reproduce with a real snippet before reporting; write `<unit>_review.OUT.md` ranked by
 severity, then what you checked and found clean." Astra edits only that file.
 
@@ -130,7 +155,7 @@ against the fixed tree. Astra re-checks in a new task, given its findings and th
    stop rule ([self-hosting-tradeoff.md](self-hosting-tradeoff.md)): if a gate must be bent to
    publish mk2's own unit, adoption stops and that is recorded.
 5. `generate`, certificate, and `check --ci`, with every mechanical row PASS or
-   NOT-APPLICABLE except `check.evidence-anchors` (§1 step 5). Commit "`<unit>@<v>`: … GREEN recorded, done
+   NOT-APPLICABLE except `check.evidence-anchors` (§1 step 6). Commit "`<unit>@<v>`: … GREEN recorded, done
    pending acceptance" (or "… GREEN recorded, re-verifying") on the unit branch. The user
    pushes it and merges the pull request with a merge commit, not a squash, so the frozen-pack
    commit stays in `main`'s history ahead of the implementation. If `main` moved meanwhile, cut

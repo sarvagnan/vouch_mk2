@@ -1795,3 +1795,35 @@ a failed publish job runs `formal` zero times in that attempt. (2) The frozen te
 and order, not execution: an extra README invocation or a commented-out planner `formal` would pass
 them; review of the diff covers that. The `push` filter names `main` literally; renaming the
 default branch needs this filter updated or anchoring stops.
+
+## D-44 — Test-quality rules from the `tdd` skill apply inside the frozen-pack boundary (2026-11-21)
+
+**Status:** decided 2026-11-21 by the user, after independent takes from Fable, Astra and Neon
+(all ADOPT WITH CHANGES; `tdd-proposal_*.OUT.md`). Amends the procedure in `docs/method.md`; the
+roles of D-27 and the freeze of D-11 and D-17 are unchanged.
+
+- **The proposal.** Gemini suggested using Matt Pocock's `tdd` skill (`mattpocock/skills`) in each
+  stage. The skill's rules: test at public seams agreed up front; no implementation-coupled or
+  tautological tests; vertical slices (one test, minimal code, next); refactoring belongs to review.
+- **Decision.** Adopt the test-quality rules, not the loop. mk2 freezes the whole acceptance pack
+  before implementation and binds evidence to that test set, so vertical slicing does not apply to
+  the pack, and the reviewers judged one-test-at-a-time drafting and implementing to be ceremony.
+  1. **Standing seams.** `docs/method.md` lists mk2's seams. A pack tests at them; the owner asks
+     the user only when a pack adds a seam, crosses a purity boundary (D-1) or tests an internal.
+     The user is asked behaviour questions (what Vouch should promise), not where to test.
+  2. **Test quality before the freeze.** Each pack test states, in the spec, the reason it fails
+     before the change (and each guard why it passes); the owner checks each RED and guard result
+     is for that reason. Expected values come from an independent source; no mocks of mk2's own
+     modules; no pin on a global fact (state format, universe sizes, certificate) unless the unit
+     changes it. A non-trivial pack is probed before freezing: a throwaway draft implementation
+     run against it and reverted, or a pre-freeze Astra read of the pack.
+  3. **Implementation.** Sol works in any order and may group tests that share a fix. A test Sol
+     adds must sit at a pack seam; Sol lists every added and changed test in the done file.
+  4. **Review.** Astra applies the anti-patterns to the pack and to Sol's added and changed tests,
+     and names at least one plausible defect that would pass every test. Refactors are
+     non-blocking suggestions.
+- **Rejected.** Vertical slicing of the acceptance pack (conflicts with the freeze); per-unit seam
+  sign-off by the user (seam mistakes caused two of the last ten deviations, and a seam list would
+  not have caught DEV-fm-01); the skill's "you can't test everything" economy (most review findings
+  in a policy engine are untested interactions); recording this as housekeeping only, since it
+  gives the user, Sol and Astra new obligations.
