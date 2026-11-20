@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","event_format":2,"pack_digest":"","payload":{"deviation_id":"DEV-mcs-01","deviation_type":"pack-defect","unit":{"name":"merge-concurrent-settings","version":"1"}},"prev":"1367fb2761cbdc65eaeae4c60f837e60474fdc15c74a9117747d349ec81f3371","recorded_at":"2026-11-20T20:50:04+00:00","revision":1239,"run_id":""}

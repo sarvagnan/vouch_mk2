@@ -221,3 +221,10 @@ merge that needs that record's boundary refuses atomically and names the record.
   upgrader steps or its golden, and any whose fixtures the version-2 envelope breaks.
 - `docs/claim-boundary.md` § Merging stores states both rules and the trust level of `origin` and
   `satisfied`; `upgrade`'s documentation names the version-1 merge count.
+
+## Amended by D-45 (2026-11-21, owner rebind)
+
+R17's B clears `x` after receiving C's mark, and D marks `x` with the same reason independently.
+Under D-45 the two sides' values for `x@1` differ (absent against `old`), so B<-D now refuses with
+one `merge.conflict` and B keeps no exception. D's mark is still treated as independent rather than
+as a copy of C's, which is what R17 guards.

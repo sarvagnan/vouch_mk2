@@ -28,8 +28,10 @@ successful exchange in both directions leaves both stores with equal governed va
   the two sides' records are distinct.
 - **The refusal detail.** A refused `merge --json` prints `accepted: false` and exactly one
   violation, code `merge.conflict`. Its detail names the key (for an exception, its `NAME@VERSION`)
-  and contains `OURS` exactly once, then `THEIRS` exactly once. The text from `OURS` up to `THEIRS`
-  names the receiving store's command verb and resulting value; the text from `THEIRS` on names the
+  and carries the side label `OURS` once, then the side label `THEIRS` once; values are quoted
+  verbatim, so an exception reason may itself contain either word (DEV-mcs-01), and the tests use
+  reasons that contain neither. The text from the `OURS` label up to the `THEIRS` label names the
+  receiving store's command verb and resulting value; the text from the `THEIRS` label on names the
   incoming store's. A value is the setting's value, the full certificate digest, an exception's
   exact reason, or `absent` for no exception. For a replay that would undo an agreed value, OURS
   names the agreed write and THEIRS the incoming write that would undo it.

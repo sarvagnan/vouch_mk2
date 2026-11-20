@@ -529,7 +529,12 @@ def test_five_generations_of_copies_keep_the_clear_and_repeat_as_a_no_op(tmp_pat
 
 
 def test_an_independent_identical_mark_still_reopens(tmp_path: Path) -> None:
-    """R17: same actor, time, reason and unit, recorded independently on another parent. # guard:"""
+    """R17: same actor, time, reason and unit, recorded independently on another parent. # guard:
+
+    Amended by D-45 (2026-11-21): B's clear and D's independent mark end with different values
+    (absent against ``old``), so the merge now refuses and B keeps no exception. The independent
+    mark is still recognised as independent, not as a copy of C's (the D-41 point of R17).
+    """
     _a, b, c, d = _base(tmp_path, "B", "C", "D")
     _spec(b, "b")
     _spec(d, "d")
@@ -537,8 +542,10 @@ def test_an_independent_identical_mark_still_reopens(tmp_path: Path) -> None:
     _replayed(b, c)
     _ex(b, commands.ClearOpenInCi("x"))
     _ex(d, commands.MarkOpenInCi("x", "old"), actor="C")
-    _replayed(b, d)
-    assert _exceptions(b) == {"x@1": "old"}
+    outcome = _lmerge(b, d)
+    assert isinstance(outcome, Refused), outcome
+    assert [item.code for item in outcome.violations] == ["merge.conflict"]
+    assert _exceptions(b) == {}
 
 
 def _companion_stores(tmp_path: Path) -> tuple[Path, Path, Path, Path]:

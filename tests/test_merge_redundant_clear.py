@@ -132,27 +132,26 @@ def _directories(
 def test_directory_merge_skips_a_clear_ours_already_made_and_keeps_the_remark(
     tmp_path: Path,
 ) -> None:
-    """R1."""
+    """R1, amended by D-45 (2026-11-21): a clear against THEIRS' clear and re-mark ends with
+    different values (absent against present), so the merge now refuses and OURS is unchanged."""
     ours, theirs = _directories(tmp_path, _clear_and_remark, _ours_clear)
+    before = _event_kinds(ours)
     code, output = _run("merge", "--root", _store(ours), "--other", _store(theirs))
-    assert code == 0, output
-    assert SKIPPED_TEXT in output, output
-    assert _exceptions(ours) == {"u@1": "re-marked on theirs"}
-    kinds = _event_kinds(ours)
-    assert kinds.count("OpenInCiCleared") == 1, kinds
-    assert kinds[-3:] == ["OpenInCiCleared", "OpenInCiMarked", "MergeRecorded"], kinds
+    assert code == 2, output
+    assert "merge.conflict" in output, output
+    assert _exceptions(ours) == {}
+    assert _event_kinds(ours) == before
 
 
 def test_json_merge_reports_the_skipped_clear(tmp_path: Path) -> None:
-    """R2."""
+    """R2, amended by D-45 (2026-11-21): the same merge with --json reports one merge.conflict.
+    R3's JSON-free skip report is unchanged."""
     ours, theirs = _directories(tmp_path, _clear_and_remark, _ours_clear)
     code, output = _run("merge", "--root", _store(ours), "--other", _store(theirs), "--json")
-    assert code == 0, output
+    assert code == 2, output
     document = json.loads(output)
-    assert document["accepted"] is True
-    assert document["mode"] == "replayed"
-    assert document["replayed_records"] == 1
-    assert document["skipped_records"] == 1
+    assert document["accepted"] is False
+    assert [item["code"] for item in document["violations"]] == ["merge.conflict"]
 
 
 def test_a_clear_on_both_sides_merges_with_no_exception(tmp_path: Path) -> None:
@@ -166,7 +165,7 @@ def test_a_clear_on_both_sides_merges_with_no_exception(tmp_path: Path) -> None:
 
 
 def test_git_stage_recovery_skips_the_redundant_clear(tmp_path: Path) -> None:
-    """R4."""
+    """R4, amended by D-45 (2026-11-21)."""
     project = tmp_path / "project"
     _shared(project)
     _must_git(project, "init", "-b", "main")
@@ -187,10 +186,23 @@ def test_git_stage_recovery_skips_the_redundant_clear(tmp_path: Path) -> None:
     _must_git(project, "add", "--", ".vouch")
     _must_git(project, "commit", "-m", "current")
     assert _git(project, "merge", "--no-edit", "incoming").returncode != 0
+    stages = _must_git(project, "ls-files", "--stage")
+    store = {
+        str(path.relative_to(project)): path.read_bytes()
+        for path in sorted((project / ".vouch").rglob("*"))
+        if path.is_file()
+    }
     code, output = _run("merge-git-stages", "--root", _store(project))
-    assert code == 0, output
-    assert SKIPPED_TEXT in output, output
-    assert _exceptions(project) == {"u@1": "re-marked on theirs"}
+    # Amended by D-45 (2026-11-21): the clear against THEIRS' clear and re-mark now refuses and
+    # leaves the index and the (still conflicted) working store unchanged.
+    assert code == 2, output
+    assert "merge.conflict" in output, output
+    assert _must_git(project, "ls-files", "--stage") == stages
+    assert {
+        str(path.relative_to(project)): path.read_bytes()
+        for path in sorted((project / ".vouch").rglob("*"))
+        if path.is_file()
+    } == store
 
 
 def test_a_clear_aimed_at_another_unit_version_is_still_refused(tmp_path: Path) -> None:

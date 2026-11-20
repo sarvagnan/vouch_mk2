@@ -71,3 +71,12 @@ before. A clear that would land on another unit version is still a `merge.confli
   no-op merges never skip, since they replay nothing.
 - `docs/claim-boundary.md`'s statement that each divergent THEIRS command is replayed through
   `decide()` names this exception.
+
+## Amended by D-45 (2026-11-21, owner rebind)
+
+A merge now refuses when both sides changed the same open-in-CI exception to different values
+(`merge-concurrent-settings@1`). R1, R2 and R4's history (OURS clears; THEIRS clears and re-marks)
+ends with the exception absent on OURS and present on THEIRS, so `merge`, `merge --json` and
+`merge-git-stages` now exit 2 with one `merge.conflict` and leave OURS, and for R4 the index,
+unchanged. R3 (both sides only clear), R5, R6 and R7 are unchanged: an incoming clear that OURS has
+already made is still skipped.
