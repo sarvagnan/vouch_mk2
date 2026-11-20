@@ -1572,6 +1572,17 @@ unit, `refreeze-green@1`. Amends D-17.
   Recording the gap as won't-fix: Vouch would keep accepting values it cannot then use. Rendering
   options as `--flag=value`: rejected in D-35 for the same reasons.
 
+**Implemented 2026-11-20 (`option-safe-labels@1`).** The four handlers refuse a dash-led label
+after any `identifier.invalid` check. Astra's review approved with two LOW findings, both accepted
+without a pack change. (1) "Only the bound form can deliver such a value" (above, and the pack's
+common rules) is too strong: argparse also passes a separate token that looks like a negative
+number (`--pack-version -1`) as a value, and `decide()` refuses it the same way. The rule is
+unaffected; the claim is narrowed here. (2) No frozen test covers a dash-led label written before
+this rule: Astra reproduced that a fast-forward merge adopts one and a divergent merge replay
+refuses its introduction (`merge.conflict` naming `identifier.leading-dash`), as stated above.
+A regression fixture is filed as `vouch_mk2-0jc`. A scratch copy of the pilot store (revision
+421) holds no dash-led deviation id, amendment version, release id or pack version.
+
 ## D-41 — A replayed record carries its origin, and a merge skips work it already holds by origin (2026-11-18)
 
 **Status:** decided 2026-11-18 by the user, choosing Fable's option O over Sol's receipt design

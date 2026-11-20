@@ -37,6 +37,7 @@ implementation, because that work is not recorded; keeping the order is up to yo
 A unit name or version may not begin with `-`, because a CLI option reads a separate value token
 that starts with `-` as another option. `specify` refuses such a name or version; history a store
 already holds, or adopts through a fast-forward merge, is not re-checked.
+A deviation id, release id, pack version or amendment version may not begin with `-` either.
 
 New stores require an effect declaration for bound packs. An empty list declares a transform
 with no effects; observations disclose a source and capture, and actions disclose a system and
