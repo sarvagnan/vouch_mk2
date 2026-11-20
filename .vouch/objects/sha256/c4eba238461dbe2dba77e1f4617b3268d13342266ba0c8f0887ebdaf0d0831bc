@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_ci_runs_once.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"be18fab3f06769a14286d84db52bad8710957348eb358b0cfadbd80f9c8b33ae","parent":"GENESIS","recorded_at":"2026-11-20T17:25:09+00:00","sequence":1,"unit":{"name":"ci-runs-once","version":"1"}}

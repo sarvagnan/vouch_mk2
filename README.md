@@ -130,12 +130,28 @@ content-addressed artifacts, pure projections, and thin adapters. All code lives
 
 ## Gates
 
-Run what CI runs (`.github/workflows/ci.yml`):
+These commands run in the `gates` job in `.github/workflows/ci.yml`. On a push to `main` the gates
+job skips `formal` and the anchor planner runs it instead (D-43). Locally, `RUNNER_TEMP` stands in
+for the CI runner's scratch directory. Run the block as one Bash script with `bash -eo pipefail`,
+as CI does, so the first failing command stops it.
 
 ```sh
-uv sync
+RUNNER_TEMP=$(mktemp -d)
+uv sync --locked
+uv run python scripts/gen_commands_doc.py --check
 uv run pyrefly check     # strict types (D-1)
 uv run lint-imports      # policy IR purity contract (D-1)
-uv run pytest            # 1394 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest            # 1402 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run python -c "from vouch_mk2.store import Store; store = Store.init('$RUNNER_TEMP/vouch-mk2-ci-check'); store.close()"
+uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
+uv run vouch-mk2 check --ci --json --root "$RUNNER_TEMP/vouch-mk2-ci-check" | python3 -m json.tool > /dev/null
+uv run vouch-mk2 generate --root "$RUNNER_TEMP/vouch-mk2-ci-check"
+uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
 uv run vouch-mk2 formal  # invariants over core-v1 and history-v1
+uv run vouch-mk2 build-lock --output "$RUNNER_TEMP/vouch.lock" | tee "$RUNNER_TEMP/lock-digest.txt"
+uv run vouch-mk2 build-lock --output "$RUNNER_TEMP/vouch2.lock" > /dev/null
+cmp "$RUNNER_TEMP/vouch.lock" "$RUNNER_TEMP/vouch2.lock"
+python3 "$RUNNER_TEMP/vouch.lock" self-check --expect "$(awk '{print $2}' "$RUNNER_TEMP/lock-digest.txt")"
+python3 "$RUNNER_TEMP/vouch.lock" check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
+python3 "$RUNNER_TEMP/vouch.lock" record-evidence --help
 ```
