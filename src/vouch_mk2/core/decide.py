@@ -730,6 +730,8 @@ def _decide_unit_transition(
             "identifier.invalid",
             f"pack version {command.pack_version!r} is not a valid identifier",
         )
+    if isinstance(command, FreezeAcceptance) and command.pack_version.startswith("-"):
+        return _refuse("identifier.leading-dash", "pack version may not begin with '-'")
     if (
         isinstance(command, FreezeAcceptance)
         and command.pack_version
@@ -968,6 +970,8 @@ def _candidate_release(
 def _decide_prepare_release(snapshot: Snapshot, command: PrepareRelease) -> Decision:
     if not valid_identifier(command.release_id):
         return _refuse("identifier.invalid", "release id is not a valid identifier")
+    if command.release_id.startswith("-"):
+        return _refuse("identifier.leading-dash", "release id may not begin with '-'")
     if snapshot.release(command.release_id) is not None:
         return _refuse(
             "release.exists", f"release {command.release_id!r} already exists"
@@ -1387,6 +1391,8 @@ def _decide_release_transition(
 def _decide_open_deviation(snapshot: Snapshot, command: OpenDeviation) -> Decision:
     if not valid_identifier(command.deviation_id):
         return _refuse("identifier.invalid", "deviation id is not a valid identifier")
+    if command.deviation_id.startswith("-"):
+        return _refuse("identifier.leading-dash", "deviation id may not begin with '-'")
     if snapshot.deviation(command.deviation_id) is not None:
         return _refuse(
             "deviation.exists", f"deviation {command.deviation_id!r} already exists"
@@ -1481,6 +1487,8 @@ def _decide_amend(snapshot: Snapshot, command: AmendDeviation) -> Decision:
             "deviation.amendment-version-required",
             "adjudicating amend requires the amendment version",
         )
+    if command.amendment_version.startswith("-"):
+        return _refuse("identifier.leading-dash", "amendment version may not begin with '-'")
     impacted = _amendment_impact(snapshot, found.unit.name)
     invalidated: list[str] = []
     for name in impacted:
