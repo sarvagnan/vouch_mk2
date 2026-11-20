@@ -1755,3 +1755,30 @@ changes its content or calls back into the digest is outside it, and the digest 
 relation while holding a lock. Pack/3 also pins the whole recorded certificate digest and checks
 that the memo releases its oldest relation.
 
+
+## D-43 — mk2's CI runs each check once per change, and README § Gates lists every gates command (2026-11-20)
+
+**Status:** decided 2026-11-20 by the user, from the owner's report on what CI runs (changes 1, 2
+and 4 of five). One unit, `ci-runs-once@1`.
+
+- **The finding.** (1) `ci.yml` ran on `push` to every branch and on `pull_request`, so each
+  pull-request commit ran the gates job (about 17 minutes) twice. (2) On a default-branch push,
+  `formal` (about 3.5 minutes) ran in the gates job and again in the anchor planner's candidate
+  step. (3) README § Gates said "Run what CI runs" but listed four of the gates job's commands: it
+  lacked the generated-command-reference check, the scratch-store checks and the lock steps, and
+  ran `uv sync` without `--locked`.
+- **Decision.** (1) `push` runs only on `main`; `pull_request` is unchanged. A branch pushed
+  without a pull request gets no CI. (2) The gates job's `formal` step is skipped exactly when the
+  anchor planner runs: its condition is the negation of the planner's. The planner's candidate
+  `formal` stays, because generated and dogfood candidates are semantically validated before they
+  are staged (`tests/test_ci_candidate_validity.py`). Every run still runs `formal` once, and pull
+  requests are unchanged. (3) README § Gates lists every gates command in CI's order, with
+  `RUNNER_TEMP` set to a scratch directory, so a contributor can run all of it locally.
+- **Not changed.** The workflow `init` generates for adopters (its `push`, `pull_request` and
+  `workflow_call` triggers are pinned by the trust-boundary tests, and an adopter's CI is the
+  adopter's), anchor semantics, permissions, and the rule that pull-request CI runs only the gates
+  job (`docs/method.md` §1).
+- **Rejected.** Dropping `formal` from the anchor planner: it contradicts the candidate-validation
+  rule above. Dropping `push` entirely: anchoring needs default-branch pushes. Two report items
+  (pull requests skip the walkthrough and dogfood check; the anchor bot's push triggers no run)
+  stay as documented.

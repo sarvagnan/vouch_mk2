@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"ci-runs-once@1","reason":"in progress on unit/ci-runs-once-1; CI anchors its evidence after the merge (D-32)"},"prev":"b7bccd6f6d2ecf387b54681a7896aabd2aac76d06ac480b7b481b977d551a4bf","recorded_at":"2026-11-20T17:25:15+00:00","revision":1226,"run_id":""}
