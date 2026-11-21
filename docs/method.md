@@ -1,5 +1,7 @@
 # Working method
 
+> For people changing mk2: this page describes how mk2 itself is built and run. You do not need it to use Vouch.
+
 The binding procedure for every forward change to Vouch mk2: each change is a unit run through
 mk2's own lifecycle (D-11). D-11 exempts `DECISIONS.md` entries, prose edits with no test binding
 and no behavioral claim, housekeeping (this file, `docs/usage-log.md`, the beads export, the

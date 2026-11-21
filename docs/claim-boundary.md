@@ -302,7 +302,7 @@ of an existing certificate.
 
 ## Never mechanically checked
 
-Reports list the items below as organizational `NOT_CHECKED` rows. They are deliberate exclusions.
+Some of the items below appear in reports as organizational `NOT_CHECKED` rows; the others are documented exclusions with no report row.
 
 | Claim | Why no artifact can prove it |
 |---|---|
