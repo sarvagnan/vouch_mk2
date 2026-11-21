@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_adoption_docs.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"3d3db52d3eb1331275a267dc1f60932360a7e46d9b6d6d860efa39f2e9c2402a","parent":"GENESIS","recorded_at":"2026-11-21T11:33:43+00:00","sequence":1,"unit":{"name":"adoption-docs","version":"1"}}
