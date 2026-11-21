@@ -1,5 +1,7 @@
 # D-11 tradeoff: should mk2 govern its own development?
 
+> For people changing mk2: this page describes how mk2 itself is built and run. You do not need it to use Vouch.
+
 *Historical decision note written 2026-08-15 for bead `vouch_mk2-dvz.2` as input to a user
 decision.* **Outcome (2026-08-17):** D-11 was adopted with named exceptions after eight pilot
 units; the stop rule never fired (see `DECISIONS.md`). The roles below reflect that time; D-27
@@ -10,9 +12,9 @@ open. This note weighed whether to adopt prospective self-hosting.
 
 ## Proposal
 
-Starting with the next change, every change to mk2 moves through mk2's own unit lifecycle. Each
-event is recorded in the dogfood store as it happens, and anchoring makes the record
-tamper-evident. Existing modules are not declared as units after the fact.
+Starting with the next change, every change to mk2 moves through mk2's own unit lifecycle. The
+dogfood store records lifecycle events, and an evidence anchor records a chain head that later
+checks can compare with the chain. Existing modules are not declared as units after the fact.
 
 | Concept | For an mk2 change | Owner |
 |---|---|---|

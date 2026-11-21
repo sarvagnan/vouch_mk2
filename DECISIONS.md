@@ -1894,3 +1894,35 @@ honour and clear). Settles `vouch_mk2-7kc` in one unit, `formal-fresh-green@1`. 
   Extending `tier-v1`: it moves pinned counts in three published units. An invariant that checks
   only the publish refusal: a `decide()` that never turned the requirement on would pass it.
 
+## D-47 — The README becomes a plain introduction, and mk2 gains technical docs for people and agents (2026-11-21)
+
+**Status:** decided 2026-11-21 by the user (six answers: pull `adoption-docs@1` forward; the
+blog-style README on top with the contributor part at its bottom; all of the drafted technical
+pages land; split the GitHub integration guide out; fold in `vouch_mk2-1l0` by narrowing the
+sentence; file the check-output collapse as its own bead). Settles `vouch_mk2-b6g.15` (retitled)
+and `vouch_mk2-1l0` in one unit, `adoption-docs@1`.
+
+- **The finding.** The README opens as a contributor document, and an adopter or a coding agent
+  has no router, no concepts page, no refusal-recovery guide, no JSON reference and no agent skill.
+  A drafted proposal (Gemini Neon, five versions, two independent claim reviews: 60 findings, then
+  10, all fixed) supplies the content; its first draft showed how easily such pages overclaim and
+  how an agent-facing recovery recipe can tell an agent to fabricate evidence.
+- **Decision.** One unit, `adoption-docs@1`, run through a frozen pack (D-28 does not cover added
+  statements). The README becomes the plain, direct introduction; a short part at its end keeps
+  "Where mk2 came from" and `## Gates` with the test count where CI's tests and CLAUDE.md expect
+  them, and `## Layout` moves to `docs/contributing.md`. New `docs/` pages: `index.md` (router),
+  `concepts.md`, `lifecycle.md` (generated from `ir/mk2.py` by a script with a `--check` mode run
+  in CI), `errors.md`, `schemas.md`, `agents/SKILL.md` and three role cards; contributor pages
+  carry a one-line banner. No existing file moves. `claim-boundary.md` stops saying that every
+  "Never mechanically checked" item is a report row. The pack pins the README's key caveats and
+  the agent recovery rules, bans the overclaim words reviews keep finding, and checks every
+  documented command, option, refusal code, decision, check id and JSON key against the code. An
+  independent reviewer checks every behavioural statement against its source.
+- **Out of scope.** The GitHub integration and compatibility guide (D-19 B5: rulesets, bot-commit
+  policy, upgrade and rollback), now `vouch_mk2-b6g.19`, after `release@1`. A refusal-code
+  registry, so `errors.md` stays a starter catalog. Collapsing the `org.tier-controls` rows in
+  `check` output (`vouch_mk2-k76`).
+- **Rejected.** Moving files into `docs/reference/` and `docs/internals/`: tests in published
+  units, DECISIONS.md (append-only) and frozen pack specs name today's paths. Landing the drafts as
+  a D-28 rewording: they add statements about behaviour.
+

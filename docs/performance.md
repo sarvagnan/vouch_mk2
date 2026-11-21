@@ -1,5 +1,7 @@
 # Performance
 
+> For people changing mk2: this page describes how mk2 itself is built and run. You do not need it to use Vouch.
+
 mk2's store operations are measured, not optimized. `scripts/bench_store.py` builds a snapshot of
 *n* published units through `decide()` and `apply()`, then times the operations a CLI verb
 performs.

@@ -1,0 +1,4 @@
+{"effects_format": 1, "effects": [
+  {"kind": "observation", "name": "lifecycle-doc-read", "source": "the repository working tree (docs/lifecycle.md, or the --output path) and the policy IR", "capture": "whether the target file's bytes equal the Markdown generated from the IR; used only for the --check exit status"},
+  {"kind": "action", "name": "lifecycle-doc-write", "system": "the repository working tree (docs/lifecycle.md, or the --output path)", "outcome": "confirmed", "detail": "without --check, scripts/gen_lifecycle_doc.py writes deterministic Markdown generated from the policy IR, creating the parent directory; with --check it writes nothing and exits 1 when the file differs"}
+]}

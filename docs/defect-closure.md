@@ -1,5 +1,7 @@
 # Vouch 0.6 defect-closure map
 
+> For people changing mk2: this page describes how mk2 itself is built and run. You do not need it to use Vouch.
+
 This map tracks how mk2 resolves each of the 70 defects recorded in the Vouch 0.6 verification
 kit, as required by `IMPLEMENTATION-PLAN.md` §5 row 1 and §7. Each entry records one primary
 defect class and exactly one disposition:

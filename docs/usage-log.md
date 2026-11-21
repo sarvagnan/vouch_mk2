@@ -1,5 +1,7 @@
 # Subagent usage log
 
+> For people changing mk2: this page describes how mk2 itself is built and run. You do not need it to use Vouch.
+
 One line per delegated run. Purpose: detect a run whose Claude-side spend is out of
 proportion to its job. The `codex` wrapper is a Sonnet agent on the SHARED session limit;
 its healthy cost is a thin launch-wait-relay. Codex's own (gpt-5.6-sol) tokens are free
