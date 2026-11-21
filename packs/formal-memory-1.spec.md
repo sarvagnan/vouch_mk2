@@ -123,3 +123,10 @@ The full suite runs on the boat.dev default sandbox (4 vCPU, 8 GB, cgroup limit 
 swap off. It must pass with the cgroup's `memory.peak` under 4 GiB. The planner records the peak
 and wall time beside the baseline: the unchanged suite was OOM-killed there without swap and took
 15 to 30 minutes with 12 GB of swap.
+
+## Amended by D-46 (2026-11-21, owner rebind)
+
+`formal-fresh-green@1` adds the `refreeze-v1` universe and invariant M12 with witness W12, so mk2's
+recorded certificate was re-recorded. The recorded relation digests gain `refreeze-v1`
+(`0ea42aaa…`); the four earlier digests are unchanged. The recorded certificate digest is now
+`faadec2b…`.

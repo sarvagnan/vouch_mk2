@@ -20,6 +20,7 @@ from vouch_mk2.core import (
 from vouch_mk2.formal import (
     CORE_V1,
     HISTORY_V1,
+    REFREEZE_V1,
     TIER_V1,
     FormalRun,
     passed,
@@ -302,7 +303,7 @@ def test_every_invariant_has_one_private_discriminating_witness(
             if universe.universe_name == TIER_V1.name
             else {
                 invariant.invariant_id for invariant in INVARIANTS
-                if universe.universe_name != "effects-v1"
+                if universe.universe_name not in ("effects-v1", REFREEZE_V1.name)
                 or invariant.invariant_id != "M6.no-nonterminal-deadlock"
             }
         )
@@ -350,6 +351,7 @@ def test_formal_artifact_encodings_are_stable_and_certificate_is_strict(
         HISTORY_V1.name,
         TIER_V1.name,
         "effects-v1",
+        REFREEZE_V1.name,
     }
     assert {
         row[0]: row[2:] for row in certificate.universes
@@ -400,7 +402,7 @@ def test_recorded_certificate_is_checked_cheaply_and_names_unexplored_properties
         assert passed_result.verdict is Verdict.PASS
         assert calls == []
         assert "regenerating the reachable relations" in passed_result.detail
-        assert "executing M1-M11" in passed_result.detail
+        assert "executing M1-M12" in passed_result.detail
         assert "witness mutations over them" in passed_result.detail
         assert store.get_object(
             ArtifactKind.FORMAL_TABLES, certificate.tables_digest

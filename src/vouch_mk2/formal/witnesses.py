@@ -12,6 +12,8 @@ from vouch_mk2.core import (
     DeviationStatus,
     DeviationType,
     EvidenceHead,
+    EvidenceKind,
+    EvidencePackSummary,
     ReleaseState,
     Snapshot,
     Tier,
@@ -89,6 +91,17 @@ def _replace_representative(
         transitions=transitions,
         initial=initial,
         representatives=tuple(sorted(representatives.items())),
+        evidence_kinds=tuple(
+            sorted(
+                (
+                    new if source == old else source,
+                    new if target == old else target,
+                    kind,
+                    pack_digest,
+                )
+                for source, target, kind, pack_digest in relation.evidence_kinds
+            )
+        ),
     )
 
 
@@ -453,6 +466,79 @@ def _mutate_m11(relation: Relation) -> Relation:
     )
 
 
+def _mutate_m12(relation: Relation) -> Relation:
+    test_set_digest = "d" * 64
+    other_test_set_digest = "e" * 64
+    unit = Unit(
+        name="w-m12",
+        version="v1",
+        status=UnitStatus.DONE_PENDING_ACCEPTANCE,
+        acceptance_pack_version="p2",
+        acceptance_pack_digest="f" * 64,
+        acceptance_test_set_digest=test_set_digest,
+        pack_history=("p1",),
+        pack_binding="late",
+        published_once=True,
+        refreeze_green_required=True,
+    )
+    before = Snapshot(
+        tier=Tier.STANDARD,
+        units=(unit,),
+        evidence_heads=(
+            EvidenceHead(
+                unit_name=unit.name,
+                unit_version=unit.version,
+                head="2" * 64,
+                head_sequence=2,
+                anchored="GENESIS",
+                pack_summaries=(
+                    EvidencePackSummary(
+                        pack_digest=test_set_digest, red_seen=True, green=True
+                    ),
+                ),
+            ),
+        ),
+    )
+    # The earlier GREEN for the current test set survives the forged clear.
+    cleared = replace(unit, refreeze_green_required=False)
+    prior_head = before.evidence_heads[0]
+    other_summary = EvidencePackSummary(
+        pack_digest=other_test_set_digest, red_seen=False, green=True
+    )
+    after_record = replace(
+        before,
+        units=(cleared,),
+        evidence_heads=(
+            replace(
+                prior_head,
+                head="3" * 64,
+                head_sequence=3,
+                pack_summaries=prior_head.pack_summaries + (other_summary,),
+            ),
+        ),
+    )
+    after_publish = replace(
+        after_record, units=(replace(cleared, status=UnitStatus.PUBLISHED),)
+    )
+    mutated, source = _with_representative(relation, before)
+    mutated, recorded = _with_representative(mutated, after_record)
+    mutated, published = _with_representative(mutated, after_publish)
+    evidence_row = (source, recorded, EvidenceKind.GREEN.value, other_test_set_digest)
+    return replace(
+        mutated,
+        transitions=tuple(
+            sorted(
+                set(mutated.transitions)
+                | {
+                    (source, mk2.CMD_RECORD_EVIDENCE, recorded),
+                    (recorded, mk2.CMD_PUBLISH, published),
+                }
+            )
+        ),
+        evidence_kinds=tuple(sorted((*mutated.evidence_kinds, evidence_row))),
+    )
+
+
 WITNESSES: tuple[Witness, ...] = (
     Witness("W1.direct-republication", "M1.no-direct-republication", "Forge invalidated -> published.", _mutate_m1),
     Witness("W2.blocked-published", "M2.published-units-gated", "Attach an open deviation to a published unit.", _mutate_m2),
@@ -465,6 +551,12 @@ WITNESSES: tuple[Witness, ...] = (
     Witness("W9.anchor-rotation", "M9.anchor-monotonic", "Rotate an anchor to an unrelated digest.", _mutate_m9),
     Witness("W10.second-active-record", "M10.one-active-record-per-name", "Add a second active version for an existing name.", _mutate_m10),
     Witness("W11.tier-lowering", "M11.tier-never-lowers-after-commitment", "Forge a tier-lowering transition after work is committed.", _mutate_m11),
+    Witness(
+        "W12.publish-before-fresh-green",
+        "M12.fresh-green-after-refreeze",
+        "Forge publication after a GREEN for a different test set clears the requirement.",
+        _mutate_m12,
+    ),
 )
 
 

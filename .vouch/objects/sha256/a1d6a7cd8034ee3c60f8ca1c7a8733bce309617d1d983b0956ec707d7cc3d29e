@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest tests/test_formal_fresh_green.py -q -p no:cacheprovider","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"616c6a119e82c3eb2d1622cc27ef4b5d86fbc97d1292c6a832d7d5710d7e84ac","parent":"GENESIS","recorded_at":"2026-11-21T07:42:05+00:00","sequence":1,"unit":{"name":"formal-fresh-green","version":"1"}}

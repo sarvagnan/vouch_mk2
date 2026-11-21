@@ -563,7 +563,7 @@ def test_the_tier_row_claims_declared_effects_only() -> None:
 
 
 def test_the_formal_model_covers_the_requirement_without_moving_other_universes() -> None:
-    assert [u.name for u in UNIVERSES] == ["core-v1", "history-v1", "tier-v1", "effects-v1"]
+    assert [u.name for u in UNIVERSES][:4] == ["core-v1", "history-v1", "tier-v1", "effects-v1"]
     plain = Snapshot(revision=1)
     assert state_fingerprint(plain) != state_fingerprint(Snapshot(revision=1, effects_required=True))
     run = run_formal()

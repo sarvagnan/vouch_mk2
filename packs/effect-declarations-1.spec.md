@@ -289,3 +289,9 @@ the dogfood store's projections.
   decision that predates this unit).
 - Re-running `decide()` over a fast-forwarded suffix in general. The effects rule is verified after
   the fact by R13c instead.
+
+## Amended by D-46 (2026-11-21, owner rebind)
+
+`formal-fresh-green@1` adds a fifth formal universe, `refreeze-v1`, after the four this pack
+names. R17 now requires the first four universes, in order, to be `core-v1`, `history-v1`,
+`tier-v1` and `effects-v1`; their counts and the effects-v1 checks are unchanged.

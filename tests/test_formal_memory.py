@@ -24,16 +24,17 @@ from vouch_mk2.store.digests import ArtifactKind, digest_of
 from vouch_mk2.verify import build_certificate
 
 # The relation digests in the formal certificate recorded in mk2's own store (checker
-# formal-checker-v9). They must not move.
+# formal-checker-v9). They must not move. D-46 added refreeze-v1; the other four are unchanged.
 _RECORDED_RELATION_DIGESTS = {
     "core-v1": "6f6ff0105ee23133eb0a0a8f254703da6dd8d32d98162d9c28c1e44f306beb60",
     "effects-v1": "af0736c6eaa83131b11ba402e3fbb89e69d935905f82eaa300867a0acff962df",
     "history-v1": "eff8e3a3ec66ad0a4b543bff6a80bdb48cd65416f7076e7ad0137eda46929c39",
+    "refreeze-v1": "0ea42aaa5885560c6cad99be599fe37587b5cc5318b76c96731cfd8c7d432228",
     "tier-v1": "5822a72ba21a762f5b1531949bdd1d814509bfaeeaaf0066805b37d4d9ad422e",
 }
 
-# The digest of that whole recorded certificate.
-_RECORDED_CERTIFICATE_DIGEST = "7b3919fd45fb169c16863f2ae5164287a7e3393df5a5f3db912a9cc357fd689c"
+# The digest of that whole recorded certificate (re-recorded for D-46's universe and M12).
+_RECORDED_CERTIFICATE_DIGEST = "faadec2bcbebb7576aafbdc2227591dca7521de2196ca76a3171ed72bed02651"
 
 _AWKWARD = (
     'quote " backslash \\ slash /',

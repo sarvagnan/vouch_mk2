@@ -1,0 +1,1 @@
+{"entries":[{"path":"packs/effect-declarations-1.spec.md","role":"spec","sha256":"4446706f2985e9f909086b5679674d7484ddc0871fba7fee181542b05e0987bb","size":19149},{"path":"tests/test_effect_declarations.py","role":"test","sha256":"06e27d02819a295a02521884280097bd227525d3fbfbda561f4c5a65c3c89496","size":36302}],"pack_format":2}

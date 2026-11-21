@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from vouch_mk2.core import (
     DeviationStatus,
+    EvidenceKind,
     ReleaseState,
     Snapshot,
     Tier,
@@ -449,6 +450,86 @@ def _tier_never_lowers_after_commitment(relation: Relation) -> tuple[str, ...]:
     return tuple(violations)
 
 
+def _advanced_green_for_test_set(
+    before: Snapshot, after: Snapshot, ref: UnitRef, test_set_digest: str
+) -> bool:
+    if not test_set_digest:
+        return False
+    prior = before.evidence_head_ref(ref)
+    head = after.evidence_head_ref(ref)
+    return (
+        head is not None
+        and (
+            prior is None
+            or (head.head_sequence > prior.head_sequence and head.head != prior.head)
+        )
+        and any(
+            summary.pack_digest == test_set_digest and summary.green
+            for summary in head.pack_summaries
+        )
+    )
+
+
+def _fresh_green_after_refreeze(relation: Relation) -> tuple[str, ...]:
+    """mk2 M12, defined by DECISIONS.md D-36 and D-46."""
+    representatives = _representatives(relation)
+    green_records = {
+        (source, target, pack_digest)
+        for source, target, kind, pack_digest in relation.evidence_kinds
+        if kind == EvidenceKind.GREEN.value
+    }
+    violations: list[str] = []
+    for source, command, target in relation.transitions:
+        before = representatives[source]
+        after = representatives[target]
+        for prior in before.units:
+            last_inventory = (
+                prior.acceptance_pack_digest or prior.previous_acceptance_pack_digest
+            )
+            if not last_inventory and not prior.refreeze_green_required:
+                continue
+            ref = prior.ref()
+            current = after.unit_ref(ref)
+            if current is None:
+                continue
+            inventory = current.acceptance_pack_digest
+            if (
+                command != mk2.CMD_REBIND_PACK
+                and last_inventory
+                and inventory
+                and inventory != last_inventory
+                and not current.refreeze_green_required
+            ):
+                violations.append(
+                    f"{command}: {ref.label()!r} changed bound inventory "
+                    "without requiring a fresh GREEN"
+                )
+            if not prior.refreeze_green_required:
+                continue
+            if (
+                before.tier in (Tier.STANDARD, Tier.HIGH)
+                and prior.status is not UnitStatus.PUBLISHED
+                and current.status is UnitStatus.PUBLISHED
+            ):
+                violations.append(
+                    f"{command}: {ref.label()!r} entered published "
+                    "while a fresh GREEN was required"
+                )
+            if not current.refreeze_green_required and (
+                command != mk2.CMD_RECORD_EVIDENCE
+                or (source, target, current.acceptance_test_set_digest)
+                not in green_records
+                or not _advanced_green_for_test_set(
+                    before, after, ref, current.acceptance_test_set_digest
+                )
+            ):
+                violations.append(
+                    f"{command}: {ref.label()!r} cleared the fresh-GREEN requirement "
+                    "without recording a GREEN for its current test set"
+                )
+    return tuple(violations)
+
+
 INVARIANTS: tuple[Invariant, ...] = (
     Invariant(
         "M1.no-direct-republication",
@@ -505,5 +586,10 @@ INVARIANTS: tuple[Invariant, ...] = (
         "M11.tier-never-lowers-after-commitment",
         "mk2 D-12: assurance tier cannot lower after any unit leaves specified.",
         _tier_never_lowers_after_commitment,
+    ),
+    Invariant(
+        "M12.fresh-green-after-refreeze",
+        "mk2 D-36: a changed inventory requires a fresh GREEN before gated publication.",
+        _fresh_green_after_refreeze,
     ),
 )

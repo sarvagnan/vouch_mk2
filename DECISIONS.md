@@ -1862,3 +1862,35 @@ refuse a replay that would undo an agreed value; include the formal certificate)
   Refusing whenever both sides changed a key even to equal values (needless refusals). Automatic
   reconciliation of the split case (needs an ordering policy for history already written).
   Release criteria, bundle bindings and evidence anchors stay under their own rules.
+
+## D-46 — Formal explores D-36's fresh-GREEN rule in a new universe under a new invariant, M12 (2026-11-21)
+
+**Status:** decided 2026-11-21 by the user (two answers: a new small universe; M12 checks set,
+honour and clear). Settles `vouch_mk2-7kc` in one unit, `formal-fresh-green@1`. Follows
+`refreeze-green@1` (D-36).
+
+- **The finding** (Fable's review of `refreeze-green@1`, Finding 2). The fresh-GREEN requirement
+  is on in no state of any formal universe. `history-v1` runs at `lightweight`, where the
+  current-pack GREEN gate is off, and only binds one inventory for `u`. `tier-v1` runs at `high`
+  but never re-freezes with a changed pack. No invariant checks any publish evidence gate, so a
+  `decide()` that dropped the requirement would still pass `formal`.
+- **Decision.** Add a focused universe, `refreeze-v1`, at `standard`: one unit is bound, recorded
+  RED and GREEN, published, blocked by a deviation, respecified, re-frozen and bound to a different
+  inventory, then may publish only after a further GREEN. It runs every invariant except M6, as
+  `effects-v1` does, because a unit marked done without evidence has no exit once the universe's
+  deviation ids are used up: a bound of the universe, not of Vouch. Add M12 over every universe
+  that runs all invariants: (set) a transition, other than an owner rebind, that binds a unit to an
+  inventory different from its last bound inventory leaves the requirement on; (honour) at
+  `standard` or `high`, no unit enters `published` while its requirement is on; (clear) the
+  requirement turns off only on a transition that records a GREEN for the unit's current test set.
+  The witness registry keeps one private mutation per invariant (W12); the acceptance tests mutate
+  `refreeze-v1`'s real relation once for each of M12's three parts. The docs name M1–M12.
+- **Consequences.** The certificate changes (a fifth universe and M12 rows); mk2's store re-records
+  it. `CHECKER_VERSION` stays. `history-v1`, `core-v1`, `tier-v1` and `effects-v1` keep their
+  relations. Two published units pin global facts this unit changes and are adapted by the owner
+  and rebound: `effect-declarations@1` (the list of universe names) and `formal-memory@1` (the set
+  of relation digests and the certificate digest).
+- **Rejected.** Extending `history-v1`: it would need a tier change and grow the largest universe.
+  Extending `tier-v1`: it moves pinned counts in three published units. An invariant that checks
+  only the publish refusal: a `decide()` that never turned the requirement on would pass it.
+

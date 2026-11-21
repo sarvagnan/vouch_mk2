@@ -108,9 +108,9 @@ content-addressed artifacts, pure projections, and thin adapters. All code lives
   organizational `NOT_CHECKED` rows, artifact checks (for evidence chains, anchors, bundles, and
   certificates), and exclusion-glob bundle inventories.
 - `formal/` — Bounded model checker. It exhaustively explores what `decide()` allows over the
-  empty `core-v1` and seeded-history `history-v1` universes, checking eleven hand-written
-  invariants. Each invariant pairs with a private mutation witness it must catch. Recomputed,
-  content-addressed certificates bind both relations.
+  `core-v1`, `history-v1`, `tier-v1`, `effects-v1`, and `refreeze-v1` universes, checking twelve
+  hand-written invariants across them. Each invariant pairs with a private mutation witness it
+  must catch. Recomputed, content-addressed certificates bind the relations.
 - `projections/` — Pure read models: the canonical system map, binding next actions, status facts,
   and deterministic agent-context generation.
 - `cli.py`, `mcp.py`, `hook.py`, `init.py`, `lock.py` — Transports:
@@ -141,13 +141,13 @@ uv sync --locked
 uv run python scripts/gen_commands_doc.py --check
 uv run pyrefly check     # strict types (D-1)
 uv run lint-imports      # policy IR purity contract (D-1)
-uv run pytest            # 1426 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest            # 1438 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run python -c "from vouch_mk2.store import Store; store = Store.init('$RUNNER_TEMP/vouch-mk2-ci-check'); store.close()"
 uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
 uv run vouch-mk2 check --ci --json --root "$RUNNER_TEMP/vouch-mk2-ci-check" | python3 -m json.tool > /dev/null
 uv run vouch-mk2 generate --root "$RUNNER_TEMP/vouch-mk2-ci-check"
 uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
-uv run vouch-mk2 formal  # invariants over core-v1 and history-v1
+uv run vouch-mk2 formal  # invariants over the bounded relations
 uv run vouch-mk2 build-lock --output "$RUNNER_TEMP/vouch.lock" | tee "$RUNNER_TEMP/lock-digest.txt"
 uv run vouch-mk2 build-lock --output "$RUNNER_TEMP/vouch2.lock" > /dev/null
 cmp "$RUNNER_TEMP/vouch.lock" "$RUNNER_TEMP/vouch2.lock"
