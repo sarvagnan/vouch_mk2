@@ -135,6 +135,10 @@ bump is not refused.
 The publication gates compare the frozen test set, not the command: a GREEN can run a different
 command from the RED before it.
 
+`show-evidence` lists the stored command line of every RED and GREEN and notes when the GREEN
+that counts has a different stored command line from the RED that counts; the note never blocks
+publication. Comparing which tests actually ran is deferred to `vouch_mk2-inv.4`.
+
 **Command validation and argument redaction:**
 - The CLI validates the exact command descriptor before opening the store or starting the child,
   refusing an invalid one without running it.

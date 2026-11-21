@@ -55,7 +55,7 @@ def test_mcp_initialize_list_and_structured_check(tmp_path: Path) -> None:
 
     listed = cast(dict[str, object], responses[1]["result"])
     tools = cast(list[dict[str, object]], listed["tools"])
-    assert [tool["name"] for tool in tools] == ["check", "formal", "next", "status", "map"]
+    assert [tool["name"] for tool in tools] == ["check", "formal", "next", "status", "map", "evidence"]
 
     tool_result = cast(dict[str, object], responses[2]["result"])
     structured = cast(dict[str, object], tool_result["structuredContent"])

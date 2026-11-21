@@ -36,6 +36,7 @@ from vouch_mk2.core import (
     Snapshot,
     Tier,
     Unit,
+    UnitRef,
     UnitSpecified,
     UnitStatus,
     apply,
@@ -54,6 +55,7 @@ from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict, Violation
 from vouch_mk2.projections import agent_context, system_map
+from vouch_mk2.projections.evidence import EvidenceView, UnitEvidenceView, project_unit_evidence
 from vouch_mk2.store import (
     CURRENT_STATE_FORMAT,
     ArtifactKind,
@@ -99,6 +101,10 @@ class _ChainWalk:
 
 def _unit_label(unit: Unit) -> str:
     return unit.ref().label()
+
+
+def _unit_name_and_version(unit: Unit) -> tuple[str, str]:
+    return unit.name, unit.version
 
 
 def _check_id(result: CheckResult) -> str:
@@ -309,6 +315,36 @@ def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
         )
         return _ChainWalk(head, tuple(events), reason)
     return _ChainWalk(head, tuple(events), "")
+
+
+def read_evidence_view(
+    store: Store,
+    snapshot: Snapshot,
+    *,
+    unit_ref: UnitRef | None = None,
+) -> EvidenceView:
+    """Read the evidence behind the selected units in one snapshot."""
+    units: list[Unit]
+    if unit_ref is None:
+        units = [unit for unit in snapshot.units if unit.status is not UnitStatus.SUPERSEDED]
+        units.sort(key=_unit_name_and_version)
+    else:
+        unit = snapshot.unit_ref(unit_ref)
+        units = [] if unit is None else [unit]
+
+    rows: list[UnitEvidenceView] = []
+    for unit in units:
+        head = snapshot.evidence_head_ref(unit.ref())
+        if head is None:
+            rows.append(project_unit_evidence(snapshot, unit, ()))
+            continue
+        try:
+            walk = _walk_chain(store, head)
+        except OSError as error:
+            rows.append(project_unit_evidence(snapshot, unit, (), chain_error=f"chain read failed: {error}"))
+        else:
+            rows.append(project_unit_evidence(snapshot, unit, walk.events, chain_error=walk.error))
+    return {"revision": snapshot.revision, "units": rows}
 
 
 def _red_before_first_green(

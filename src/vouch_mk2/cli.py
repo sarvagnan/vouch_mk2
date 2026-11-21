@@ -90,6 +90,7 @@ from vouch_mk2.verify import (
     emit_context,
     emit_system_map,
     pending_anchor_is_only_unchecked,
+    read_evidence_view,
     record_evidence,
     record_formal_certificate,
     run_artifact_checks,
@@ -129,6 +130,7 @@ class _Arguments(argparse.Namespace):
     tier: str
     actor: str
     other: str
+    evidence_unit: UnitRef | None
 
 
 def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
@@ -206,6 +208,27 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
                 action="store_true",
                 help="emit structured invocations instead of text",
             )
+    evidence = commands.add_parser(
+        "show-evidence", help="show recorded evidence and current-pack witnesses"
+    )
+    evidence.add_argument(
+        "--root",
+        default=".",
+        help="store root directory (default: current directory)",
+    )
+    evidence.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="emit one JSON result instead of text",
+    )
+    evidence.add_argument(
+        "--unit",
+        dest="evidence_unit",
+        metavar="NAME@VERSION",
+        type=_unit_ref,
+        help="show only this exact unit version, including superseded versions",
+    )
     bundle_inventory = commands.add_parser(
         "bundle-inventory",
         help="build and place a content-addressed bundle inventory",
@@ -1415,6 +1438,42 @@ def _effect_unit_name(unit: Unit) -> str:
     return unit.name
 
 
+def _show_evidence(root: str, json_output: bool, unit_ref: UnitRef | None) -> int:
+    try:
+        with Store.open(root, read_only=True) as store:
+            view = read_evidence_view(store, store.read_snapshot(), unit_ref=unit_ref)
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
+        return 2
+    units = view["units"]
+    if unit_ref is not None and not units:
+        print(f"vouch-mk2: unknown unit {unit_ref.label()!r}", file=sys.stderr)
+        return 2
+    if json_output:
+        print(json.dumps(view, sort_keys=True))
+    else:
+        for unit in units:
+            test_set = unit["current_test_set"] or "-"
+            current_green = str(unit["current_pack_green"]).lower()
+            print(
+                f"{unit['unit']} ({unit['status']}): "
+                f"current_test_set={test_set} current_pack_green={current_green}"
+            )
+            if unit["chain_error"]:
+                print(f"  chain_error: {unit['chain_error']}")
+            for record in unit["records"]:
+                mark = f" counts={record['counts']}" if record["counts"] else ""
+                print(
+                    f"  {record['sequence']} {record['kind']}{mark}  {record['command']}  "
+                    f"[{record['outcome']} "
+                    f"test_set={record['test_set'] or '-'} "
+                    f"recorded_at={record['recorded_at']!r} digest={record['digest']}]"
+                )
+            for note in unit["notes"]:
+                print(f"  {note}")
+    return 1 if any(unit["chain_error"] for unit in units) else 0
+
+
 def _show_effects(root: str, json_output: bool) -> int:
     from vouch_mk2.core import ActionEffect, ObservationEffect
     from vouch_mk2.store import ArtifactKind, decode_pack_inventory
@@ -1613,6 +1672,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         tier=Tier.LIGHTWEIGHT.value,
         actor=default_actor(),
         other="",
+        evidence_unit=None,
     )
     parsed = parser.parse_args(arguments, namespace=namespace)
     if not isinstance(parsed, _Arguments):
@@ -1885,6 +1945,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if parsed.command == "show-effects":
         return _show_effects(parsed.root, parsed.json_output)
+
+    if parsed.command == "show-evidence":
+        return _show_evidence(parsed.root, parsed.json_output, parsed.evidence_unit)
 
     if parsed.command in ("next", "status"):
         try:
