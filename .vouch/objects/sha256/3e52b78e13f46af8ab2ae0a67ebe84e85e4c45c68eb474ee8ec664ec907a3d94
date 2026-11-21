@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","event_format":2,"pack_digest":"","payload":{"deviation_id":"DEV-cc-02","deviation_type":"pack-defect","unit":{"name":"claim-corrections","version":"1"}},"prev":"264aa642c43ec523d8ace1c65ca65fe50d2fbac753cc0cd446054faa39951624","recorded_at":"2026-11-21T16:27:37+00:00","revision":1337,"run_id":""}

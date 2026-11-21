@@ -1926,3 +1926,51 @@ and `vouch_mk2-1l0` in one unit, `adoption-docs@1`.
   units, DECISIONS.md (append-only) and frozen pack specs name today's paths. Landing the drafts as
   a D-28 rewording: they add statements about behaviour.
 
+## D-48 — Upgrade refuses a re-baseline below format 4, and claim-boundary says what cleanup, upgrade, evidence and the workflow really do (2026-11-21)
+
+**Status:** decided 2026-11-21 by the user ("go ahead" on the owner's proposal after independent
+reviews by Claude Fable, GPT 6.2 Astra and Gemini Neon of four findings from the non-guarantee
+review, `vouch_mk2-inv`). One unit, `claim-corrections@1` (`vouch_mk2-inv.1`).
+
+- **The findings.** (1) `upgrade` checks the event-log downgrade signals (an `event_head` key in
+  the raw document, a canonical event object) only when `state.json` declares format 3. With the
+  `state-format.json` mark deleted and the declared format lowered to 0, 1 or 2, `upgrade` mints a
+  fresh pre-log baseline over an existing event log, erasing its history, and `check` passes
+  (reproduced by Neon and the owner). Formats below 4 never carried an event log (D-16), so either
+  signal at any of them is evidence of a downgrade. (2) `claim-boundary.md` says the opportunistic
+  cleanup reclaims the unreferenced objects an interrupted write leaves; it removes only temporary
+  files, staged merge objects and, best-effort, unreferenced event objects; evidence, pack, bundle
+  inventory and formal objects stay as inert files (reproduced by Fable and Astra). (3) It says the
+  pre-log checkpoint is written when upgrading to format 3; it is written at the 3→4 step.
+  (4) Nothing says that RED and GREEN may run different commands: the gates compare the test-set
+  digest, not `command_line`, so at `standard` a RED of `false` and a GREEN of `true` publish a unit
+  whose frozen test still fails (reproduced by Fable and Astra; a consequence of the existing
+  statement that the argv is not claimed to be a test runner). (5) Its workflow-limits sentence lists
+  "give forks write access" beside real gaps; withholding it is deliberate (D-18, D-20).
+- **Decision.** `upgrade` refuses when the raw document declares any format below 4 and either
+  event-log signal is present, with the existing refusal and recovery hint; a genuine pre-log store
+  has neither, so its upgrade is unchanged. `claim-boundary.md` and `Store.commit`'s docstring say
+  exactly what cleanup reclaims and that other orphans stay; the upgrade section names the 3→4
+  step and the formats the refusal covers; the evidence section says the gates compare the frozen
+  test set, not the command, and the README and `concepts.md` say what "the same tests" means; the
+  workflow paragraph keeps its real limits and states the fork rule as a design choice whose
+  consequence is that a fork's work is anchored only after it is merged.
+- **Out of scope.** Showing recorded evidence commands and an opt-in pack-bound evidence command
+  (`vouch_mk2-inv.2`). Sweeping every unreferenced object kind (it would delete a staged
+  `bundle-inventory` object before `bind-bundle`, and merges need objects from older history).
+  Defending the store against hand edits in general (`vouch_mk2-22a`).
+- **Rejected.** A rule that GREEN must run RED's exact command: it blocks a narrow RED followed by
+  a full-suite GREEN (this project's own practice), breaks existing stores and the evidence-bearing
+  formal universes, treats `<redacted>` positions as equal, and `true` run twice still passes.
+
+**D-48 note (2026-11-21, owner adjudication of the review).** Two pack-defect deviations amended
+only the spec of `claim-corrections@1`; the tests did not change. DEV-cc-01 (pack/2, from Sol): a
+real `upgrade` opens the store writable before the guard runs, so writable-open housekeeping can
+create `.lock` and remove leftover temporary files before a refusal; the Promise now says "before
+any migration write". DEV-cc-02 (pack/3, from Astra's review): that housekeeping also rolls back an
+interrupted merge transaction whose saved state matches `state.json`, so a hand-made transaction
+can make it unlink the event objects before the guard runs and the upgrade proceeds (the read-only
+dry run refuses). Adjudicated under the Limits set before review as a hand edit that forges the
+signals away: building that transaction takes the same write access as deleting the objects by
+hand. It belongs to `vouch_mk2-22a`; `claim-boundary.md` says so.
+

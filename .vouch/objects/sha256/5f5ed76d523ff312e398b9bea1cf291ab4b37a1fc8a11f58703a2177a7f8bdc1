@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_claim_corrections.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"59597c79764a7f04ff87ad40d776914a1c6e195409ccf6a947fefd1a5e42c74a","parent":"GENESIS","recorded_at":"2026-11-21T15:42:54+00:00","sequence":1,"unit":{"name":"claim-corrections","version":"1"}}

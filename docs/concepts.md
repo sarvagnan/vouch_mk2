@@ -50,6 +50,9 @@ the tier once any unit is beyond `specified`. The anchor modes are `none` and `c
 | `standard` | An evidence head and a current-pack GREEN after RED for the same tests or after a qualifying rebind. A changed re-freeze requires a subsequent GREEN. | Active packs with a version must have a byte binding. Anchor mode must be `ci`, with current anchors carrying workflow run claims for recorded chains. |
 | `high` | The standard evidence requirements plus an evidence head anchored past `GENESIS` and a recorded formal certificate. | The standard checks plus a valid recorded formal certificate. `check.pack-bound` also rejects late binding and rebound packs that lack fresh GREEN. |
 
+"The same tests" means the same frozen test set; Vouch does not compare the commands that RED
+and GREEN ran.
+
 These are evidence requirements. Publication also checks the recorded pack version, dependencies
 and blocking deviations. To interpret other report rows, see the [claim boundary](claim-boundary.md).
 
