@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"show-evidence@1","reason":"show-evidence@1 (D-49) is in progress on unit/show-evidence-1; publish clears this after CI anchors on main"},"prev":"983dddb490603b1ab5d57cfde55c2b4c64ea06bf950c2659ffa46d0bf5ae8562","recorded_at":"2026-11-21T18:43:15+00:00","revision":1357,"run_id":""}
