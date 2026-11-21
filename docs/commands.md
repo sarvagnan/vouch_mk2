@@ -74,6 +74,18 @@ options:
   --json       emit structured invocations instead of text
 ```
 
+## show-evidence
+
+```text
+usage: vouch-mk2 show-evidence [-h] [--root ROOT] [--json] [--unit NAME@VERSION]
+
+options:
+  -h, --help           show this help message and exit
+  --root ROOT          store root directory (default: current directory)
+  --json               emit one JSON result instead of text
+  --unit NAME@VERSION  show only this exact unit version, including superseded versions
+```
+
 ## bundle-inventory
 
 ```text

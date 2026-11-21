@@ -245,6 +245,11 @@
       "key": "D-48",
       "bytes": 4230,
       "sha256": "6535320ba1ae61cf38e9466ef83fdc7d3a54b539b929bbc8b3e930b15eba34d2"
+    },
+    {
+      "key": "D-49",
+      "bytes": 3671,
+      "sha256": "5c98512d11a1d6df7c639927edda93c17e6dc69113a02c97a298123d9980f60d"
     }
   ]
 }

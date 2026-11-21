@@ -1974,3 +1974,49 @@ dry run refuses). Adjudicated under the Limits set before review as a hand edit 
 signals away: building that transaction takes the same write access as deleting the objects by
 hand. It belongs to `vouch_mk2-22a`; `claim-boundary.md` says so.
 
+## D-49 — `show-evidence`: a read-only view of each unit's recorded evidence, with the commands (2026-11-21)
+
+**Status:** decided 2026-11-21 by the user (three answers: a new read-only `show-evidence` verb and
+a matching read-only MCP tool, generated files unchanged; the full chain with the records
+publication relies on marked; a note, never a block, when the GREEN that counts ran a different
+command from the RED before it). One unit, `show-evidence@1` (`vouch_mk2-inv.2`).
+
+- **The finding.** Every evidence record stores the command it ran (`command_line`, redacted
+  positions as `<redacted>`), but no command, generated file or MCP tool shows it, so the reviewer
+  the README defers to cannot see whether RED and GREEN ran a real test command. The gates compare
+  the frozen test set, not the command (D-48).
+- **Decision.** `vouch-mk2 show-evidence [--root ROOT] [--json] [--unit NAME@VERSION]` opens the
+  store read-only and, for each unit that is not superseded, walks its evidence chain oldest first
+  and shows every record: sequence, kind, outcome, the test set it was recorded for, the command,
+  and when it was recorded. Against the unit's current test set it marks the GREEN that counts (the
+  latest GREEN for that test set with no later RED for it) and the RED that counts (the latest RED
+  for that test set before that GREEN), and reports whether the current pack's RED-then-GREEN
+  requirement used by the `standard` and `high` publication gate holds. When both marks exist and
+  their commands differ, it adds a note; it never refuses and never changes the gate. A chain that
+  cannot be read is reported on that unit and makes the command exit 1. The MCP server gains a
+  read-only `evidence` tool returning the same object as `show-evidence --json`.
+- **Out of scope.** Binding an evidence command in the frozen pack (`vouch_mk2-inv.3`, its own
+  decision). Showing evidence in `vouch-context.md` or `map.json`. Any change to recording, the
+  gates or `check`.
+- **Rejected.** Adding the commands to `status` (longer output for every unit). An informational
+  `check` row for differing commands (a narrow RED then a full-suite GREEN is legitimate; the
+  reviewer decides).
+
+**D-49 note (2026-11-22, user decision).** Asked mid-design, the user wants to know whether the
+tests GREEN ran are a superset of those RED ran or a different set, kept separate from the command
+listing. An evidence record holds only the command and its exit status, so that needs Vouch to
+record which tests each run executed. The user chose: `show-evidence@1` proceeds as decided above,
+and a separate later unit (`vouch_mk2-inv.4`) has `record-evidence` read a JUnit XML report the
+runner writes, stores the test IDs and per-test outcomes in the evidence record, and adds a
+set comparison to `show-evidence` beside the command listing, report-only.
+
+**D-49 note (2026-11-22, owner, after Astra's pre-freeze read).** The marks are witnesses of the
+gate's own evidence predicate, not a separate rule: when `current_pack_evidence_is_green` is true
+and the chain was read in full, the view marks the latest explicit GREEN for the current test set
+and the latest RED for it before that GREEN, if any; when the predicate is false, nothing is marked.
+The first wording ("the latest GREEN with no later RED") marked records the gate cannot use: a GREEN
+with no RED before it, a GREEN from before a spec-only re-freeze (D-36), and a GREEN from before a
+rebind. The note compares stored command lines only. Astra also found that after a spec-only
+rebind a REFACTOR alone can satisfy the predicate; that is a gate question, filed as
+`vouch_mk2-inv.5`, not part of this unit.
+

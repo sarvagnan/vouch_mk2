@@ -26,6 +26,7 @@ from vouch_mk2 import __version__
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.projections import NextAction, StatusFacts, next_actions, status_facts, system_map
+from vouch_mk2.projections.evidence import UnitEvidenceView
 from vouch_mk2.store import (
     ArtifactKind,
     Store,
@@ -34,11 +35,11 @@ from vouch_mk2.store import (
     encode_system_map,
     digest_of,
 )
-from vouch_mk2.verify import run_artifact_checks
+from vouch_mk2.verify import read_evidence_view, run_artifact_checks
 
 
 _PROTOCOL_VERSION = "2025-06-18"
-_READ_TOOLS = frozenset({"check", "formal", "next", "status", "map"})
+_READ_TOOLS = ("check", "formal", "next", "status", "map", "evidence")
 # One line = one JSON-RPC object; a request larger than this is hostile or a
 # framing error, and is refused rather than read into memory.
 MAX_LINE_BYTES = 1024 * 1024
@@ -179,6 +180,8 @@ def _call_tool(root: str, name: str, arguments: object) -> dict[str, object]:
             return _report_object(
                 run_checks(snapshot, artifact_results=run_artifact_checks(store, snapshot))
             )
+        if name == "evidence":
+            return dict(read_evidence_view(store, snapshot))
         actions = next_actions(snapshot)
         if name == "next":
             return {
@@ -228,6 +231,7 @@ def _tools() -> list[object]:
         "next": "Project binding next actions from a snapshot.",
         "status": "Project aggregate status facts from a snapshot.",
         "map": "Project the canonical complete system map.",
+        "evidence": "Show recorded evidence and current-pack witnesses.",
     }
     return [
         {
@@ -235,7 +239,7 @@ def _tools() -> list[object]:
             "description": descriptions[name],
             "inputSchema": empty_schema if name == "formal" else root_schema,
         }
-        for name in ("check", "formal", "next", "status", "map")
+        for name in _READ_TOOLS
     ]
 
 
@@ -299,7 +303,11 @@ def _dispatch(root: str, raw: object) -> dict[str, object] | None:
                 raise _InvalidParams("tool name must be a string")
             try:
                 structured = _call_tool(root, name, document["arguments"])
-                result = _tool_result(structured)
+                is_error = name == "evidence" and any(
+                    unit["chain_error"]
+                    for unit in cast(list[UnitEvidenceView], structured["units"])
+                )
+                result = _tool_result(structured, is_error=is_error)
             except StoreError as error:
                 result = _tool_result({"error": str(error)}, is_error=True)
             return None if is_notification else _response(identifier, result)

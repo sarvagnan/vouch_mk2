@@ -1,7 +1,7 @@
 # JSON and MCP reference
 
-The output examples come from a scratch project created with `init`, after specifying
-`greeter@1`. The check report shows a subset of its rows.
+The `check`, `next`, and `status` examples come from a scratch project created with `init`,
+after specifying `greeter@1`. The check report shows a subset of its rows.
 
 ## `check --json`
 
@@ -99,6 +99,63 @@ Run `python3 vouch.lock status --root .vouch --json` for counts and store policy
 }
 ```
 
+## `show-evidence --json`
+
+Run `python3 vouch.lock show-evidence --root .vouch --json` to read recorded evidence oldest
+first for each non-superseded unit, or add `--unit NAME@VERSION` to read one exact version,
+including a superseded version. The example was captured after recording a failing `unittest`
+run for `greeter@1`, fixing the greeter, and recording a passing run with `-v`.
+
+```json
+{
+  "revision": 7,
+  "units": [
+    {
+      "chain_error": "",
+      "current_pack_green": true,
+      "current_test_set": "00de08c8421a65e3732c8385387366f36de4da0146736457162229bef899dfac",
+      "notes": [
+        "GREEN ran a different command from RED"
+      ],
+      "records": [
+        {
+          "command": "python3 -m unittest discover -s tests",
+          "counts": "red",
+          "digest": "b348d02996b0aafc6234ea1ec462309155984c7b0172c614952fb2f3bc3ae88a",
+          "kind": "red",
+          "outcome": "tests-failed",
+          "recorded_at": "2026-11-21T18:50:03+00:00",
+          "sequence": 1,
+          "test_set": "00de08c8421a65e3732c8385387366f36de4da0146736457162229bef899dfac"
+        },
+        {
+          "command": "python3 -m unittest discover -s tests -v",
+          "counts": "green",
+          "digest": "8c33967379bd2b4480ced8aef8c85381e1e29c1eeef3d43bfa55b469d83a95b6",
+          "kind": "green",
+          "outcome": "tests-passed",
+          "recorded_at": "2026-11-21T18:50:03+00:00",
+          "sequence": 2,
+          "test_set": "00de08c8421a65e3732c8385387366f36de4da0146736457162229bef899dfac"
+        }
+      ],
+      "status": "in-progress",
+      "unit": "greeter@1"
+    }
+  ]
+}
+```
+
+`current_pack_green` reports the evidence predicate used at `standard` and `high`.
+On a readable chain with a true predicate, `counts` marks the latest explicit GREEN for the
+current test set and the latest preceding RED for that set, if present. Other records have an
+empty `counts` string. A command-line note compares the stored text, including any redactions.
+Comparing the tests the two commands actually ran is deferred to `vouch_mk2-inv.4`.
+
+If a chain is unreadable, its unit has a nonempty `chain_error`, empty `records` and `notes`,
+and the snapshot's `current_pack_green` value. The CLI prints the document and exits 1 if it
+contains any chain error. An unknown `--unit` exits 2 and names the requested unit on stderr.
+
 ## Lifecycle `--json`
 
 `python3 vouch.lock specify --root .vouch --name greeter --version 1 --json` on the new store
@@ -190,6 +247,7 @@ stdio. The store root is set at startup, and the read tools take no parameters. 
 | `status` | `revision` and `status`. The status object omits the CLI's `effects_required` field. |
 | `map` | Canonical system map, including units, dependency edges, deviations, releases, and evidence heads. |
 | `formal` | Bounded exploration results for the policy IR. This call does not record a certificate. |
+| `evidence` | Same object as CLI `show-evidence --json` without `--unit`. Any chain error also sets `isError: true`. |
 
 Example response to a `tools/call` request for `next`.
 
