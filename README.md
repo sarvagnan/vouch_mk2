@@ -26,8 +26,10 @@ The acceptance pack describes the work and holds the tests the unit is expected 
    dependencies are satisfied, and no blocking deviations remain.
    At the default `lightweight` tier, `publish` has no evidence gate; at `standard` and `high`
    it needs a GREEN for the current pack, after a RED for the same tests or an owner rebind,
-   and after any re-freeze that changed the pack. The
-   [tier guide](docs/concepts.md#assurance-tiers) covers the other gates and what the report checks.
+   and after any re-freeze that changed the pack.
+   "The same tests" means the same frozen test set; Vouch does not compare the commands that RED
+   and GREEN ran. The [tier guide](docs/concepts.md#assurance-tiers) covers the other gates and
+   what the report checks.
 
 If a frozen test is wrong, the implementer opens a deviation and the acceptance owner decides
 whether to amend the pack or keep it. A reviewer can read the frozen tests and assess whether

@@ -1963,3 +1963,14 @@ review, `vouch_mk2-inv`). One unit, `claim-corrections@1` (`vouch_mk2-inv.1`).
   a full-suite GREEN (this project's own practice), breaks existing stores and the evidence-bearing
   formal universes, treats `<redacted>` positions as equal, and `true` run twice still passes.
 
+**D-48 note (2026-11-21, owner adjudication of the review).** Two pack-defect deviations amended
+only the spec of `claim-corrections@1`; the tests did not change. DEV-cc-01 (pack/2, from Sol): a
+real `upgrade` opens the store writable before the guard runs, so writable-open housekeeping can
+create `.lock` and remove leftover temporary files before a refusal; the Promise now says "before
+any migration write". DEV-cc-02 (pack/3, from Astra's review): that housekeeping also rolls back an
+interrupted merge transaction whose saved state matches `state.json`, so a hand-made transaction
+can make it unlink the event objects before the guard runs and the upgrade proceeds (the read-only
+dry run refuses). Adjudicated under the Limits set before review as a hand edit that forges the
+signals away: building that transaction takes the same write access as deleting the objects by
+hand. It belongs to `vouch_mk2-22a`; `claim-boundary.md` says so.
+

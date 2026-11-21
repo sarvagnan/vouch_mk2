@@ -52,9 +52,16 @@ wait on a blocking exclusive lock. Read-only handles never acquire that lock.
   record.
 - An interrupted write before the swap can leave inert, unreferenced objects and temporary
   transaction files that are unreachable from the authoritative state.
-- An opportunistic cleanup reclaims those files on the next writable open, skipping cleanup while
-  another writer holds the lock. Because of this, the store does not guarantee byte identity after
-  `SIGKILL`: its bytes may differ until cleanup runs.
+- On the next writable open, cleanup runs only if it can take the writer lock immediately. It
+  removes leftover temporary files and interrupted merge transaction directories. If `state.json`
+  still matches the pre-merge state, cleanup also removes the supporting objects that the
+  transaction placed.
+- The event-object sweep is best-effort. It removes canonical event objects unreachable from the
+  current event chain. It skips the scan if the store format differs from the current format,
+  the state or chain cannot be read, or the object directory's modification time is no later than
+  `state.json`'s.
+- Other unreferenced objects, such as evidence and pack objects, stay in the store as inert files.
+  After `SIGKILL`, the store can differ from its pre-write state even after cleanup.
 - A caught merge failure whose state is still unchanged removes the exact objects it created
   before releasing the writer lock.
 
@@ -81,12 +88,15 @@ wall-clock order: Vouch has no independent monotonic trust root to establish whe
 events really happened. Run-ID and anchor claims are the only external ties, and they remain
 claims. An anchor labeled "advanced by workflow run N" only repeats what was recorded.
 
-**Upgrading a pre-log store to format 3:**
-- Upgrading to format 3 writes a pre-log checkpoint containing the entire asserted snapshot as the
-  first record. Everything before the checkpoint is attested rather than verified, and
-  replay proves nothing about pre-log history.
-- The upgrader refuses format 3 if the raw document still has an `event_head` key or if a
-  canonical event object already exists.
+**Upgrading a pre-log store:**
+- Upgrading a store from format 3 or older writes a pre-log checkpoint at the step from
+  format 3 to format 4. The first record contains the entire asserted snapshot. Everything before
+  the checkpoint is attested rather than verified, and replay proves nothing about pre-log history.
+- The upgrader refuses a store that declares a format below 4 if its raw `state.json` still has an
+  `event_head` key or a canonical event object already exists. A real upgrade judges the store as
+  the writable open's cleanup leaves it, so a hand-made merge transaction that makes that cleanup
+  remove the event objects has the same effect as deleting them by hand. `upgrade --dry-run` opens
+  the store read-only and does no cleanup.
 - `state-format.json` records the highest format the store has held. It is strictly decoded,
   raised under the writer lock, and replaced atomically using descriptor-relative calls with
   fsyncs. `upgrade` refuses a lower format even if both event-log signals are gone.
@@ -121,6 +131,9 @@ bump is not refused.
   digest; checks name it and never count it as current-pack GREEN.
 - A re-freeze that changes any bound pack file also requires a GREEN recorded after the re-freeze;
   RED stays keyed to the test-set digest. Identical-byte re-freezes keep earlier evidence.
+
+The publication gates compare the frozen test set, not the command: a GREEN can run a different
+command from the RED before it.
 
 **Command validation and argument redaction:**
 - The CLI validates the exact command descriptor before opening the store or starting the child,
@@ -206,9 +219,12 @@ bypass, or using GitHub App credentials so independent forge checks run on it, i
 organization's choice.
 
 **What the workflow does not cover:** The workflow does not verify the GitHub identity behind run
-IDs, configure required checks or branch protection, prove that the workflow file is unchanged, or
-give forks write access to the base repository. Forge and runner identity, artifact delivery,
-required checks, and branch protection are organizational governance and trust-root concerns.
+IDs, configure required checks or branch protection, or prove that the workflow file is unchanged.
+Forge and runner identity, artifact delivery, required checks, and branch protection are
+organizational governance and trust-root concerns.
+
+By design, the generated workflow never anchors from a fork, so a fork's work is anchored only
+after it is merged into the base repository.
 
 ## Merging stores
 

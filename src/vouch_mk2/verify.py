@@ -1239,7 +1239,7 @@ def _refuse_event_log_downgrade_signals(
             f"declared state_format {raw_format} is lower than the store's "
             f"high-water mark {high_water}"
         )
-    if raw_format == 3:
+    if raw_format == 3 or (type(raw_format) is int and 0 <= raw_format < 3):
         if "event_head" in document:
             found.append("raw state.json contains an 'event_head' key")
         event_objects = store.canonical_object_digests(ArtifactKind.EVENT)

@@ -10,10 +10,14 @@ under which it refuses and adds no read or write.
 
 ## Promise
 
-`upgrade` (and `upgrade --dry-run`) refuses, before changing any byte, a store whose raw
+`upgrade` (and `upgrade --dry-run`) refuses, before any migration write, a store whose raw
 `state.json` declares a format below 4 (including a missing `state_format`, format 0) while its raw
 document still has an `event_head` key or a canonical event object exists, with the existing
-refusal and its git-history recovery hint. A genuine pre-log store, which has neither signal,
+refusal and its git-history recovery hint. The refused upgrade leaves `state.json`, every object
+and the format mark unchanged; opening the store for a real upgrade still does the housekeeping
+every writable open does (creating `.lock`, removing leftover temporary files, rolling back an
+interrupted merge transaction whose saved state still matches), and the refusal judges the store
+as that housekeeping leaves it. The dry run opens the store read-only and does no housekeeping. A genuine pre-log store, which has neither signal,
 upgrades as before. `docs/claim-boundary.md` says exactly what the cleanup on a writable open
 removes and that other unreferenced objects stay; names the step from format 3 to format 4 as the
 one that writes the pre-log checkpoint and every format below 4 as covered by the refusal; says the
@@ -30,7 +34,8 @@ Each test fails before the change for the stated reason, except the guards.
   (key removed), 1 or 2; in the `event_head` cases its event objects are deleted and the key kept,
   in the `event object` cases the key is removed and the objects kept, so each case carries one
   signal. `upgrade` exits 2, its output names the signal (`event_head` or `event object`) and
-  `git history`, no file under the store changes, and no mark is written. *Before:* `upgrade`
+  `git history`, no file under the store changes (the scenario has no leftover temporary files;
+`.lock` is excluded), and no mark is written. *Before:* `upgrade`
   exits 0, runs the steps up to the current format and mints a fresh pre-log checkpoint over the
   existing log.
 - **R2 — The dry run refuses the same.** `test_the_dry_run_refuses_the_same_rebaseline` (two
@@ -91,4 +96,27 @@ A review blocks only on: a reachable store with a format below 4 and an event-lo
 `upgrade` or `upgrade --dry-run` accepts or partly writes; a genuine pre-log store (no signal) that
 is now refused; a behavioural statement in a changed sentence that is false of the code; or a
 pinned phrase removed. Hand edits that also forge the signals away (deleting both the key and every
-event object along with the mark) are `vouch_mk2-22a`'s, not this unit's. Wording is a note.
+event object along with the mark) are `vouch_mk2-22a`'s, not this unit's; a hand-made merge
+transaction that makes the writable open's rollback remove the event objects is such an edit
+(DEV-cc-02). Wording is a note.
+
+## Amended by DEV-cc-01 (pack/2, 2026-11-21)
+
+Sol's implementation (deviation, pack defect): the Promise said a refused upgrade changes no byte,
+but the CLI opens the store writable before `upgrade_store` runs, and every writable open may
+create `.lock` and remove leftover temporary files before the refusal (the ground rules forbid
+changing that). pack/2 narrows the Promise to "before any migration write": `state.json`, every
+object and the format mark stay unchanged, and the writable-open housekeeping is named. R1's note
+records that its scenario has no leftover temporary files. The tests are unchanged.
+
+## Amended by DEV-cc-02 (pack/3, 2026-11-21)
+
+Astra's review (REWORK, one HIGH): on a format-2 store whose `event_head` key was removed by hand,
+a hand-made merge transaction (its saved state equal to the edited `state.json`, every canonical
+object hard-linked into it) made the real upgrade's writable open roll the transaction back and
+unlink the event objects before the guard ran, so `upgrade` exited 0; the read-only dry run
+refused. The owner adjudicated it under the Limits set before review: building that transaction
+takes the same write access as deleting the event objects by hand, so it is a hand edit that
+forges the signals away (`vouch_mk2-22a`). pack/3 makes the Promise name merge rollback as part of
+writable-open housekeeping, say that the refusal judges the store as that housekeeping leaves it,
+and say the dry run does none; the Limits name the case. The tests are unchanged.
