@@ -25,7 +25,6 @@ from vouch_mk2.store import (
 )
 from vouch_mk2.store.upgrade import UPGRADERS, UpgradeRefused, upgrade_document
 from vouch_mk2.verify import run_artifact_checks
-from vouch_mk2.store.event_log import commit_pre_log_checkpoint as commit_snapshot_fixture
 
 
 def _make_stale_store(root: Path) -> bytes:
@@ -33,6 +32,7 @@ def _make_stale_store(root: Path) -> bytes:
     state = root / "state.json"
     document = json.loads(encode_snapshot(Snapshot()))
     del document["state_format"]
+    del document["event_head"]
     legacy = (
         json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         .encode("utf-8")
@@ -194,15 +194,12 @@ def test_upgraded_format2_legacy_chain_has_an_honest_empty_summary(
         ),
         evidence_heads=(EvidenceHead("u", digest, 1, "GENESIS", "v1"),),
     )
-    with Store.init(str(root)) as store:
-        snapshot = commit_snapshot_fixture(
-            store,
-            snapshot,
-            objects=((ArtifactKind.EVIDENCE, data),),
-        )
+    with Store.init(str(root)) as store, store.write_locked():
+        store.put_object(ArtifactKind.EVIDENCE, data)
     (root / STATE_FORMAT_HIGH_WATER_FILE).unlink()
-    document = json.loads((root / "state.json").read_bytes())
+    document = json.loads(encode_snapshot(snapshot))
     document["state_format"] = 2
+    del document["event_head"]
     for head in cast(list[dict[str, object]], document["evidence_heads"]):
         for field in (
             "unit_version",

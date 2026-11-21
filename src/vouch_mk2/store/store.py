@@ -1183,9 +1183,10 @@ class Store:
 
         The ordering is deliberately asymmetric: a committed snapshot can never
         name a missing object, while a killed pre-swap writer may leave inert,
-        unreachable content-addressed objects for the next writable open to
-        sweep. No partial semantic state is published, but post-kill byte identity
-        is not promised. Advancing a current-format revision requires the matching
+        unreachable content-addressed objects. The next writable open can sweep
+        unreachable event objects, and other unreferenced objects can remain.
+        No partial semantic state is published, but post-kill byte identity is
+        not promised. Advancing a current-format revision requires the matching
         event chain extension in ``objects``; unchanged-revision upgrade/repair
         re-encodes remain legal without a new record.
         """
