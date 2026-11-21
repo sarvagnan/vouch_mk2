@@ -1063,7 +1063,7 @@ def _check_formal_certificate(store: Store, snapshot: Snapshot) -> CheckResult:
             "strictly; checker identity is current; recorded tables resolve and "
             "equal freshly emitted tables; invariant/witness rows cover the current "
             "registries and are all true; residual not performed by `check`: "
-            "regenerating the reachable relations and executing M1-M11 and the "
+            "regenerating the reachable relations and executing M1-M12 and the "
             "witness mutations over them — that is `vouch-mk2 formal`'s job"
         ),
     )

@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationAmended","event_format":2,"pack_digest":"","payload":{"amendment_version":"pack/3","deviation_id":"DEV-ffg-02","impact_set":["formal-fresh-green"],"release_impact_set":[]},"prev":"5ebcd9b567fb1576c37d2db2f7c90b5626fa0decbc60af97971ad986afcfe69c","recorded_at":"2026-11-21T08:56:32+00:00","revision":1290,"run_id":""}

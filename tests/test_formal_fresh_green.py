@@ -19,7 +19,16 @@ from functools import cache
 from pathlib import Path
 
 from vouch_mk2.cli import main
-from vouch_mk2.core import Snapshot, Tier, Unit, UnitStatus
+from vouch_mk2.core import (
+    Accepted,
+    RecordEvidence,
+    Snapshot,
+    Tier,
+    Unit,
+    UnitStatus,
+    apply,
+    decide,
+)
 from vouch_mk2.formal import UNIVERSES, Relation, Universe, explore, state_fingerprint
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.explore import emit_tables
@@ -393,3 +402,94 @@ def test_the_docs_state_twelve_invariants_and_the_refreeze_universe() -> None:
     readme = _normalized(ROOT / "README.md")
     assert "checking twelve hand-written invariants" in readme
     assert "eleven hand-written" not in readme
+
+
+# R12 (pack/2, DEV-ffg-01; pack/3, DEV-ffg-02)
+
+
+def _expected_evidence_rows(relation: Relation) -> set[tuple[str, str, str, str]]:
+    """Recompute every record-evidence edge's row through decide() and apply() directly."""
+    rows: set[tuple[str, str, str, str]] = set()
+    commands = [
+        command
+        for command in _refreeze_universe().commands
+        if isinstance(command, RecordEvidence)
+    ]
+    for state, snapshot in relation.representatives:
+        for command in commands:
+            decision = decide(snapshot, command)
+            if isinstance(decision, Accepted):
+                target = state_fingerprint(apply(snapshot, decision.events))
+                rows.add(
+                    (state, target, command.event.kind.value, command.event.pack_digest)
+                )
+    return rows
+
+
+def _with_rows(
+    relation: Relation, edge: tuple[str, str, str], forged: Snapshot, kinds: tuple[tuple[str, str], ...]
+) -> Relation:
+    source, _command, target = edge
+    mutated = _redirect(relation, edge, forged)
+    fingerprint = state_fingerprint(forged)
+    return replace(
+        mutated,
+        evidence_kinds=tuple(
+            sorted(
+                {row for row in relation.evidence_kinds if (row[0], row[1]) != (source, target)}
+                | {(source, fingerprint, kind, digest) for kind, digest in kinds}
+            )
+        ),
+    )
+
+
+def test_m12_requires_the_clearing_record_to_be_a_green_for_the_current_test_set() -> None:
+    m12 = _m12()
+    relation = _relation()
+    snapshots = _snapshots(relation)
+    evidence_edges = {
+        (source, target)
+        for source, command, target in relation.transitions
+        if command == mk2.CMD_RECORD_EVIDENCE
+    }
+    assert set(relation.evidence_kinds) == _expected_evidence_rows(relation)
+    rows = {(row[0], row[1]): (row[2], row[3]) for row in relation.evidence_kinds}
+    assert len(relation.evidence_kinds) == len(evidence_edges)
+    assert set(rows) == evidence_edges
+    for source, target in evidence_edges:
+        if _on(snapshots[source]) and not _on(snapshots[target]):
+            unit = _on(snapshots[source])[0]
+            assert rows[(source, target)] == ("green", unit.acceptance_test_set_digest)
+    edge = next(
+        (
+            (source, command, target)
+            for source, command, target in relation.transitions
+            if command == mk2.CMD_RECORD_EVIDENCE
+            and rows[(source, target)][0] == "refactor"
+            and _on(snapshots[source])
+        ),
+        None,
+    )
+    assert edge is not None, "no REFACTOR is recorded while the requirement is on"
+    source, _command, target = edge
+    after = snapshots[target]
+    assert _on(after), "a REFACTOR turned the requirement off"
+    unit = _on(after)[0]
+    current = unit.acceptance_test_set_digest
+    before_head = snapshots[source].evidence_head_ref(unit.ref())
+    after_head = after.evidence_head_ref(unit.ref())
+    assert after_head is not None and before_head is not None
+    assert after_head.head_sequence > before_head.head_sequence
+    assert any(
+        summary.pack_digest == current and summary.green
+        for summary in after_head.pack_summaries
+    ), "the REFACTOR edge must keep an earlier GREEN for the current test set"
+    forged = _with_unit(after, unit, refreeze_green_required=False)
+    other = "0" * 64
+    assert other != current
+    for kinds in (
+        (("refactor", current),),
+        (("refactor", current), ("green", other)),
+        (("green", other),),
+    ):
+        assert m12.check(_with_rows(relation, edge, forged, kinds)), kinds

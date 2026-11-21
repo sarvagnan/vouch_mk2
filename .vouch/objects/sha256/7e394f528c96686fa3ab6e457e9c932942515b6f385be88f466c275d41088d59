@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","event_format":2,"pack_digest":"","payload":{"deviation_id":"DEV-ffg-01","deviation_type":"pack-defect","unit":{"name":"formal-fresh-green","version":"1"}},"prev":"f55eb487008b4441dbb3166aa47f54c2bfab95af092bb9a0b6393ce72806c509","recorded_at":"2026-11-21T08:33:10+00:00","revision":1272,"run_id":""}

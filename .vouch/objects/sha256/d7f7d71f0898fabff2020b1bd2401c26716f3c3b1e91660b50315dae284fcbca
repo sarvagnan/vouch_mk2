@@ -1,0 +1,1 @@
+{"actor":"claude","event":"FormalCertificateRecorded","event_format":2,"pack_digest":"","payload":{"certificate_digest":"faadec2bcbebb7576aafbdc2227591dca7521de2196ca76a3171ed72bed02651"},"prev":"d3ee9c60443b3432d13d06b47852a30bb3cd506b24a22417249c091d42c1b803","recorded_at":"2026-11-21T08:51:52+00:00","revision":1285,"run_id":""}

@@ -9,6 +9,7 @@ from vouch_mk2.core import (
     Accepted,
     Deviation,
     EvidenceHead,
+    EvidenceRecorded,
     FreezeAcceptance,
     Release,
     Snapshot,
@@ -43,6 +44,8 @@ class Relation:
     initial: str
     representatives: tuple[tuple[str, Snapshot], ...]
     offered_freeze_labels: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # (source, target, kind, pack_digest) rows outside the encoded relation.
+    evidence_kinds: tuple[tuple[str, str, str, str], ...] = ()
 
 
 class StateLimitExceeded(Exception):
@@ -191,6 +194,7 @@ def explore(universe: Universe) -> Relation:
     frontier = [initial]
     cursor = 0
     transitions: set[tuple[str, str, str]] = set()
+    evidence_kinds: list[tuple[str, str, str, str]] = []
     while cursor < len(frontier):
         source = frontier[cursor]
         cursor += 1
@@ -202,7 +206,19 @@ def explore(universe: Universe) -> Relation:
             target_snapshot = apply(snapshot, decision.events)
             target = state_fingerprint(target_snapshot)
             target = canonical_states.setdefault(target, target)
-            transitions.add((source, command.ir_command, target))
+            label = command.ir_command
+            transitions.add((source, label, target))
+            if label == mk2.CMD_RECORD_EVIDENCE:
+                for event in decision.events:
+                    if isinstance(event, EvidenceRecorded):
+                        evidence_kinds.append(
+                            (
+                                source,
+                                target,
+                                event.event.kind.value,
+                                event.event.pack_digest,
+                            )
+                        )
             if target in representatives:
                 continue
             if len(representatives) >= _STATE_LIMIT:
@@ -231,6 +247,7 @@ def explore(universe: Universe) -> Relation:
                 }.items()
             )
         ),
+        evidence_kinds=tuple(sorted(evidence_kinds)),
     )
 
 

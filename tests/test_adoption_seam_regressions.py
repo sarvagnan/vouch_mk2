@@ -533,7 +533,7 @@ def test_standard_tier_cheap_formal_certificate_passes_with_explicit_residual_an
         assert verified in passed.detail
     for residual in (
         "regenerating the reachable relations",
-        "executing M1-M11",
+        "executing M1-M12",
         "witness mutations over them",
         "`vouch-mk2 formal`",
     ):

@@ -33,7 +33,7 @@ that ran, or the run fails. Threat levels come from [threat-model.md](threat-mod
 | Projection freshness | `check.map-freshness` and `check.context-freshness` regenerate projections and byte-compare them. A stale projection is a `FAIL`, not a broken commit. | 1 |
 | Registry completeness | Any check declared in the IR without an evaluator fails CI on the mk2 repository. | 1 |
 | Recorded formal certificate | Cheap verification of a recorded certificate; see [Formal certificate](#formal-certificate). | 1 |
-| Formal invariants over the bounded model | `vouch-mk2 formal` exhaustively regenerates the bounded relations, evaluates M1–M11, and runs the private mutation witnesses; see [Formal certificate](#formal-certificate). | 1 |
+| Formal invariants over the bounded model | `vouch-mk2 formal` exhaustively regenerates the bounded relations, evaluates M1–M12, and runs the private mutation witnesses; see [Formal certificate](#formal-certificate). | 1 |
 
 ## Store writes
 
@@ -285,11 +285,15 @@ If all of those hold, `check.formal-certificate` reports `PASS` for that narrowe
 any fails, it reports `FAIL` at every tier.
 
 That `PASS` does not mean `check` regenerated the relations, recomputed their digests or counts,
-ran M1–M11, or reran the witness mutations. `vouch-mk2 formal` performs that full exploration over
-`core-v1` and `history-v1`. The generated workflow runs it after `check --ci` on every CI run, and
+ran M1–M12, or reran the witness mutations. `vouch-mk2 formal` performs that full exploration over
+every formal universe. The generated workflow runs it after `check --ci` on every CI run, and
 the read-only MCP `formal` summary runs the same exploration (D-7). Only a passing
 `vouch-mk2 formal --record --root ROOT` records results (tables, relation digests and counts, and
 the certificate). MCP `check`, CLI `check`, and hooks never explore.
+
+The `refreeze-v1` formal universe reaches D-36's fresh-GREEN requirement at the `standard` tier,
+and M12 checks that a changed pack turns it on, that no unit publishes while it is on, and that
+only a GREEN for the current pack turns it off.
 
 With no recorded certificate, the row is `NOT_APPLICABLE` under
 `subjects-present: formal-certificate`. Publishing at `high` separately requires a recorded

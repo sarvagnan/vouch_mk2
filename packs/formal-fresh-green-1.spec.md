@@ -13,13 +13,17 @@ network read or write.
 
 `vouch-mk2 formal` explores a new universe, `refreeze-v1`, that starts at the `standard` tier and
 reaches D-36's fresh-GREEN requirement: a unit re-frozen with a bound inventory different from its
-last bound inventory waits at `done-pending-acceptance` with the requirement on, and publishes
-only after a recorded GREEN turns it off. A new invariant, M12, runs in every universe that runs
+last bound inventory waits at `done-pending-acceptance` with the requirement on, a REFACTOR record
+leaves it on, and the unit publishes only after a recorded GREEN turns it off. Each explored
+relation carries, outside its digest, the evidence kind recorded by every `record-evidence`
+transition (`Relation.evidence_kinds`, rows `(source, target, kind, pack_digest)`: the
+`EvidenceKind` value and the evidence's test-set digest). A new invariant, M12, runs in every universe that runs
 M1–M11 in full, in `effects-v1`, and in `refreeze-v1`. It fails a relation in which (set) a
 transition other than an owner rebind binds a unit to an inventory different from its last bound
 inventory and leaves the requirement off, (honour) a unit enters `published` at `standard` or
 `high` while its requirement is on, or (clear) the requirement turns off on a transition that does
-not record a GREEN for the unit's current test set. One private witness, W12, discriminates M12.
+not record a GREEN (by its recorded evidence kind and test-set digest) for the unit's current
+test set. One private witness, W12, discriminates M12.
 The certificate check's residual and the docs name M1–M12. `decide()`, `apply()`, the state and
 event formats, and the relations of `core-v1`, `history-v1`, `tier-v1` and `effects-v1` do not
 change.
@@ -28,7 +32,7 @@ change.
 
 - `_relation()` explores `refreeze-v1` once per process. A state "has the requirement on" when a
   unit in its snapshot has `refreeze_green_required`.
-- The mutation tests (R5–R7) change only the M12 input they name: one transition's target is
+- The mutation tests (R5–R7, R12) change only the M12 input they name: one transition's target is
   replaced by a forged copy, or one forged transition is added. M12 must hold on the unmutated
   relation and fail on each mutated one; they do not assert M12's violation text.
 
@@ -83,6 +87,18 @@ Each RED test states why it fails before the change.
   contains `checking twelve hand-written invariants` and not `eleven hand-written`. *Before:* the
   docs say M1–M11 and eleven.
 
+- **R12 — M12 (clear) needs a GREEN for the current test set (pack/2, DEV-ffg-01; pack/3,
+  DEV-ffg-02).** `test_m12_requires_the_clearing_record_to_be_a_green_for_the_current_test_set`.
+  `refreeze-v1`'s `evidence_kinds` equals the rows recomputed independently by calling `decide()`
+  and `apply()` with each of the universe's `RecordEvidence` commands from every explored state,
+  one row per `record-evidence` transition; every transition that turns the requirement off
+  records `("green", <the unit's current test-set digest>)`; some `refactor` transition leaves a
+  state with the requirement on, keeps it on, advances the head and keeps an earlier GREEN for the
+  current test set. That edge is redirected to a copy of its target with the requirement off, and
+  M12 fails with each of three row sets: a REFACTOR for the current test set; that REFACTOR plus a
+  GREEN for another test set; a GREEN for another test set alone. *Before:* `Relation` has no
+  `evidence_kinds` (pack/2), and its rows carry no test-set digest (pack/3).
+
 There are no guards: every test needs the new universe, the new invariant or the new wording.
 
 ## Ground rules
@@ -93,7 +109,8 @@ There are no guards: every test needs the new universe, the new invariant or the
   `core-v1`'s relation like the others, so it forges its own gated states.
 - `decide()`, `apply()`, `core/`, `store/`, the codec, `CHECKER_VERSION`, and the state and event
   formats do not change. `core-v1`, `history-v1`, `tier-v1` and `effects-v1` keep their states,
-  transitions and relation digests.
+  transitions and relation digests; `evidence_kinds`, like `offered_freeze_labels`, is not part of
+  the encoded relation.
 - Frozen tests of published units that pin facts this unit changes are adapted by the owner, not
   the implementer: `effect-declarations@1` (the list of universe names) and `formal-memory@1` (the
   recorded relation digests and certificate digest). The implementer reports which fail and why,
@@ -106,3 +123,19 @@ The owner re-records mk2's certificate with `vouch-mk2 formal --record --root .v
 in a scratch tree that each of three `decide()` mutants (the publish gate ignores the requirement;
 the requirement is never turned on; any recorded evidence turns it off) makes `vouch-mk2 formal`
 fail on `refreeze-v1`.
+
+## Amended by DEV-ffg-01 (pack/2, 2026-11-21)
+
+Astra's review (REWORK, one HIGH) found that M12's clear part accepted a REFACTOR that wrongly
+cleared the requirement: a REFACTOR advances the head and keeps the earlier GREEN summary, so the
+snapshots alone cannot tell it from a GREEN. pack/2 adds the per-edge evidence kind to the relation
+(outside its digest), a REFACTOR to `refreeze-v1`, and R12. R1–R11 are unchanged.
+
+## Amended by DEV-ffg-02 (pack/3, 2026-11-21)
+
+Astra's re-check (REWORK, one MEDIUM, one LOW): M12 accepted a clear on an edge that recorded a
+REFACTOR for the current test set and a GREEN for another one, so it did not check what the
+Promise says ("a GREEN for the unit's current test set"); and R12 had no independent oracle for the
+rows, so a collector that relabelled RED rows as GREEN passed. pack/3 adds the test-set digest to
+each row, recomputes the rows through `decide()` and `apply()` in R12, and adds the two forged row
+sets. The rows stay outside the encoded relation, so no relation digest or certificate moves.

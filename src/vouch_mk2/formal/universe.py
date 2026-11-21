@@ -367,4 +367,98 @@ EFFECTS_V1 = Universe(
     ),
 )
 
-UNIVERSES: tuple[Universe, ...] = (CORE_V1, HISTORY_V1, TIER_V1, EFFECTS_V1)
+_REFREEZE_UNIT = UnitRef(name="u", version="v1")
+_REFREEZE_TEST_SET = "d" * 64
+_REFREEZE_REFACTOR_DIGEST = "3" * 64
+
+# M6 would flag units marked done without evidence once the single deviation
+# id has been used up. That dead end comes from the universe's command bound.
+REFREEZE_V1 = Universe(
+    name="refreeze-v1",
+    commands=(
+        SpecifyUnit(name="u", version="v1"),
+        FreezeAcceptance(name="u", pack_version="p1"),
+        FreezeAcceptance(name="u", pack_version="p2"),
+        # The inventory can change without changing RED's test-set binding.
+        BindPack(name="u", pack_digest="e" * 64, test_set_digest=_REFREEZE_TEST_SET),
+        BindPack(name="u", pack_digest="f" * 64, test_set_digest=_REFREEZE_TEST_SET),
+        MarkReady(name="u"),
+        StartWork(name="u"),
+        RecordEvidence(
+            event=EvidenceEvent(
+                unit=_REFREEZE_UNIT,
+                sequence=1,
+                parent="GENESIS",
+                kind=EvidenceKind.RED,
+                command_line="formal refreeze red",
+                outcome=EvidenceOutcome.TESTS_FAILED,
+                recorded_at="2026-11-21T00:00:00Z",
+                pack_digest=_REFREEZE_TEST_SET,
+            ),
+            event_digest=_FIRST_DIGEST,
+        ),
+        RecordEvidence(
+            event=EvidenceEvent(
+                unit=_REFREEZE_UNIT,
+                sequence=2,
+                parent=_FIRST_DIGEST,
+                kind=EvidenceKind.GREEN,
+                command_line="formal refreeze green",
+                outcome=EvidenceOutcome.TESTS_PASSED,
+                recorded_at="2026-11-21T00:01:00Z",
+                pack_digest=_REFREEZE_TEST_SET,
+            ),
+            event_digest=_SECOND_DIGEST,
+        ),
+        RecordEvidence(
+            event=EvidenceEvent(
+                unit=_REFREEZE_UNIT,
+                sequence=3,
+                parent=_SECOND_DIGEST,
+                kind=EvidenceKind.REFACTOR,
+                command_line="formal refreeze refactor",
+                outcome=EvidenceOutcome.TESTS_PASSED,
+                recorded_at="2026-11-21T00:02:00Z",
+                pack_digest=_REFREEZE_TEST_SET,
+            ),
+            event_digest=_REFREEZE_REFACTOR_DIGEST,
+        ),
+        RecordEvidence(
+            event=EvidenceEvent(
+                unit=_REFREEZE_UNIT,
+                sequence=4,
+                parent=_REFREEZE_REFACTOR_DIGEST,
+                kind=EvidenceKind.GREEN,
+                command_line="formal refreeze fresh green",
+                outcome=EvidenceOutcome.TESTS_PASSED,
+                recorded_at="2026-11-21T00:03:00Z",
+                pack_digest=_REFREEZE_TEST_SET,
+            ),
+            event_digest="4" * 64,
+        ),
+        MarkDone(name="u"),
+        Publish(name="u"),
+        OpenDeviation(
+            deviation_id="d1",
+            deviation_type=DeviationType.PACK_DEFECT,
+            unit=_REFREEZE_UNIT,
+        ),
+        AmendDeviation(deviation_id="d1", amendment_version="v2"),
+        CloseDeviation(deviation_id="d1"),
+        Respecify(name="u"),
+    ),
+    initial=Snapshot(tier=Tier.STANDARD),
+    invariant_ids=tuple(
+        invariant.invariant_id
+        for invariant in INVARIANTS
+        if invariant.invariant_id != "M6.no-nonterminal-deadlock"
+    ),
+)
+
+UNIVERSES: tuple[Universe, ...] = (
+    CORE_V1,
+    HISTORY_V1,
+    TIER_V1,
+    EFFECTS_V1,
+    REFREEZE_V1,
+)
