@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_rebind_fresh_green.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"80bb01ecc05b7f4b5b834b8d71b7ca096eb91164770d8d3123af5a2d2c96d612","parent":"GENESIS","recorded_at":"2026-11-22T10:52:00+00:00","sequence":1,"unit":{"name":"rebind-fresh-green","version":"1"}}
