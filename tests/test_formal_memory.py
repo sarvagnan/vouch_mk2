@@ -30,11 +30,11 @@ _RECORDED_RELATION_DIGESTS = {
     "effects-v1": "af0736c6eaa83131b11ba402e3fbb89e69d935905f82eaa300867a0acff962df",
     "history-v1": "eff8e3a3ec66ad0a4b543bff6a80bdb48cd65416f7076e7ad0137eda46929c39",
     "refreeze-v1": "0ea42aaa5885560c6cad99be599fe37587b5cc5318b76c96731cfd8c7d432228",
-    "tier-v1": "5822a72ba21a762f5b1531949bdd1d814509bfaeeaaf0066805b37d4d9ad422e",
+    "tier-v1": "6b9712c61f993c175166cf352f16cff3f0f2489afa2e1eafef153e280db1ec0c",
 }
 
 # The digest of that whole recorded certificate (re-recorded for D-46's universe and M12).
-_RECORDED_CERTIFICATE_DIGEST = "faadec2bcbebb7576aafbdc2227591dca7521de2196ca76a3171ed72bed02651"
+_RECORDED_CERTIFICATE_DIGEST = "fab0cfc293983d42326119ab517ad48f4a11570a0ad0e0e69232a5a100cbc029"
 
 _AWKWARD = (
     'quote " backslash \\ slash /',

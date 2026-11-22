@@ -168,6 +168,10 @@ files too.
 - Afterwards, `check.evidence-chains` requires a fresh GREEN for the new test-set digest at every
   tier (no RED needed), and `check.pack-bound` names rebound units and enforces that GREEN at
   `high`.
+- A rebind after publication turns on the fresh-GREEN requirement; while the unit stays active,
+  only a passing GREEN for the current test set turns it off, and a REFACTOR does not.
+  Superseding a rebound unit ends its requirement. This rule applies when Vouch folds a rebind
+  event. A pre-log checkpoint keeps the state it captured.
 - Each rebind must name the unit's current inventory and test set. A re-freeze starts a new pack
   generation, so the first rebind after it does not continue an earlier generation's rebinds.
 
@@ -325,6 +329,9 @@ the certificate). MCP `check`, CLI `check`, and hooks never explore.
 The `refreeze-v1` formal universe reaches D-36's fresh-GREEN requirement at the `standard` tier,
 and M12 checks that a changed pack turns it on, that no unit publishes while it is on, and that
 only a GREEN for the current pack turns it off.
+The `tier-v1` universe reaches the same requirement through a rebind. M12 includes rebinds in its
+inventory-change rule and excludes superseded targets from its GREEN requirement for clearing
+the flag.
 
 With no recorded certificate, the row is `NOT_APPLICABLE` under
 `subjects-present: formal-certificate`. Publishing at `high` separately requires a recorded

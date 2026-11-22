@@ -2067,3 +2067,61 @@ keep different run claims, so the evidence heads differ. The generated workflow 
 the default branch, so an ordinary pull-request branch does not produce this; it would take two
 stores anchored independently by CI. The check reports it, as the Promise requires; no change.
 
+## D-51 — A rebind after publication requires an explicit GREEN, through D-36's flag (2026-11-22)
+
+**Status:** decided 2026-11-22 by the user (`vouch_mk2-inv.5`; option "reuse D-36's flag" of
+three). One unit, `rebind-fresh-green@1`.
+
+- **The finding.** After a published unit's pack is rebound (`rebind-pack`, D-14 amendment) with
+  only the spec changed, a REFACTOR alone makes `current_pack_evidence_is_green` true: the
+  predicate requires the evidence head to move past the rebind boundary, and a REFACTOR moves it
+  while keeping the test set's cached green summary. The predicate feeds the publication gate,
+  the `standard`/`high` tier check of rebound packs, `next` and `show-evidence`. The documented
+  rule (`docs/claim-boundary.md`, `docs/concepts.md`) and `check.evidence-chains` already require
+  a fresh GREEN after a rebind, so the pure predicate disagreed with them. Found by Astra during
+  `show-evidence@1`; reproduced on scratch stores.
+- **Decision.** Folding a rebind sets the unit's existing `refreeze_green_required` flag (D-36),
+  and, as after a changed re-freeze, only an explicit passing GREEN recorded for the unit's
+  current test set clears it. The predicate already refuses while the flag is set, so a REFACTOR
+  no longer satisfies it after a rebind. No state or event format changes. Formal M12 (D-46) drops
+  its exemption for `rebind-pack`: a rebind that changes the bound inventory must turn the flag
+  on, like every other command that changes it. The certificate is re-recorded.
+- **Existing stores.** A store whose every rebind is already followed by a GREEN for the current
+  test set replays to the same state. A store caught between a rebind and its fresh GREEN when
+  the new code arrives fails `check.event-log` (the replay sets the flag the stored state lacks)
+  as well as `check.evidence-chains`, which already failed it, until that GREEN is recorded.
+- **Rejected.** Storing the sequence of the latest explicit GREEN in each test-set summary (a
+  state-format bump for the same behaviour). Leaving the gate and documenting the gap.
+
+**D-51 note (2026-11-22, owner, while writing the pack).** The reach is narrower than the finding
+says. A rebind needs a published unit, and a published unit is never published again, so the
+publication gate never sees a rebound unit. The store-level `check` already failed the case:
+`check.evidence-chains`, and at `high` the chain-walking part of `check.pack-bound`. What a
+REFACTOR alone satisfied was the pure predicate and its pure consumers: the snapshot-only
+`check.pack-bound` the warn-only hook runs, `show-evidence`'s `current_pack_green`, `next`, and
+the formal model, which never turned the flag on for a rebind. The decision stands: every view
+now agrees with the chain-walking checks.
+
+**D-51 note (2026-11-22, owner, after Astra's pre-freeze read).** Three refinements. (1)
+Superseding a unit whose binding is `rebound` clears its flag: a retired version takes no
+evidence and every chain check skips it, and without this an old store that rebound a version and
+then superseded it before a GREEN would replay to a flag its stored state lacks and fail
+`check.event-log` permanently. Units bound any other way keep the flag on supersession, so D-36's
+re-freeze histories replay unchanged; M12 does not count a supersession as clearing the
+requirement. (2) The rule applies to rebinds folded by the new code. Stored states are not
+rebuilt, a pre-log checkpoint keeps what it captured, and an old history whose replay now differs
+from its stored state (an active rebound unit still waiting for its GREEN, or, rarer, one
+respecified and published again with only a REFACTOR after the rebind) fails `check.event-log`
+until it agrees; that is the price of no format change. (3) Correction to the first note: a
+rebound unit can be respecified and published again (D-39), and then the flag carries through
+the re-freeze, so that publication needs the GREEN too.
+
+**D-51 note (2026-11-22, owner, after Astra's implementation review; DEV-rfg-01).** One more
+legacy history breaks, and no rule without a new field avoids it. At `lightweight`, a unit
+re-frozen with a changed pack (flag on, D-36), published without a GREEN, rebound and then
+superseded keeps the flag in a store the old code wrote, while the new fold clears it on the
+supersession of a rebound unit, so that store fails `check.event-log` for good (a superseded
+version takes no evidence). Dropping the supersession rule would instead break the more common
+history, a unit rebound with the flag off and superseded before a GREEN. The owner keeps the rule
+and accepts this loss under the no-format-change decision; a spec-only deviation (pack/2) states
+both cases in the Promise. The implementation is unchanged.

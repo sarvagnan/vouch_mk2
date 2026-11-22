@@ -471,7 +471,7 @@ def _advanced_green_for_test_set(
 
 
 def _fresh_green_after_refreeze(relation: Relation) -> tuple[str, ...]:
-    """mk2 M12, defined by DECISIONS.md D-36 and D-46."""
+    """mk2 M12, defined by DECISIONS.md D-36, D-46 and D-51."""
     representatives = _representatives(relation)
     green_records = {
         (source, target, pack_digest)
@@ -494,8 +494,7 @@ def _fresh_green_after_refreeze(relation: Relation) -> tuple[str, ...]:
                 continue
             inventory = current.acceptance_pack_digest
             if (
-                command != mk2.CMD_REBIND_PACK
-                and last_inventory
+                last_inventory
                 and inventory
                 and inventory != last_inventory
                 and not current.refreeze_green_required
@@ -515,12 +514,16 @@ def _fresh_green_after_refreeze(relation: Relation) -> tuple[str, ...]:
                     f"{command}: {ref.label()!r} entered published "
                     "while a fresh GREEN was required"
                 )
-            if not current.refreeze_green_required and (
-                command != mk2.CMD_RECORD_EVIDENCE
-                or (source, target, current.acceptance_test_set_digest)
-                not in green_records
-                or not _advanced_green_for_test_set(
-                    before, after, ref, current.acceptance_test_set_digest
+            if (
+                current.status is not UnitStatus.SUPERSEDED
+                and not current.refreeze_green_required
+                and (
+                    command != mk2.CMD_RECORD_EVIDENCE
+                    or (source, target, current.acceptance_test_set_digest)
+                    not in green_records
+                    or not _advanced_green_for_test_set(
+                        before, after, ref, current.acceptance_test_set_digest
+                    )
                 )
             ):
                 violations.append(
@@ -589,7 +592,7 @@ INVARIANTS: tuple[Invariant, ...] = (
     ),
     Invariant(
         "M12.fresh-green-after-refreeze",
-        "mk2 D-36: a changed inventory requires a fresh GREEN before gated publication.",
+        "mk2 D-36 and D-51: a changed inventory requires a fresh GREEN before gated publication.",
         _fresh_green_after_refreeze,
     ),
 )
