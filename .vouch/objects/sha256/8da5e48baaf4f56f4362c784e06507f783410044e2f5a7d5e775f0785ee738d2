@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitInvalidated","event_format":2,"pack_digest":"","payload":{"name":"rebind-fresh-green","trigger_deviation_id":"DEV-rfg-01"},"prev":"4d34a9bd037c5d9af484bc4dcc5c8bb323dfc11b3d950acf31e18c9c95927c6f","recorded_at":"2026-11-22T11:37:11+00:00","revision":1386,"run_id":""}

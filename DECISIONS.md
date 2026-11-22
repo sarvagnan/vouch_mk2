@@ -2115,3 +2115,13 @@ respecified and published again with only a REFACTOR after the rebind) fails `ch
 until it agrees; that is the price of no format change. (3) Correction to the first note: a
 rebound unit can be respecified and published again (D-39), and then the flag carries through
 the re-freeze, so that publication needs the GREEN too.
+
+**D-51 note (2026-11-22, owner, after Astra's implementation review; DEV-rfg-01).** One more
+legacy history breaks, and no rule without a new field avoids it. At `lightweight`, a unit
+re-frozen with a changed pack (flag on, D-36), published without a GREEN, rebound and then
+superseded keeps the flag in a store the old code wrote, while the new fold clears it on the
+supersession of a rebound unit, so that store fails `check.event-log` for good (a superseded
+version takes no evidence). Dropping the supersession rule would instead break the more common
+history, a unit rebound with the flag off and superseded before a GREEN. The owner keeps the rule
+and accepts this loss under the no-format-change decision; a spec-only deviation (pack/2) states
+both cases in the Promise. The implementation is unchanged.

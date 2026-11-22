@@ -180,7 +180,8 @@ class Unit:
     # Retained across respecify and label-only freeze; consumed when an inventory
     # is installed by freeze or bind-pack. Empty for legacy history.
     previous_acceptance_pack_digest: str = ""
-    # A changed re-freeze sets this until an explicit current-pack GREEN is folded.
+    # A changed re-freeze or rebind sets this. A passing current-pack GREEN or
+    # supersession of a rebound unit clears it.
     refreeze_green_required: bool = False
 
     def __post_init__(self) -> None:

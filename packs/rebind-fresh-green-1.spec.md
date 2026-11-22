@@ -31,16 +31,41 @@ transition turns it on. The formal run still passes every invariant and witness.
 
 The rule applies to rebind events folded by this code; stored states are not rebuilt, and a
 pre-log checkpoint keeps the state it captured. A store written before this unit replays the same
-as it is stored when each of its rebinds was followed by a passing GREEN for the then-current test
-set, or by the supersession of that rebound unit, before anything else depended on the flag. When
-a replayed rebind event leaves an active unit waiting for that GREEN, its replayed flag is set
-while its stored flag is not, so `check.event-log` fails; the row passes again once the whole
-replayed state agrees with the stored one, that is, once every such unit has its GREEN (a GREEN
-reconciles only its own unit). A rebind captured inside a pre-log checkpoint is not replayed and
-does not cause this. Other old histories whose replay under the new fold differs from their
-stored state (for example a rebound unit respecified and published again with only a
-REFACTOR after the rebind) fail `check.event-log`; that is the cost of changing the fold without a
-format change (D-51). `docs/claim-boundary.md` states the rule (R7).
+as it is stored when, for each rebind, the unit's flag was off when it was rebound and the rebind
+was followed by a passing GREEN for the then-current test set, or by the supersession of that
+rebound unit, before anything else depended on the flag. If a replayed rebind event leaves an
+active unit waiting for that GREEN while its stored flag is off, `check.event-log` fails; the row
+passes again once the whole replayed state agrees with the stored one. Each such unit's flags agree
+again after a passing GREEN for its current test set or after its supersession while its binding
+is still rebound; either reconciles only that unit. If the stored flag was already on when the
+unit was rebound (a D-36 requirement still pending), replay agrees on that unit's flag after the
+rebind, but the supersession of that unit while its binding is still rebound and before a GREEN
+now clears a flag the old code kept, so that retired
+version's replay disagrees with its stored state and `check.event-log` fails for good, since a
+superseded version takes no evidence (reachable only at `lightweight`, where publication needs no
+evidence; found by Astra's review, DEV-rfg-01). A rebind captured inside a pre-log checkpoint is
+not replayed and does not cause any of this. Other old histories whose replay under the new fold
+differs from their stored state (for example a rebound unit respecified and published again with
+only a REFACTOR after the rebind) fail `check.event-log`; that is the cost of changing the fold
+without a format change (D-51). `docs/claim-boundary.md` states the rule (R7).
+
+## Amended by DEV-rfg-01 (pack/2)
+
+Astra's implementation review found a legacy history the Promise described wrongly: at
+`lightweight`, a unit re-frozen with a changed pack (flag on), published without a GREEN, rebound
+and superseded. Under the old fold the stored flag stays on; the new fold clears it on the
+supersession of a rebound unit, so `check.event-log` fails permanently for that store. Keeping the
+supersession rule protects the more common legacy history (rebound with the flag off, then
+superseded before a GREEN), and no rule without a new field keeps both. The owner accepts the
+loss under D-51's no-format-change decision. The Promise above now states both cases; no test,
+code or effects change.
+
+## Amended by DEV-rfg-02 (pack/3)
+
+Astra's re-check: the old-store paragraph said the event-log row recovers once every affected unit
+has its GREEN, but superseding a still-rebound unit also brings its flags into agreement (R9's
+history). The paragraph now names both ways for each unit and scopes the flag-on case to
+supersession while the binding is still rebound. No test, code or effects change.
 
 ## Requirements
 

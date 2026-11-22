@@ -76,9 +76,9 @@ def current_pack_evidence_is_green(snapshot: Snapshot, unit: Unit) -> bool:
     """Whether the exact unit's current pack has a RED→GREEN result still green.
 
     ``REFACTOR`` records preserve the preceding result; the fold maintains this
-    summary so the pure publication gate never needs artifact I/O. A changed
-    re-freeze additionally needs an explicit GREEN recorded after it, or after
-    the bind-pack that bound it (D-36). Label-only evidence cannot qualify.
+    summary so the pure publication gate never needs artifact I/O. An explicit
+    GREEN is required after a changed re-freeze (or the late bind that binds it)
+    or a rebind (D-36, D-51). Label-only evidence cannot qualify.
     """
     if not unit.acceptance_test_set_digest:
         return False

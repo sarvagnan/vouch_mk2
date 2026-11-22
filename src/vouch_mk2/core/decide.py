@@ -1783,6 +1783,7 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                     acceptance_pack_digest=new_pack_digest,
                     acceptance_test_set_digest=new_test_set_digest,
                     pack_binding="rebound",
+                    refreeze_green_required=True,
                     rebound_history=unit.rebound_history
                     + (
                         PackRebound(
@@ -1810,7 +1811,18 @@ def _apply_one(snapshot: Snapshot, event: Event, *, run_id: str = "") -> Snapsho
                 replace(unit, status=UnitStatus.PUBLISHED, published_once=True),
             )
         case UnitSuperseded(name=name):
-            units = _with_status(snapshot, name, UnitStatus.SUPERSEDED)
+            unit = _existing(snapshot, name)
+            units = _with_unit(
+                units,
+                name,
+                replace(
+                    unit,
+                    status=UnitStatus.SUPERSEDED,
+                    refreeze_green_required=(
+                        unit.refreeze_green_required and unit.pack_binding != "rebound"
+                    ),
+                ),
+            )
         case UnitReleaseBound(name=name):
             units = _with_status(snapshot, name, UnitStatus.RELEASE_BOUND)
         case UnitRespecified(name=name, previous_pack_digest=previous_pack_digest):
