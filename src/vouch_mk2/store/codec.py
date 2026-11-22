@@ -12,6 +12,7 @@ event record is never rewritten merely because the live state format changes.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import types
@@ -52,6 +53,9 @@ from vouch_mk2.core.model import (
     ReleaseArchetype,
     ReleaseState,
     Snapshot,
+    TEST_REPORT_EVIDENCE_FORMAT,
+    TestOutcome,
+    TestReport,
     Tier,
     Unit,
     UnitRef,
@@ -74,7 +78,8 @@ from vouch_mk2.store.paths import RelPath
 
 
 CURRENT_STATE_FORMAT = 7
-CURRENT_EVIDENCE_FORMAT = 2
+CURRENT_EVIDENCE_FORMAT = TEST_REPORT_EVIDENCE_FORMAT
+MAX_TEST_REPORT_CASES = 100_000
 
 
 def _canonical_json(document: object) -> bytes:
@@ -97,6 +102,16 @@ def _event_wire_value(value: object) -> object:
         return json.loads(encode_snapshot(value))
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, EvidenceEvent):
+        report_fields = _test_report_fields(value)
+        return {
+            **{
+                field.name: _event_wire_value(getattr(value, field.name))
+                for field in fields(value)
+                if field.name != "test_report"
+            },
+            **report_fields,
+        }
     if is_dataclass(value) and not isinstance(value, type):
         return {
             field.name: _event_wire_value(getattr(value, field.name))
@@ -300,6 +315,14 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
     return _canonical_json(document)
 
 
+def _test_report_fields(event: EvidenceEvent) -> dict[str, str]:
+    if event.evidence_format == TEST_REPORT_EVIDENCE_FORMAT:
+        return {"test_report": _digest(event.test_report, "test_report")}
+    if event.test_report:
+        raise StoreError("only format-3 evidence can carry test_report")
+    return {}
+
+
 def encode_evidence_event(event: EvidenceEvent) -> bytes:
     body = {
             "command_line": event.command_line,
@@ -310,18 +333,43 @@ def encode_evidence_event(event: EvidenceEvent) -> bytes:
             "sequence": event.sequence,
             "unit": {"name": event.unit.name, "version": event.unit.version},
     }
+    body.update(_test_report_fields(event))
     if event.evidence_format == 1:
         if event.pack_digest:
             raise StoreError("legacy evidence format cannot carry pack_digest")
         return _canonical_json(body)
-    if event.evidence_format != CURRENT_EVIDENCE_FORMAT:
+    if event.evidence_format not in (2, CURRENT_EVIDENCE_FORMAT):
         raise StoreError(
             f"unsupported evidence format {event.evidence_format}; "
-            f"expected {CURRENT_EVIDENCE_FORMAT}"
+            f"expected 2 or {CURRENT_EVIDENCE_FORMAT}"
         )
-    body["evidence_format"] = CURRENT_EVIDENCE_FORMAT
+    body["evidence_format"] = event.evidence_format
     body["pack_digest"] = event.pack_digest
     return _canonical_json(body)
+
+
+def valid_test_id(test_id: str) -> bool:
+    return 1 <= len(test_id) <= 4096 and test_id.isprintable() and "::" in test_id
+
+
+def encode_test_report(report: TestReport, *, max_bytes: int) -> bytes:
+    """Encode the sorted ID-to-outcome object, bounding its escaped size."""
+    if not 1 <= len(report) <= MAX_TEST_REPORT_CASES:
+        raise StoreError(f"test report must contain 1..{MAX_TEST_REPORT_CASES} test cases")
+    with io.BytesIO() as encoded:
+        encoded.write(b"{")
+        separator = b""
+        for test_id in sorted(report):
+            if not valid_test_id(test_id):
+                raise StoreError("test report IDs must be 1..4096 printable characters")
+            key = json.dumps(test_id, ensure_ascii=False).encode("utf-8")
+            entry = separator + key + b':"' + report[test_id].value.encode("ascii") + b'"'
+            if encoded.tell() + len(entry) + len(b"}\n") > max_bytes:
+                raise StoreError(f"encoded test report exceeds the {max_bytes}-byte artifact bound")
+            encoded.write(entry)
+            separator = b","
+        encoded.write(b"}\n")
+        return encoded.getvalue()
 
 
 def encode_bundle_inventory(inventory: BundleInventory) -> bytes:
@@ -1133,7 +1181,19 @@ def _decode_event_value(value: object, annotation: object, path: str) -> object:
     if isinstance(annotation, type) and is_dataclass(annotation):
         annotations = get_type_hints(annotation)
         names = frozenset(field.name for field in fields(annotation))
-        if annotation is event_module.AnchorAdvanced:
+        if annotation is EvidenceEvent:
+            raw = _object(value, path)
+            format_path = _child(path, "evidence_format")
+            evidence_format = _integer(raw.get("evidence_format"), format_path)
+            report_path = _child(path, "test_report")
+            if evidence_format == TEST_REPORT_EVIDENCE_FORMAT:
+                obj = _fields(raw, path, names)
+                _digest(obj["test_report"], report_path)
+            elif evidence_format in (1, 2):
+                obj = {**_fields(raw, path, names - {"test_report"}), "test_report": ""}
+            else:
+                raise DecodeError(f"{format_path}: unsupported version {evidence_format}")
+        elif annotation is event_module.AnchorAdvanced:
             # Only the pre-unit shape may omit the version. An explicit empty
             # version is neither a legacy record nor an exact reference.
             obj = _fields(
@@ -1605,19 +1665,19 @@ def decode_raw_document(data: bytes) -> dict[str, object]:
 def decode_evidence_event(data: bytes) -> EvidenceEvent:
     raw = _object(_decode_json(data, "evidence event"), "")
     legacy = "evidence_format" not in raw
-    obj = _fields(
-        raw,
-        "",
-        _LEGACY_EVIDENCE_EVENT_FIELDS if legacy else _EVIDENCE_EVENT_FIELDS,
-    )
     evidence_format = 1
+    required = _LEGACY_EVIDENCE_EVENT_FIELDS
     if not legacy:
-        evidence_format = _integer(obj["evidence_format"], "evidence_format")
-        if evidence_format != CURRENT_EVIDENCE_FORMAT:
+        evidence_format = _integer(raw["evidence_format"], "evidence_format")
+        if evidence_format not in (2, CURRENT_EVIDENCE_FORMAT):
             raise DecodeError(
-                f"evidence_format: expected {CURRENT_EVIDENCE_FORMAT}; "
+                f"evidence_format: expected 2 or {CURRENT_EVIDENCE_FORMAT}; "
                 f"format {evidence_format} is not supported"
             )
+        required = _EVIDENCE_EVENT_FIELDS
+        if evidence_format == TEST_REPORT_EVIDENCE_FORMAT:
+            required |= {"test_report"}
+    obj = _fields(raw, "", required)
     sequence = _integer(obj["sequence"], "sequence")
     if sequence < 1:
         raise DecodeError("sequence: must be at least 1")
@@ -1639,7 +1699,12 @@ def decode_evidence_event(data: bytes) -> EvidenceEvent:
             if legacy
             else _digest(obj["pack_digest"], "pack_digest", allow_empty=True)
         ),
-        evidence_format=1 if legacy else evidence_format,
+        evidence_format=evidence_format,
+        test_report=(
+            _digest(obj["test_report"], "test_report")
+            if evidence_format == TEST_REPORT_EVIDENCE_FORMAT
+            else ""
+        ),
     )
     if not valid_unit_identifier(event.unit.name) or not valid_unit_identifier(
         event.unit.version
@@ -1653,6 +1718,27 @@ def decode_evidence_event(data: bytes) -> EvidenceEvent:
     if canonical != data:
         raise DecodeError("$: non-canonical evidence event encoding")
     return event
+
+
+def decode_test_report(data: bytes) -> TestReport:
+    try:
+        obj = _object(_decode_json(data, "test report"), "")
+    except (RecursionError, ValueError) as error:
+        raise DecodeError("$: invalid test report JSON") from error
+    if not 1 <= len(obj) <= MAX_TEST_REPORT_CASES:
+        raise DecodeError(f"$: expected 1..{MAX_TEST_REPORT_CASES} test cases")
+    report: TestReport = {}
+    for test_id, value in obj.items():
+        if not valid_test_id(test_id):
+            raise DecodeError("$: expected a printable classname::name ID of 1..4096 characters")
+        report[test_id] = _enum_value(value, test_id, TestOutcome)
+    try:
+        canonical = encode_test_report(report, max_bytes=len(data))
+    except StoreError as error:
+        raise DecodeError("$: non-canonical test report encoding") from error
+    if canonical != data:
+        raise DecodeError("$: non-canonical test report encoding")
+    return report
 
 
 def decode_bundle_inventory(data: bytes) -> BundleInventory:

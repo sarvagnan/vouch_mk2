@@ -535,7 +535,7 @@ options:
 ## record-evidence
 
 ```text
-usage: vouch-mk2 record-evidence [-h] --root ROOT [--json] [--actor ACTOR] --unit NAME@VERSION --kind {red,green,refactor} [--redact-arg INDEX] -- <argv...>
+usage: vouch-mk2 record-evidence [-h] --root ROOT [--json] [--actor ACTOR] --unit NAME@VERSION --kind {red,green,refactor} [--redact-arg INDEX] [--junit-report] -- <argv...>
 
 options:
   -h, --help            show this help message and exit
@@ -546,6 +546,7 @@ options:
   --kind {red,green,refactor}
   --redact-arg INDEX    store <redacted> for this zero-based child argv position (repeatable;
                         argv[0] cannot be redacted)
+  --junit-report        collect a JUnit XML report at the private path substituted for {junit}
 
 the recorded outcome is the exit status of a process this verb spawned.
 ```

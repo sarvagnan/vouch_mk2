@@ -18,6 +18,7 @@ from vouch_mk2.store.codec import (
     decode_event_record,
     decode_formal_certificate,
     decode_pack_inventory,
+    decode_test_report,
     encode_snapshot,
 )
 from vouch_mk2.store.digests import ArtifactKind, digest_of
@@ -703,6 +704,10 @@ def _supporting_objects(
             evidence = decode_evidence_event(payload)
             if evidence.parent != "GENESIS":
                 pending.add((ArtifactKind.EVIDENCE, evidence.parent))
+            if evidence.test_report:
+                pending.add((ArtifactKind.TEST_REPORT, evidence.test_report))
+        elif kind is ArtifactKind.TEST_REPORT:
+            decode_test_report(payload)
         elif kind is ArtifactKind.FORMAL_CERTIFICATE:
             certificate = decode_formal_certificate(payload)
             pending.add((ArtifactKind.FORMAL_TABLES, certificate.tables_digest))

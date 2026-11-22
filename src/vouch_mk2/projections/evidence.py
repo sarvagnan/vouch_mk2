@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal, TypedDict
 
 from vouch_mk2.core.invariants import current_pack_evidence_is_green
-from vouch_mk2.core.model import EvidenceEvent, EvidenceKind, Snapshot, Unit
+from vouch_mk2.core.model import (
+    EvidenceEvent, EvidenceKind, Snapshot, TestOutcome, TestReport, Unit,
+)
 
 
 class EvidenceRecordView(TypedDict):
@@ -17,6 +20,14 @@ class EvidenceRecordView(TypedDict):
     recorded_at: str
     digest: str
     counts: Literal["red", "green", ""]
+    test_report: str
+
+
+class TestComparison(TypedDict):
+    relation: Literal["equal", "superset", "subset", "overlap", "disjoint"]
+    red_only: list[str]
+    green_only: list[str]
+    red_failures_not_passed: list[str]
 
 
 class UnitEvidenceView(TypedDict):
@@ -27,6 +38,7 @@ class UnitEvidenceView(TypedDict):
     records: list[EvidenceRecordView]
     notes: list[str]
     chain_error: str
+    test_comparison: TestComparison | None
 
 
 class EvidenceView(TypedDict):
@@ -34,10 +46,14 @@ class EvidenceView(TypedDict):
     units: list[UnitEvidenceView]
 
 
-def _witnesses(
+def evidence_witnesses(
+    snapshot: Snapshot,
+    unit: Unit,
     newest_first: tuple[tuple[str, EvidenceEvent], ...],
-    test_set: str,
 ) -> tuple[EvidenceEvent | None, EvidenceEvent | None]:
+    if not current_pack_evidence_is_green(snapshot, unit):
+        return None, None
+    test_set = unit.acceptance_test_set_digest
     green: EvidenceEvent | None = None
     for _, event in newest_first:
         if not event.pack_digest or event.pack_digest != test_set:
@@ -49,21 +65,55 @@ def _witnesses(
     return None, green
 
 
+def _compare_reports(red: TestReport, green: TestReport) -> TestComparison:
+    red_only = sorted(red.keys() - green.keys())
+    green_only = sorted(green.keys() - red.keys())
+    if not red_only and not green_only:
+        relation = "equal"
+    elif not red_only:
+        relation = "superset"
+    elif not green_only:
+        relation = "subset"
+    elif len(red_only) == len(red):
+        relation = "disjoint"
+    else:
+        relation = "overlap"
+    return {
+        "relation": relation,
+        "red_only": red_only,
+        "green_only": green_only,
+        "red_failures_not_passed": sorted(
+            test_id for test_id, outcome in red.items()
+            if outcome in (TestOutcome.FAILED, TestOutcome.ERROR)
+            and green.get(test_id) is not TestOutcome.PASSED
+        ),
+    }
+
+
 def project_unit_evidence(
     snapshot: Snapshot,
     unit: Unit,
     newest_first: tuple[tuple[str, EvidenceEvent], ...],
     *,
     chain_error: str = "",
+    reports: Mapping[str, TestReport] | None = None,
 ) -> UnitEvidenceView:
     current_green = current_pack_evidence_is_green(snapshot, unit)
     test_set = unit.acceptance_test_set_digest
     if chain_error:
         newest_first = ()
-    red, green = _witnesses(newest_first, test_set) if current_green else (None, None)
+    red, green = evidence_witnesses(snapshot, unit, newest_first)
     notes: list[str] = []
-    if red is not None and green is not None and red.command_line != green.command_line:
-        notes.append("GREEN ran a different command from RED")
+    comparison = None
+    if red is not None and green is not None:
+        if red.command_line != green.command_line:
+            notes.append("GREEN ran a different command from RED")
+        if reports is not None and red.test_report and green.test_report:
+            comparison = _compare_reports(reports[red.test_report], reports[green.test_report])
+            if comparison["red_only"]:
+                notes.append("GREEN's report lacks tests RED's report lists")
+            if comparison["red_failures_not_passed"]:
+                notes.append("a test that failed in RED's report did not pass in GREEN's report")
     records: list[EvidenceRecordView] = []
     for digest, event in reversed(newest_first):
         counts: Literal["red", "green", ""] = ""
@@ -80,6 +130,7 @@ def project_unit_evidence(
             "recorded_at": event.recorded_at,
             "digest": digest,
             "counts": counts,
+            "test_report": event.test_report,
         })
     return {
         "unit": unit.ref().label(),
@@ -89,4 +140,5 @@ def project_unit_evidence(
         "records": records,
         "notes": notes,
         "chain_error": chain_error,
+        "test_comparison": comparison,
     }

@@ -26,6 +26,7 @@ inspect the message and use `python3 vouch.lock generate --root .vouch` to retry
 | `evidence.kind-outcome-mismatch` | The requested kind disagrees with the process exit status, for example a RED exited 0 or a GREEN exited nonzero. | For a failed GREEN, investigate the failure before retrying the intended test command. For a passing RED, inspect the test selection and raise a deviation if the frozen pack is defective. |
 | `evidence.pack-moved` | The unit or its test-set binding no longer matches what Vouch captured before the child ran. | Inspect the current unit and binding with the acceptance owner. Use the current pack and rerun only when the evidence kind truthfully describes the run. |
 | `evidence.redaction-invalid` | An argument position repeats or falls outside the allowable range. | Choose each existing child argument at most once and leave the executable at position 0 unselected. |
+| `evidence.test-report-invalid` | Exit 2. The child arguments lack exactly one `{junit}` token, the report file is missing or unreadable, or the report fails XML, test case, or size validation. | Pass `--junit-report` before `--` and a runner argument such as `--junitxml={junit}` after it. Ensure the runner writes a regular JUnit XML file with unique test IDs at that path. The input and stored report each have a 64 MiB limit. |
 | `merge.conflict` | Replay cannot safely reconcile divergent facts, for example conflicting changes to the same setting or CI exception. | Read the refusal detail. For conflicting settings or exceptions, align the affected sides with ordinary Vouch commands and retry. For Git conflicts, follow the [merge and rebase walkthrough](quickstart.md#recovering-from-a-git-merge-or-rebase-conflict) so the retry reads fresh index stages. |
 | `merge.ancestry-unproven` | After exact exclusions, a version-1 history leaves replay without enough ancestry information. | Inspect the refusal and each side's version-1 marker count using `python3 vouch.lock upgrade --root .vouch --dry-run` against the respective store. Ask the owner to reconcile the work through supported commands and preserve both histories for inspection. |
 | `transition.illegal` | The command is not a legal transition from the subject's current state. | Inspect the subject in the system map and look up the edge in the [lifecycle reference](lifecycle.md). `python3 vouch.lock next --root .vouch --json` lists binding next work, a subset of the commands you could run. |
@@ -49,4 +50,5 @@ rebind interval.
 
 `--redact-arg` positions run from 1 to the last argument, inclusive.
 Redaction changes the stored command descriptor. The child still gets its original arguments,
-and its output and side effects are unaffected.
+with path substitution when `--junit-report` is enabled. Redaction leaves the child's output and
+side effects as they occur.
