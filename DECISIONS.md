@@ -2125,3 +2125,46 @@ version takes no evidence). Dropping the supersession rule would instead break t
 history, a unit rebound with the flag off and superseded before a GREEN. The owner keeps the rule
 and accepts this loss under the no-format-change decision; a spec-only deviation (pack/2) states
 both cases in the Promise. The implementation is unchanged.
+
+## D-52 — Evidence can record which tests ran, from a JUnit report, and `show-evidence` compares GREEN's tests with RED's (2026-11-22)
+
+**Status:** decided 2026-11-22 by the user (`vouch_mk2-inv.4`, following the D-49 note; answers:
+the report path is chosen by Vouch and handed to the command through a `{junit}` placeholder;
+keep each test's ID and outcome; IDs are `classname::name` as written; report the relation and a
+note in text). One unit, `test-sets@1`.
+
+- **The finding.** An evidence record holds the command and its exit status only, so Vouch
+  cannot tell whether GREEN ran the tests RED ran, more of them, or different ones (D-49 note).
+- **Recording.** `record-evidence --junit-report ... -- <argv>` requires the literal token
+  `{junit}` exactly once in the child argv. Just before the run Vouch creates a new private
+  directory, replaces the token with a report path inside it, and runs the command; afterwards it
+  reads the report, removes the directory, and records the evidence. Vouch cannot see which
+  process wrote a file, but only the spawned command is given the path, so a report found there
+  comes from that command or a process it started (a process of the same user reading the path
+  during the run is outside the threat model, level 3). The stored command line keeps the literal
+  `{junit}`, so RED and GREEN do not differ by their report paths. The report is strictly decoded
+  (bounded size and test count, no DTD, `<testcase>` elements with their `classname` and `name`;
+  the outcome is `failed`, `error` or `skipped` from the child element, else `passed`); a missing,
+  unreadable, malformed or duplicate-ID report refuses the recording, exit 2, nothing written.
+  Without `--junit-report`, nothing changes.
+- **Storage.** Each test's ID (`classname::name` exactly as written) and outcome go into a new
+  content-addressed test-report object; the evidence record names it by digest. Records with a
+  report use a new evidence format 3; records without one stay format 2. Evidence chain checks,
+  `show-evidence` and merges treat the report object as part of the record (it must resolve and
+  decode; merges carry it). A Vouch release older than this one cannot read a format-3 record:
+  writing one is a declared store action.
+- **Reporting.** When the RED and the GREEN that count (D-49's marks) both have reports,
+  `show-evidence` reports how GREEN's test IDs relate to RED's (equal, superset, subset,
+  overlapping or disjoint), which tests that failed or errored in RED did not pass in GREEN, and
+  the IDs on each side only; the text form adds a note when GREEN is neither equal to nor a superset
+  of RED, and another when a test that failed in RED did not pass in GREEN. Report only: no gate,
+  check or refusal uses it. The report is the runner's claim, like the exit status.
+- **Out of scope.** Constraining the IDs to the frozen pack's test files. Normalising IDs across
+  runners. Storing the raw XML. Binding the evidence command in the pack (`vouch_mk2-inv.3`).
+
+**D-52 note (2026-11-22, owner, after Astra's pre-freeze reads).** The notes speak of what the
+reports list, not of what ran, since Vouch collects a report at the path it supplied but does not
+see which tests executed: the text is `GREEN's report lacks tests RED's report lists` and `a test
+that failed in RED's report did not pass in GREEN's report`. Format-1 and format-2 evidence and
+the event-log records that carry them keep their exact bytes (the evidence-recorded event carries
+`test_report` only at format 3), and the text form also shows a `tests: <relation>` line.
