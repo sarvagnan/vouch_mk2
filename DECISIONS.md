@@ -2059,3 +2059,11 @@ E of `d41-forgery-loop_fable.OUT.md` section 4, plus a stated boundary). One uni
   by digest (honest diverged branches merge by replay, so their chains do not). Re-validating every
   historical merge (D-41 options A and B). Validating coverage claims that name records the pull
   request cannot see (an honest head that merged a teammate's branch directly would fail).
+
+**D-50 note (2026-11-22, owner, after Astra's implementation review).** One more honest history
+fails the check besides the two policy refusals the pack names: when BASE and HEAD each advance
+the anchor of the same evidence tip under different CI run IDs, both merge directions succeed but
+keep different run claims, so the evidence heads differ. The generated workflow anchors only on
+the default branch, so an ordinary pull-request branch does not produce this; it would take two
+stores anchored independently by CI. The check reports it, as the Promise requires; no change.
+

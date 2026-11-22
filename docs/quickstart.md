@@ -251,17 +251,19 @@ implies a control was checked.
 
 ### Wiring up CI
 
-The generated workflow splits into three jobs:
+The generated workflow has four jobs.
 - **Validation (read-only):** checks the lock digest, runs `check --ci --pending-anchor-ok` and the
   formal check, and keeps no checkout credentials. `--pending-anchor-ok` lets the first
   otherwise-clean run reach planning while still showing the pending anchor row; any FAIL or other
   mechanical `NOT_CHECKED` row still fails.
+- **Merge check (read-only)** runs on pull requests and checks the merged store against a replay
+  of the head's store onto the base's store.
 - **Anchor planning (read-only):** advances anchors, runs `check --ci` and `formal` again on the
   result, and prepares a `.vouch/**` candidate commit.
 - **Publisher (only job with write access):** runs no repository code. It rechecks the candidate's
   parent, paths, file modes, and live remote head, then pushes it as a bot commit.
 
-Direct runs of the generated workflow validate only and never anchor.
+Direct runs of the generated workflow never anchor.
 
 To gate anchoring on your project's tests, pass each test job to `init` with `--test-job`. `init`
 prints a caller job for you to paste into the workflow that defines those jobs; it does not edit

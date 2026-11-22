@@ -9,8 +9,10 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Sequence
 from enum import Enum
 from typing import Callable, Protocol, cast, get_args, get_origin, get_type_hints
@@ -43,6 +45,7 @@ from vouch_mk2.core import (
     valid_command_line,
 )
 from vouch_mk2.core import commands as command_module
+from vouch_mk2.core.merge_comparison import merge_snapshot_differences
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.git_merge import merge_git_stages
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
@@ -82,7 +85,7 @@ from vouch_mk2.store import (
 )
 from vouch_mk2.store.upgrade import UpgradeRefused
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
-from vouch_mk2.store.merge import merge_store_roots
+from vouch_mk2.store.merge import merge_store_roots, read_verified_snapshot
 from vouch_mk2.verify import (
     ProjectionRegenerationError,
     RefusedError,
@@ -130,6 +133,9 @@ class _Arguments(argparse.Namespace):
     tier: str
     actor: str
     other: str
+    base: str
+    head: str
+    merged: str
     evidence_unit: UnitRef | None
 
 
@@ -413,6 +419,12 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         default=default_actor(),
         help="recorded actor claim (default: OS user)",
     )
+    check_merge = commands.add_parser(
+        "check-merge", help="compare the proposed merged store with replay of HEAD onto BASE"
+    )
+    check_merge.add_argument("--base", required=True, help="base store root directory")
+    check_merge.add_argument("--head", required=True, help="head store root directory")
+    check_merge.add_argument("--merged", required=True, help="merged store root directory")
     merge_git = commands.add_parser(
         "merge-git-stages",
         help="recover a conflicted store from Git index stages without staging it",
@@ -1235,6 +1247,66 @@ def _merge_handler(namespace: argparse.Namespace) -> int:
     return 0
 
 
+def _check_merge_handler(namespace: _Arguments) -> int:
+    roots = (namespace.base, namespace.head, namespace.merged)
+    try:
+        for root in roots:
+            try:
+                os.lstat(os.path.join(root, "state.json"))
+            except (FileNotFoundError, NotADirectoryError):
+                print(f"vouch-mk2: {root!r} has no state.json", file=sys.stderr)
+                return 2
+
+        with (
+            Store.open(namespace.base, read_only=True) as base,
+            Store.open(namespace.head, read_only=True) as head,
+            Store.open(namespace.merged, read_only=True) as merged,
+        ):
+            read_verified_snapshot(base, "base")
+            read_verified_snapshot(head, "head")
+            merged_snapshot = read_verified_snapshot(merged, "merged")
+
+        # Resolve the parent before tempfile can probe an input store for writability.
+        configured_temp = (
+            tempfile.tempdir or os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP")
+        )
+        temp_parent = os.path.realpath(os.fsdecode(configured_temp or "/tmp"))
+        for root in map(os.path.realpath, roots):
+            if os.path.commonpath((temp_parent, root)) == root:
+                raise StoreError(f"temporary directory {temp_parent!r} is inside store {root!r}")
+
+        with tempfile.TemporaryDirectory(prefix="vouch-check-merge-", dir=temp_parent) as scratch:
+            copy = os.path.join(scratch, "base")
+            shutil.copytree(namespace.base, copy, symlinks=True, copy_function=shutil.copyfile)
+            # Permissions that protect BASE must not prevent writes to the private copy.
+            os.chmod(copy, 0o700)
+            for directory, subdirs, _ in os.walk(copy):
+                for name in subdirs:
+                    copied_dir = os.path.join(directory, name)
+                    if not os.path.islink(copied_dir):
+                        os.chmod(copied_dir, 0o700)
+            result = merge_store_roots(copy, namespace.head, actor="check-merge", run_id="")
+            if isinstance(result, Refused):
+                print("FAIL check-merge: replay refused")
+                for violation in result.violations:
+                    print(f"  {violation.code}: {violation.detail}")
+                return 1
+            with Store.open(copy, read_only=True) as replayed:
+                replayed_snapshot = replayed.read_snapshot()
+    except (OSError, StoreError) as error:
+        print(f"FAIL check-merge: {error}")
+        return 1
+
+    differences = merge_snapshot_differences(replayed_snapshot, merged_snapshot)
+    if differences:
+        print("FAIL check-merge: replay differs from MERGED")
+        for difference in differences:
+            print(f"  {difference}")
+        return 1
+    print(f"PASS check-merge: replay matches MERGED ({result.mode})")
+    return 0
+
+
 def _merge_git_stages_handler(namespace: argparse.Namespace) -> int:
     try:
         result = merge_git_stages(namespace.root, actor=namespace.actor)
@@ -1682,6 +1754,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if parsed.command == "merge":
         return _merge_handler(parsed)
+    if parsed.command == "check-merge":
+        return _check_merge_handler(parsed)
     if parsed.command == "merge-git-stages":
         return _merge_git_stages_handler(parsed)
 

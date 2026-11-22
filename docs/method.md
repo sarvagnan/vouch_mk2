@@ -79,8 +79,8 @@ workflows).
    check on names the frozen tests use, so the later gates never run on that commit and an
    unrelated regression looks the same as the expected RED. CI anchors nothing from a branch or
    a red run; RED and GREEN are anchored together after the merge, when `main` goes green.
-   Pull-request CI runs only the gates job. The dogfood check and the walkthrough run after the
-   merge, which is why §6 step 3 runs them locally.
+   Pull-request CI runs the gates and merge check jobs. The dogfood check and the walkthrough run
+   after the merge, which is why §6 step 3 runs them locally.
 
 ## 2. Implementation (Sol, T3 delegated task)
 

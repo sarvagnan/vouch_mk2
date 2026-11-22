@@ -231,7 +231,7 @@ def test_generated_workflow_parses_as_yaml_with_the_intended_shape() -> None:
 
     document = yaml.safe_load(generated_workflow())
     jobs = document["jobs"]
-    assert set(jobs) == {"validation", "anchor_plan", "anchor_publish"}
+    assert set(jobs) == {"validation", "merge_check", "anchor_plan", "anchor_publish"}
     assert jobs["validation"]["permissions"] == {"contents": "read"}
     assert jobs["anchor_plan"]["permissions"] == {"contents": "read"}
     assert jobs["anchor_publish"]["permissions"] == {"contents": "write"}
