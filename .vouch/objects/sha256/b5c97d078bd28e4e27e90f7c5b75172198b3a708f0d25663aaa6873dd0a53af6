@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_pr_merge_check.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"dac218dbe7c4ea2f7143254f66ddeff0d361f8078aff1bad7c68b79dfed46c4d","parent":"GENESIS","recorded_at":"2026-11-22T05:10:47+00:00","sequence":1,"unit":{"name":"pr-merge-check","version":"1"}}

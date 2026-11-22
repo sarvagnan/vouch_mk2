@@ -296,6 +296,13 @@ def _read_verified_chain(
     return tuple(facts), history
 
 
+def read_verified_snapshot(store: Store, branch: str) -> Snapshot:
+    """Read a snapshot and verify its full event chain as in merge."""
+    snapshot = store.read_snapshot()
+    _read_verified_chain(store, snapshot, branch)
+    return snapshot
+
+
 def _event_label(event: events.Event) -> str:
     subject = ""
     for field in ("name", "deviation_id", "release_id", "unit_name"):
@@ -989,4 +996,4 @@ def merge_store_roots(
     return MergeOutcome(mode, candidate, replayed, skipped, incorporated_batches)
 
 
-__all__ = ["MergeOutcome", "merge_store_roots"]
+__all__ = ["MergeOutcome", "merge_store_roots", "read_verified_snapshot"]

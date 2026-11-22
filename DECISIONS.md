@@ -2020,3 +2020,50 @@ rebind. The note compares stored command lines only. Astra also found that after
 rebind a REFACTOR alone can satisfy the predicate; that is a gate question, filed as
 `vouch_mk2-inv.5`, not part of this unit.
 
+## D-50 — A pull request's store must equal its head replayed onto its base, checked in CI (2026-11-22)
+
+**Status:** decided 2026-11-22 by the user on the owner's recommendation (`vouch_mk2-22a`, option
+E of `d41-forgery-loop_fable.OUT.md` section 4, plus a stated boundary). One unit,
+`pr-merge-check@1`.
+
+- **The finding.** D-41 trusts a merge record's `theirs_head`, `origin`, `satisfied` and
+  `generated` as tool-written claims. A hand-edited store can forge them so that a later merge
+  silently drops work (`vouch_mk2-22a`: a rewritten `theirs_head`, a `satisfied` entry naming a
+  third store's record, a `satisfied` entry for a fact the merge should have replayed). Validating
+  each claim inside one store has no natural end (D-41 notes). Only where both parents are held
+  can a merge be recomputed instead of trusted, and a pull request is that place.
+- **Threat model.** In scope: a contributor whose changes reach the default branch through a pull
+  request and who may hand-edit `.vouch/` on their branch. Out of scope, and the docs say so:
+  someone who can push to the default branch directly (the base is trusted), and a pull request
+  that edits the workflow file or the lock it runs (level 3 of `docs/threat-model.md`: reviewing
+  those files and requiring the check are the repository's governance).
+- **Decision.** A new read-only verb, `vouch-mk2 check-merge --base BASE --head HEAD --merged
+  MERGED`, copies BASE into a private temporary directory, merges HEAD into the copy exactly as
+  `merge` does, and passes only when the state reached equals MERGED's state (every state field
+  except the revision and the event head; collections compared as sets). It fails when the replay
+  is refused, when a history cannot be read, or when the states differ, and names what differs.
+  The generated workflow and mk2's own CI gain a read-only `merge_check` job that runs only on
+  pull requests: it takes the two parents of the merge commit GitHub checks out, extracts each
+  parent's `.vouch/`, and runs `check-merge` with the checked-out `.vouch/` as MERGED. A base with
+  no store (an adoption pull request) passes with a message.
+- **What it guarantees.** Every store merged through a pull request with the check passing has the
+  base's state with the head's work replayed onto it. Nothing on the base can be lost that way,
+  because the base is OURS in the recomputed merge, and head work the replay skips makes the
+  states differ. A forged claim that changes no state passes at its own pull request; if it later
+  makes another pull request's replay skip or refuse work, that pull request fails instead of
+  losing the work. An honest pull request also fails when its work cannot be replayed onto the
+  base even though its own merge of the base succeeded (for example, lowering the tier on a branch
+  while the base moved a unit beyond `specified`); that is reported, not overridden.
+- **Rejected.** Signed records (option 3: key management and a new trust root, and a signature
+  shows who wrote a claim, not that it is true). Requiring the head's chain to extend the base's
+  by digest (honest diverged branches merge by replay, so their chains do not). Re-validating every
+  historical merge (D-41 options A and B). Validating coverage claims that name records the pull
+  request cannot see (an honest head that merged a teammate's branch directly would fail).
+
+**D-50 note (2026-11-22, owner, after Astra's implementation review).** One more honest history
+fails the check besides the two policy refusals the pack names: when BASE and HEAD each advance
+the anchor of the same evidence tip under different CI run IDs, both merge directions succeed but
+keep different run claims, so the evidence heads differ. The generated workflow anchors only on
+the default branch, so an ordinary pull-request branch does not produce this; it would take two
+stores anchored independently by CI. The check reports it, as the Promise requires; no change.
+

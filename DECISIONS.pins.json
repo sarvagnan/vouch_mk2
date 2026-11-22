@@ -250,6 +250,11 @@
       "key": "D-49",
       "bytes": 3671,
       "sha256": "5c98512d11a1d6df7c639927edda93c17e6dc69113a02c97a298123d9980f60d"
+    },
+    {
+      "key": "D-50",
+      "bytes": 3971,
+      "sha256": "f80497a7f6629cc9da17dd6ddc2267ba7556cf2a4a581b6a07ae61eddf83062b"
     }
   ]
 }

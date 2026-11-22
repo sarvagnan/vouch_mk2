@@ -222,6 +222,18 @@ options:
   --actor ACTOR  recorded actor claim (default: OS user)
 ```
 
+## check-merge
+
+```text
+usage: vouch-mk2 check-merge [-h] --base BASE --head HEAD --merged MERGED
+
+options:
+  -h, --help       show this help message and exit
+  --base BASE      base store root directory
+  --head HEAD      head store root directory
+  --merged MERGED  merged store root directory
+```
+
 ## merge-git-stages
 
 ```text
