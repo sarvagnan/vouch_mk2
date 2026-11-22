@@ -116,6 +116,20 @@ class EvidenceEvent:
     recorded_at: str
     pack_digest: str = ""
     evidence_format: int = 2
+    test_report: str = ""
+
+
+TEST_REPORT_EVIDENCE_FORMAT = 3
+
+
+class TestOutcome(Enum):
+    PASSED = "passed"
+    SKIPPED = "skipped"
+    ERROR = "error"
+    FAILED = "failed"
+
+
+type TestReport = dict[str, TestOutcome]
 
 
 @dataclass(frozen=True, slots=True)

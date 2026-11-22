@@ -103,8 +103,8 @@ Run `python3 vouch.lock status --root .vouch --json` for counts and store policy
 
 Run `python3 vouch.lock show-evidence --root .vouch --json` to read recorded evidence oldest
 first for each non-superseded unit, or add `--unit NAME@VERSION` to read one exact version,
-including a superseded version. The example was captured after recording a failing `unittest`
-run for `greeter@1`, fixing the greeter, and recording a passing run with `-v`.
+including a superseded version. This example records a failing pytest run for one greeter test,
+then a passing run for both greeter tests after a fix. Both runs used `--junit-report`.
 
 ```json
 {
@@ -113,33 +113,43 @@ run for `greeter@1`, fixing the greeter, and recording a passing run with `-v`.
     {
       "chain_error": "",
       "current_pack_green": true,
-      "current_test_set": "00de08c8421a65e3732c8385387366f36de4da0146736457162229bef899dfac",
+      "current_test_set": "ad2c53f36dc9182e879a40866f35ca1782bc286dd94b5a5a4d74cf368fed36f8",
       "notes": [
         "GREEN ran a different command from RED"
       ],
       "records": [
         {
-          "command": "python3 -m unittest discover -s tests",
+          "command": "python3 -m pytest -q '--junitxml={junit}' tests/test_greeter.py::test_greets_by_name",
           "counts": "red",
-          "digest": "b348d02996b0aafc6234ea1ec462309155984c7b0172c614952fb2f3bc3ae88a",
+          "digest": "dff3b16103a657adc1c81053902891ebe9df117ce42e3445bf3f3b18fa29a4f8",
           "kind": "red",
           "outcome": "tests-failed",
-          "recorded_at": "2026-11-21T18:50:03+00:00",
+          "recorded_at": "2026-11-22T15:48:30+00:00",
           "sequence": 1,
-          "test_set": "00de08c8421a65e3732c8385387366f36de4da0146736457162229bef899dfac"
+          "test_report": "91300c3a9e2f6e68ad75c7e89d722bca4ef899064a37a0c57619c25d5bd04e75",
+          "test_set": "ad2c53f36dc9182e879a40866f35ca1782bc286dd94b5a5a4d74cf368fed36f8"
         },
         {
-          "command": "python3 -m unittest discover -s tests -v",
+          "command": "python3 -m pytest -q '--junitxml={junit}' tests/test_greeter.py",
           "counts": "green",
-          "digest": "8c33967379bd2b4480ced8aef8c85381e1e29c1eeef3d43bfa55b469d83a95b6",
+          "digest": "03e1d49c1a82265a89271e8649d8d9b7a82dc7e2572c6bf4b9da42ed7c3882f1",
           "kind": "green",
           "outcome": "tests-passed",
-          "recorded_at": "2026-11-21T18:50:03+00:00",
+          "recorded_at": "2026-11-22T15:48:30+00:00",
           "sequence": 2,
-          "test_set": "00de08c8421a65e3732c8385387366f36de4da0146736457162229bef899dfac"
+          "test_report": "d475ea96cd4dd1bfe075595cba3480ffedf5a056ef8a59f4b16666ed8b26c5ed",
+          "test_set": "ad2c53f36dc9182e879a40866f35ca1782bc286dd94b5a5a4d74cf368fed36f8"
         }
       ],
       "status": "in-progress",
+      "test_comparison": {
+        "green_only": [
+          "tests.test_greeter::test_greets_another_name"
+        ],
+        "red_failures_not_passed": [],
+        "red_only": [],
+        "relation": "superset"
+      },
       "unit": "greeter@1"
     }
   ]
@@ -150,10 +160,15 @@ run for `greeter@1`, fixing the greeter, and recording a passing run with `-v`.
 On a readable chain with a true predicate, `counts` marks the latest explicit GREEN for the
 current test set and the latest preceding RED for that set, if present. Other records have an
 empty `counts` string. A command-line note compares the stored text, including any redactions.
-Comparing the tests the two commands actually ran is deferred to `vouch_mk2-inv.4`.
+`test_report` is the digest of the stored report or an empty string.
+`test_comparison` is null unless both marked records have reports. Its `relation` describes the
+GREEN report's IDs relative to the RED report's and is one of `equal`, `superset`, `subset`,
+`overlap` or `disjoint`. The three ID lists are sorted. `red_failures_not_passed` includes
+IDs with `failed` or `error` in RED and no `passed` outcome in GREEN, including IDs absent
+from GREEN.
 
 If a chain is unreadable, its unit has a nonempty `chain_error`, empty `records` and `notes`,
-and the snapshot's `current_pack_green` value. The CLI prints the document and exits 1 if it
+a null `test_comparison`, and the snapshot's `current_pack_green` value. The CLI prints the document and exits 1 if it
 contains any chain error. An unknown `--unit` exits 2 and names the requested unit on stderr.
 
 ## Lifecycle `--json`
@@ -188,6 +203,38 @@ engine and print a message instead of this JSON envelope.
       "detail": "unit 'greeter' already exists"
     }
   ]
+}
+```
+
+The accepted `record-evidence --json` receipt for the GREEN above contains a format-3 record
+and its `test_report` digest. A recording without `--junit-report` has format 2 and an empty
+`test_report` string in the receipt. In JSON mode, the child's stdout goes to stderr.
+
+```json
+{
+  "accepted": true,
+  "events": [
+    {
+      "event": "evidence-recorded",
+      "event_digest": "03e1d49c1a82265a89271e8649d8d9b7a82dc7e2572c6bf4b9da42ed7c3882f1",
+      "evidence": {
+        "command_line": "python3 -m pytest -q '--junitxml={junit}' tests/test_greeter.py",
+        "evidence_format": 3,
+        "kind": "green",
+        "outcome": "tests-passed",
+        "pack_digest": "ad2c53f36dc9182e879a40866f35ca1782bc286dd94b5a5a4d74cf368fed36f8",
+        "parent": "dff3b16103a657adc1c81053902891ebe9df117ce42e3445bf3f3b18fa29a4f8",
+        "recorded_at": "2026-11-22T15:48:30+00:00",
+        "sequence": 2,
+        "test_report": "d475ea96cd4dd1bfe075595cba3480ffedf5a056ef8a59f4b16666ed8b26c5ed",
+        "unit": {
+          "name": "greeter",
+          "version": "1"
+        }
+      }
+    }
+  ],
+  "revision": 7
 }
 ```
 

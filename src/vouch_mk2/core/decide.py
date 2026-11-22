@@ -122,6 +122,7 @@ from vouch_mk2.core.model import (
     ReleaseArchetype,
     ReleaseState,
     Snapshot,
+    TEST_REPORT_EVIDENCE_FORMAT,
     Tier,
     Unit,
     UnitRef,
@@ -1138,10 +1139,19 @@ def _decide_record_evidence(
             f"evidence pack digest does not match unit {event.unit.label()!r}'s "
             "current acceptance test-set digest",
         )
-    if event.evidence_format != 2:
+    if event.evidence_format not in (2, TEST_REPORT_EVIDENCE_FORMAT):
         return _refuse(
             "evidence.format-legacy",
             "legacy evidence objects are readable history but cannot be recorded anew",
+        )
+    if (
+        (event.evidence_format == TEST_REPORT_EVIDENCE_FORMAT
+         and not _valid_digest(event.test_report))
+        or (event.evidence_format == 2 and event.test_report)
+    ):
+        return _refuse(
+            "evidence.test-report-invalid",
+            "format-3 evidence requires a test report digest; format 2 omits it",
         )
     if not valid_command_line(event.command_line):
         return _refuse(

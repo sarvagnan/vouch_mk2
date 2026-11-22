@@ -14,6 +14,7 @@ class ArtifactKind(Enum):
     STATE = "state"
     OBJECT = "object"
     EVIDENCE = "evidence"
+    TEST_REPORT = "test-report"
     BUNDLE_INVENTORY = "bundle-inventory"
     FORMAL_CERTIFICATE = "formal-certificate"
     FORMAL_TABLES = "formal-tables"

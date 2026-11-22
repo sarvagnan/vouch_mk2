@@ -41,6 +41,7 @@ UNIT_KEYS = {
     "records",
     "notes",
     "chain_error",
+    "test_comparison",
 }
 RECORD_KEYS = {
     "sequence",
@@ -51,6 +52,7 @@ RECORD_KEYS = {
     "recorded_at",
     "digest",
     "counts",
+    "test_report",
 }
 
 Json = dict[str, object]
@@ -441,6 +443,7 @@ def test_units_are_ordered_and_unbound_or_empty_units_are_unmarked(tmp_path: Pat
         "records": [],
         "notes": [],
         "chain_error": "",
+        "test_comparison": None,
     }
 
 
@@ -684,6 +687,7 @@ def test_a_format_one_record_is_listed_with_no_test_set_and_no_mark(tmp_path: Pa
         "recorded_at": "2026-01-02T03:04:05+00:00",
         "digest": digest,
         "counts": "",
+        "test_report": "",
     }]
     assert unit["current_pack_green"] is False
     assert unit["notes"] == []

@@ -45,6 +45,7 @@ from vouch_mk2.core import (
     fold_evidence_pack_summaries,
 )
 from vouch_mk2.core.events import MergeRecorded
+from vouch_mk2.core.model import TestReport
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.explore import Relation, emit_tables
 from vouch_mk2.formal.invariants import INVARIANTS
@@ -55,7 +56,12 @@ from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict, Violation
 from vouch_mk2.projections import agent_context, system_map
-from vouch_mk2.projections.evidence import EvidenceView, UnitEvidenceView, project_unit_evidence
+from vouch_mk2.projections.evidence import (
+    EvidenceView,
+    UnitEvidenceView,
+    evidence_witnesses,
+    project_unit_evidence,
+)
 from vouch_mk2.store import (
     CURRENT_STATE_FORMAT,
     ArtifactKind,
@@ -76,7 +82,7 @@ from vouch_mk2.store import (
     encode_snapshot,
     encode_system_map,
 )
-from vouch_mk2.store.codec import decode_raw_document
+from vouch_mk2.store.codec import decode_raw_document, decode_test_report
 from vouch_mk2.store.upgrade import UpgradeRefused, upgrade_document
 from vouch_mk2.store.event_log import (
     ReplayHistory,
@@ -273,8 +279,13 @@ def _valid_digest(value: str) -> bool:
     return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
 
 
+def _read_test_report(store: Store, digest: str) -> TestReport:
+    return decode_test_report(store.get_object(ArtifactKind.TEST_REPORT, digest))
+
+
 def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
     events: list[tuple[str, EvidenceEvent]] = []
+    checked_reports: set[str] = set()
     digest = head.head
     expected_sequence = head.head_sequence
     for _ in range(head.head_sequence):
@@ -305,6 +316,14 @@ def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
                 tuple(events),
                 f"event sequence {event.sequence}, expected {expected_sequence}",
             )
+        if event.test_report and event.test_report not in checked_reports:
+            try:
+                _read_test_report(store, event.test_report)
+            except (OSError, StoreError) as error:
+                return _ChainWalk(
+                    head, tuple(events), f"test report {event.test_report!r}: {error}",
+                )
+            checked_reports.add(event.test_report)
         digest = event.parent
         expected_sequence -= 1
     if digest != "GENESIS":
@@ -340,10 +359,21 @@ def read_evidence_view(
             continue
         try:
             walk = _walk_chain(store, head)
-        except OSError as error:
+            reports: dict[str, TestReport] = {}
+            if not walk.error:
+                red, green = evidence_witnesses(snapshot, unit, walk.events)
+                if red is not None and green is not None and red.test_report and green.test_report:
+                    # Keep only the marked pair's decoded reports in memory.
+                    reports = {
+                        digest: _read_test_report(store, digest)
+                        for digest in {red.test_report, green.test_report}
+                    }
+        except (OSError, StoreError) as error:
             rows.append(project_unit_evidence(snapshot, unit, (), chain_error=f"chain read failed: {error}"))
         else:
-            rows.append(project_unit_evidence(snapshot, unit, walk.events, chain_error=walk.error))
+            rows.append(project_unit_evidence(
+                snapshot, unit, walk.events, chain_error=walk.error, reports=reports,
+            ))
     return {"revision": snapshot.revision, "units": rows}
 
 
@@ -1407,6 +1437,7 @@ def record_evidence(
     actor: str | None = None,
     run_id: str = "",
     captured_pack_digest: str | None = None,
+    test_report_data: bytes | None = None,
 ) -> str:
     with store.write_locked():
         snapshot = store.read_snapshot()
@@ -1422,13 +1453,21 @@ def record_evidence(
         )
         if not isinstance(decision, Accepted):
             raise RefusedError(decision.violations)
+        objects = [(ArtifactKind.EVIDENCE, data)]
+        if test_report_data is not None:
+            if digest_of(ArtifactKind.TEST_REPORT, test_report_data) != event.test_report:
+                raise StoreError("evidence.test-report-invalid: report digest does not match evidence")
+            decode_test_report(test_report_data)
+            objects.append((ArtifactKind.TEST_REPORT, test_report_data))
+        elif event.test_report:
+            raise StoreError("evidence.test-report-invalid: report data is required")
         commit_events(
             store,
             snapshot,
             decision.events,
             actor=default_actor() if actor is None else actor,
             run_id=run_id,
-            objects=((ArtifactKind.EVIDENCE, data),),
+            objects=objects,
         )
     return digest
 

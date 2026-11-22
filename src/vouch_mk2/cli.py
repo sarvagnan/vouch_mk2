@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
+from contextlib import nullcontext
 from enum import Enum
 from typing import Callable, Protocol, cast, get_args, get_origin, get_type_hints
 
@@ -46,6 +47,7 @@ from vouch_mk2.core import (
 )
 from vouch_mk2.core import commands as command_module
 from vouch_mk2.core.merge_comparison import merge_snapshot_differences
+from vouch_mk2.core.model import TEST_REPORT_EVIDENCE_FORMAT
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.git_merge import merge_git_stages
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
@@ -78,11 +80,16 @@ from vouch_mk2.mcp import run_stdio
 from vouch_mk2.projections import NextAction, next_actions, status_facts
 from vouch_mk2.store import (
     CURRENT_STATE_FORMAT,
+    DEFAULT_MAX_ARTIFACT_BYTES,
+    ArtifactKind,
     DecodeError,
     Store,
     StoreError,
     decode_system_map,
+    digest_of,
 )
+from vouch_mk2.store.codec import encode_test_report
+from vouch_mk2.store.junit import read_junit_report
 from vouch_mk2.store.upgrade import UpgradeRefused
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
 from vouch_mk2.store.merge import merge_store_roots, read_verified_snapshot
@@ -128,6 +135,7 @@ class _Arguments(argparse.Namespace):
     never_published: list[str]
     command_argv: list[str]
     redact_arg: list[int]
+    junit_report: bool
     tree: str
     exclude: list[str]
     tier: str
@@ -646,7 +654,7 @@ def _add_lifecycle_parsers(commands: _Subparsers) -> None:
         if command_type is command_module.RecordEvidence:
             parser.usage = (
                 "%(prog)s [-h] --root ROOT [--json] [--actor ACTOR] --unit NAME@VERSION "
-                "--kind {red,green,refactor} [--redact-arg INDEX] -- <argv...>"
+                "--kind {red,green,refactor} [--redact-arg INDEX] [--junit-report] -- <argv...>"
             )
             parser.epilog = (
                 "the recorded outcome is the exit status of a process this verb spawned."
@@ -667,6 +675,11 @@ def _add_lifecycle_parsers(commands: _Subparsers) -> None:
                     "store <redacted> for this zero-based child argv position "
                     "(repeatable; argv[0] cannot be redacted)"
                 ),
+            )
+            parser.add_argument(
+                "--junit-report",
+                action="store_true",
+                help="collect a JUnit XML report at the private path substituted for {junit}",
             )
             continue
         if command_type is command_module.RecordFormalCertificate:
@@ -1019,8 +1032,57 @@ def _stream_child_stdout(command_argv: Sequence[str]) -> int:
     return process.wait()
 
 
+_JUNIT_TOKEN = "{junit}"
+
+
+def _run_evidence_child(
+    command_argv: list[str], *, json_output: bool, junit_report: bool,
+) -> tuple[int, bytes | None]:
+    try:
+        # TemporaryDirectory allocates atomically with mkdtemp and cleans up
+        # even when execution, report validation, or the caller is interrupted.
+        report_directory = (
+            tempfile.TemporaryDirectory(prefix="vouch-junit-") if junit_report else nullcontext()
+        )
+        with report_directory as directory:
+            if directory is not None:
+                # mkdtemp applies the process umask, which can only remove bits from 0700;
+                # restore the owner's bits so the child can write and Vouch can read.
+                os.chmod(directory, 0o700)
+            report_path = None if directory is None else os.path.join(directory, "report.xml")
+            child_argv = command_argv if report_path is None else [
+                argument.replace(_JUNIT_TOKEN, report_path) for argument in command_argv
+            ]
+            try:
+                returncode = (
+                    _stream_child_stdout(child_argv)
+                    if json_output
+                    else subprocess.run(child_argv, check=False).returncode
+                )
+            except OSError as error:
+                raise StoreError(f"cannot execute {command_argv[0]!r}: {error}") from error
+            if returncode < 0 or report_path is None:
+                return returncode, None
+            try:
+                report = read_junit_report(report_path, max_bytes=DEFAULT_MAX_ARTIFACT_BYTES)
+                data = encode_test_report(report, max_bytes=DEFAULT_MAX_ARTIFACT_BYTES)
+            except StoreError as error:
+                raise StoreError(f"evidence.test-report-invalid: {error}") from error
+            return returncode, data
+    except OSError as error:
+        raise StoreError(f"evidence.test-report-invalid: {error}") from error
+
+
 def _record_evidence_handler(namespace: argparse.Namespace) -> int:
     command_argv = cast(list[str], namespace.command_argv)
+    junit_report = cast(bool, namespace.junit_report)
+    if junit_report and sum(argument.count(_JUNIT_TOKEN) for argument in command_argv) != 1:
+        print(
+            "vouch-mk2: evidence.test-report-invalid: --junit-report requires "
+            "exactly one {junit} token in the child argv",
+            file=sys.stderr,
+        )
+        return 2
     if not command_argv:
         print("vouch-mk2: record-evidence requires -- <argv...>", file=sys.stderr)
         return 2
@@ -1064,8 +1126,9 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
     try:
-        with Store.open(namespace.root) as store:
-            with store.write_locked():
+        # Report refusals must leave even the store's housekeeping untouched.
+        with Store.open(namespace.root, read_only=junit_report) as store:
+            with (nullcontext() if junit_report else store.write_locked()):
                 snapshot = store.read_snapshot()
                 requested_unit = cast(UnitRef, namespace.unit)
                 resolved = snapshot.unit_ref(requested_unit)
@@ -1085,16 +1148,11 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
         print(f"vouch-mk2: {error}", file=sys.stderr)
         return 2
     try:
-        returncode = (
-            _stream_child_stdout(command_argv)
-            if namespace.json_output
-            else subprocess.run(command_argv, check=False).returncode
+        returncode, report_data = _run_evidence_child(
+            command_argv, json_output=namespace.json_output, junit_report=junit_report,
         )
-    except OSError as error:
-        print(
-            f"vouch-mk2: cannot execute {command_argv[0]!r}: {error}",
-            file=sys.stderr,
-        )
+    except StoreError as error:
+        print(f"vouch-mk2: {error}", file=sys.stderr)
         return 2
     if returncode < 0:
         print(
@@ -1128,6 +1186,13 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                         timespec="seconds"
                     ),
                     pack_digest=capture.test_set_digest,
+                    evidence_format=2 if report_data is None else TEST_REPORT_EVIDENCE_FORMAT,
+                    test_report=(
+                        "" if report_data is None else digest_of(ArtifactKind.TEST_REPORT, report_data)
+                    ),
+                )
+                report_options = (
+                    {} if report_data is None else {"test_report_data": report_data}
                 )
                 digest = record_evidence(
                     store,
@@ -1137,6 +1202,7 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                     captured_pack_digest=(
                         capture.test_set_digest if capture.enforce_current else None
                     ),
+                    **report_options,
                 )
                 revision = store.read_snapshot().revision
     except RefusedError as error:
@@ -1541,6 +1607,9 @@ def _show_evidence(root: str, json_output: bool, unit_ref: UnitRef | None) -> in
                     f"test_set={record['test_set'] or '-'} "
                     f"recorded_at={record['recorded_at']!r} digest={record['digest']}]"
                 )
+            comparison = unit["test_comparison"]
+            if comparison is not None:
+                print(f"  tests: {comparison['relation']}")
             for note in unit["notes"]:
                 print(f"  {note}")
     return 1 if any(unit["chain_error"] for unit in units) else 0
@@ -1703,16 +1772,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             separator = arguments.index("--")
         except ValueError:
-            if "--help" not in arguments:
-                parser.error("record-evidence requires -- <argv...>")
+            evidence_argv = []
         else:
             lifecycle_arguments = arguments[:separator]
             child_arguments = arguments[separator + 1 :]
             arguments = lifecycle_arguments
             if "--help" not in lifecycle_arguments:
                 evidence_argv = child_arguments
-                if not evidence_argv:
-                    parser.error("record-evidence requires -- <argv...>")
     namespace = _Arguments(
         command="",
         root=".",
@@ -1739,6 +1805,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         never_published=[],
         command_argv=[],
         redact_arg=[],
+        junit_report=False,
         tree="",
         exclude=[],
         tier=Tier.LIGHTWEIGHT.value,
@@ -1750,6 +1817,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not isinstance(parsed, _Arguments):
         raise TypeError("argparse returned an unexpected namespace type")
     if evidence_argv is not None:
+        if not evidence_argv and not parsed.junit_report:
+            parser.error("record-evidence requires -- <argv...>")
         parsed.command_argv = evidence_argv
 
     if parsed.command == "merge":

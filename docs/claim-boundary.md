@@ -137,15 +137,26 @@ command from the RED before it.
 
 `show-evidence` lists the stored command line of every RED and GREEN and notes when the GREEN
 that counts has a different stored command line from the RED that counts; the note never blocks
-publication. Comparing which tests actually ran is deferred to `vouch_mk2-inv.4`.
+publication.
+
+`record-evidence --junit-report` stores the test IDs and outcomes that the JUnit report at a path
+only Vouch gave the command lists; the report is the command's claim, like the exit status, and
+Vouch does not see which tests ran.
+`show-evidence` compares the tests the counted GREEN's report lists with those the counted RED's
+report lists and notes when GREEN's report lacks some of RED's; the comparison never blocks
+publication.
+Vouch releases that predate `--junit-report` cannot read or replay the format-3 evidence records
+created with it.
 
 **Command validation and argument redaction:**
 - The CLI validates the exact command descriptor before opening the store or starting the child,
   refusing an invalid one without running it.
 - `--redact-arg INDEX` (repeatable, placed before `--`) takes zero-based positions that include
   `argv[0]`, though `argv[0]` itself cannot be redacted.
-- The child receives the original argv; the stored descriptor shows `<redacted>`, and Vouch keeps
-  no digest of the redacted value.
+- With `--junit-report`, the child's argv has the private report path in place of the single
+  `{junit}` token. Without the option, the child receives the original argv.
+- The stored descriptor uses the argv from before path substitution and shows `<redacted>`
+  at the selected positions. Vouch keeps no digest of the redacted argument value.
 - Redaction covers only the stored descriptor: child output is not redacted, and neither are the
   child's side effects. Prefer passing secrets through the environment.
 - The CLI warns on stderr whenever the original argv looks like it carries a secret. Without
