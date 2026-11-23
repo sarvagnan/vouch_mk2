@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"workflow-refresh@1","reason":"unit branch: anchored by CI on main after merge"},"prev":"57278e6619904116fe5ccf3046366d1dde257ba0667bdd5a4e1f42f54dd89d4e","recorded_at":"2026-11-23T17:42:54+00:00","revision":1476,"run_id":""}

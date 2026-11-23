@@ -736,6 +736,14 @@ class Store:
         if name not in GENERATED_FILES:
             raise StoreError(f"generated file {name!r} is not allowlisted")
 
+    def has_init_config(self) -> bool:
+        """Check for init's config marker in the opened store, without reading it."""
+        try:
+            os.stat("config.json", dir_fd=self._root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        return True
+
     def generated_path(self, name: str) -> str:
         """Return the caller-visible absolute path of one allowlisted output."""
         self._validate_generated_name(name)

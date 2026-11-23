@@ -160,47 +160,42 @@ def write_atomic_with_parents(
             os.close(directory_fd)
             directory_fd = child_fd
 
-        temp = f".{filename}.{secrets.token_hex(8)}.tmp"
-        temp_exists = False
-        try:
-            try:
-                fd = os.open(
-                    temp,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                    mode,
-                    dir_fd=directory_fd,
-                )
-            except OSError as error:
-                raise StoreError(
-                    f"{path}: cannot write {purpose}: {error}"
-                ) from error
-            temp_exists = True
-            try:
-                os.fchmod(fd, mode)
-                with os.fdopen(fd, "wb", closefd=False) as stream:
-                    stream.write(data)
-                    stream.flush()
-                    os.fsync(fd)
-            finally:
-                os.close(fd)
-            try:
-                os.replace(
-                    temp,
-                    filename,
-                    src_dir_fd=directory_fd,
-                    dst_dir_fd=directory_fd,
-                )
-            except OSError as error:
-                raise StoreError(
-                    f"{path}: cannot write {purpose}: {error}"
-                ) from error
-            temp_exists = False
-            os.fsync(directory_fd)
-        finally:
-            if temp_exists:
-                try:
-                    os.unlink(temp, dir_fd=directory_fd)
-                except FileNotFoundError:
-                    pass
+        write_atomic_at(directory_fd, path, data, mode, purpose)
     finally:
         os.close(directory_fd)
+
+
+def write_atomic_at(
+    directory_fd: int, path: str, data: bytes, mode: int, purpose: str,
+) -> None:
+    """Replace the basename of ``path`` atomically in the opened directory."""
+    filename = os.path.basename(os.path.abspath(path))
+    temp = f".{filename}.{secrets.token_hex(8)}.tmp"
+    temp_exists = False
+    try:
+        fd = os.open(
+            temp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            mode,
+            dir_fd=directory_fd,
+        )
+        temp_exists = True
+        try:
+            os.fchmod(fd, mode)
+            with os.fdopen(fd, "wb", closefd=False) as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temp, filename, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        temp_exists = False
+        os.fsync(directory_fd)
+    except OSError as error:
+        raise StoreError(f"{path}: cannot write {purpose}: {error}") from error
+    finally:
+        if temp_exists:
+            try:
+                os.unlink(temp, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass

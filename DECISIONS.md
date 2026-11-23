@@ -2274,3 +2274,32 @@ read.
 - **Out of scope.** Requiring a policy at any tier. A per-kind command (narrow RED, full GREEN):
   a pack that needs it does not opt in. Constraining report IDs to the frozen test files.
   Showing the policy in `show-evidence`. Proving that a report came from the tests (D-52).
+
+## D-55 — `check` compares the generated workflow with the lock's, and `refresh-workflow` rewrites it (2026-11-23)
+
+**Status:** decided 2026-11-23 by the user (`vouch_mk2-bd4.4.26`; answers: a check row and a
+refresh verb rather than either alone or documentation only; drift is a `FAIL` at every tier).
+One unit, `workflow-refresh@1`.
+
+- **The finding.** The activity_tracker_portal pilot re-pinned `vouch.lock` and upgraded its store,
+  but its `.github/workflows/vouch.yml` stayed at the version `init` wrote: `init` writes it once,
+  no command rewrites it, and neither `self-check` nor `check --ci` compares it with what the
+  running Vouch would generate. The portal hand-patched the anchor loop (D-34) and added D-50's
+  `merge_check` job by hand.
+- **Check.** A new row, `check.workflow-current`, applies when `check` is given a project root and
+  the store holds the `config.json` that `init` writes (an adopted project; mk2's own store has
+  none). It passes only when `<project>/.github/workflows/vouch.yml` is a regular file, not a
+  symlink, whose bytes equal the workflow the running Vouch generates. Otherwise it is a `FAIL`
+  at every tier, naming the remedy. The generated workflow runs `check` from the pinned lock, so
+  in CI the comparison is with the pinned lock's workflow. `vouch.yml` is a file Vouch owns; hand
+  edits to it are not supported.
+- **Refresh.** `vouch-mk2 refresh-workflow --project PATH` rewrites
+  `<project>/.github/workflows/vouch.yml` with the running Vouch's workflow, atomically, and
+  touches nothing else. It refuses a project without `.vouch/config.json` and a symlinked path.
+  Run from the pinned lock (`python3 vouch.lock refresh-workflow --project .`), it writes what CI
+  will compare against.
+- **Re-pin step.** `docs/quickstart.md` documents re-pinning: replace `vouch.lock`, update the
+  digest in `.vouch/config.json`, run `upgrade`, then `refresh-workflow`, then `check --ci`.
+- **Out of scope.** Updating the lock and `config.json` together, and rollback (release-upgrade@1,
+  `vouch_mk2-b6g.14.3`, which will reuse this refresh). The caller job in the project's own
+  workflow, which the project owns.

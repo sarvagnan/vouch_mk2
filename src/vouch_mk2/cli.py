@@ -63,6 +63,7 @@ from vouch_mk2.init import (
     InitStatus,
     generated_workflow,
     init_project,
+    refresh_workflow,
 )
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict
@@ -190,8 +191,8 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         "--project",
         default="",
         help=(
-            "project root for acceptance-pack file verification (default: parent "
-            "of --root when its basename is .vouch)"
+            "project root for pack and workflow checks; pack checks default to "
+            "the parent of --root when its basename is .vouch"
         ),
     )
     formal = commands.add_parser(
@@ -371,6 +372,11 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         default=default_actor(),
         help="recorded actor claim (default: OS user)",
     )
+    refresh = commands.add_parser(
+        "refresh-workflow",
+        help="replace the project's generated .github/workflows/vouch.yml",
+    )
+    refresh.add_argument("--project", required=True, help="target project directory")
     mcp = commands.add_parser(
         "mcp", help="serve read-only MCP over line-delimited stdio for ONE store"
     )
@@ -1991,6 +1997,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         return 0
 
+    if parsed.command == "refresh-workflow":
+        try:
+            refresh_workflow(parsed.project)
+        except (OSError, StoreError) as error:
+            print(f"vouch-mk2: {error}", file=sys.stderr)
+            return 2
+        return 0
+
     if parsed.command == "init":
         try:
             if parsed.lock_path is not None:
@@ -2280,12 +2294,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             snapshot = store.read_snapshot()
             project = parsed.project or None
             normalized_root = os.path.normpath(parsed.root)
+            inferred_project = None
             if project is None and os.path.basename(normalized_root) == ".vouch":
-                project = os.path.abspath(os.path.dirname(normalized_root))
+                inferred_project = os.path.abspath(os.path.dirname(normalized_root))
             artifact_results = run_artifact_checks(
                 store,
                 snapshot,
                 project=project,
+                inferred_project=inferred_project,
             )
     except StoreError as error:
         print(f"vouch-mk2: {error}", file=sys.stderr)

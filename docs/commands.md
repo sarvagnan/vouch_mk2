@@ -15,8 +15,8 @@ options:
                        check.evidence-anchors reporting a pending CI anchor
   --json               emit one JSON report instead of text
   --root ROOT          store root directory (default: current directory)
-  --project PROJECT    project root for acceptance-pack file verification (default: parent of
-                       --root when its basename is .vouch)
+  --project PROJECT    project root for pack and workflow checks; pack checks default to the
+                       parent of --root when its basename is .vouch
 ```
 
 ## formal
@@ -167,6 +167,16 @@ options:
 Exit codes: 0 initialized; 2 refused with nothing written; 3 suggestion files
 written—review/replace them and rerun init; 4 incomplete publication—complete remnants remain; fix
 the cause and retry init.
+```
+
+## refresh-workflow
+
+```text
+usage: vouch-mk2 refresh-workflow [-h] --project PROJECT
+
+options:
+  -h, --help         show this help message and exit
+  --project PROJECT  target project directory
 ```
 
 ## mcp

@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_workflow_refresh.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"e9b9dc88093348e90983df131c36f3a4263402e01f9f688fb4016074640a5e9c","parent":"GENESIS","recorded_at":"2026-11-23T17:42:54+00:00","sequence":1,"unit":{"name":"workflow-refresh","version":"1"}}
