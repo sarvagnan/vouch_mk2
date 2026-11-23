@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitInvalidated","event_format":2,"pack_digest":"","payload":{"name":"evidence-policy","trigger_deviation_id":"DEV-ep-02"},"prev":"53a9a427c4a0c0165db8b2d05b54bc6749c138776c2101d47a37496dc5b3f342","recorded_at":"2026-11-23T15:20:47+00:00","revision":1459,"run_id":""}

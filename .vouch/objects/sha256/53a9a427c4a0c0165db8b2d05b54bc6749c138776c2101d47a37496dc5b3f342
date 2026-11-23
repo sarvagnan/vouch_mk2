@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationAmended","event_format":2,"pack_digest":"","payload":{"amendment_version":"evidence-policy-pack/3","deviation_id":"DEV-ep-02","impact_set":["evidence-policy"],"release_impact_set":[]},"prev":"a99f27e8fe0b3caaab740f968a51f89d682b5f3d533ce80c349dfe3f0acefa4a","recorded_at":"2026-11-23T15:20:47+00:00","revision":1458,"run_id":""}

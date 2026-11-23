@@ -2219,3 +2219,58 @@ store rather than pass with a message). One unit, `merge-check-upgrade@1`.
   with a message saying so instead of replaying. A store newer than the running Vouch still fails.
 - **Out of scope.** Upgrading MERGED; refreshing an adopter's generated workflow after a re-pin
   (`vouch_mk2-bd4.4.26`); `merge-git-stages` with an older THEIRS store.
+
+## D-54 — A pack may bind its evidence command and require complete JUnit reports (2026-11-23)
+
+**Status:** decided 2026-11-23 by the user (`vouch_mk2-inv.3`; answers: both opt-ins, each
+separately; one shared command for RED and GREEN; a changed command needs a fresh RED and GREEN;
+refuse a GREEN whose report falls short; RED's report must list at least one failure; refuse
+`--redact-arg` for a unit whose pack binds a command). One unit, `evidence-policy@1`. Drafted as
+D-53 and renumbered when `vouch_mk2-bd4.4.25` took D-53; refined after Astra's first pre-freeze
+read.
+
+- **The finding.** RED and GREEN may run any command; the gates compare the frozen test set, not
+  the command, so a RED of `false` and a GREEN of `true` publish at `standard` (D-48). D-49 shows
+  the commands and D-52 compares JUnit reports, but neither blocks.
+- **The file.** A pack may bind one evidence-policy file, `freeze --pack-evidence-file`, beside
+  its tests and effects file. It is strict JSON with `evidence_format: 1` and at least one of two
+  opt-ins: `command`, the exact argv RED and GREEN must run (it may contain `{junit}` once), and
+  `reports: "required"`. Freeze refuses a malformed file, and a file that requires reports and
+  binds a command without `{junit}`. The decoded policy is stored in the pack inventory, as the
+  effects declaration is, so recording and checking read the frozen policy, never the working
+  tree. The file is part of the test set in both of its projections (explicit test files and the
+  whole-pack fallback), so freezing a different policy re-keys the evidence: at tiers whose gates
+  check the current pack, publication then needs a new RED and a new GREEN. Packs without the file keep their inventory, digests and
+  behaviour.
+- **Bound command.** For a unit whose current pack binds a command, `record-evidence` refuses,
+  before launching anything, an argv that is not exactly the bound argv, and refuses
+  `--redact-arg` (secrets go through the environment). `--junit-report` is required exactly when
+  the bound argv contains `{junit}`, for every kind.
+- **Required reports.** For a unit whose current pack requires reports, `record-evidence` refuses
+  a RED or GREEN without `--junit-report` before launching anything; refuses a RED whose report
+  lists no test as `failed` or `error`; and refuses a GREEN unless its report lists every test the
+  comparison RED's report lists and every test that RED's report lists as `failed` or `error` is
+  listed as `passed`. The comparison RED is the latest RED for the current test set before the
+  GREEN, or, when there is none, the latest RED in the unit's chain; a GREEN with no comparison
+  RED, or one whose comparison RED has no report, is refused. These report refusals are decided
+  under the store's write lock against the chain the record would join. REFACTOR records need no
+  report.
+- **What a refusal writes.** A refusal before launch, and a refused freeze, leave every store file
+  unchanged, including the store's housekeeping. A refusal after the child ran adds no record and
+  no object and changes neither state nor event log; the writable open it shares with the append
+  may sweep leftovers of interrupted writes, as every writable open does.
+- **Rebind.** A rebind whose pack adds, removes or changes the decoded policy is refused by
+  `decide`, beside `rebind.effects-changed`, so a merge replay and `check-merge` refuse it too: a
+  rebind follows a shared-interface change after publication, when a fresh RED cannot be produced,
+  so a new policy needs a new unit version. The comparison is of what the policy says, not of its
+  path or bytes; moving it to another path still meets `rebind.paths-removed`. After a rebind that
+  changes the test files the current test set has no RED, so the GREEN is compared with the RED
+  before the rebind.
+- **Check.** `check.evidence-chains` also walks, for every unit whose current pack binds a policy,
+  every evidence record for the current test set in chain order and fails on any that breaks the
+  policy, so a record written by an older release or another clone that skipped the policy fails
+  the check wherever it sits in the chain. Records for other test sets are not held to the policy
+  but still serve as comparison REDs.
+- **Out of scope.** Requiring a policy at any tier. A per-kind command (narrow RED, full GREEN):
+  a pack that needs it does not opt in. Constraining report IDs to the frozen test files.
+  Showing the policy in `show-evidence`. Proving that a report came from the tests (D-52).

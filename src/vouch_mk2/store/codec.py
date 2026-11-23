@@ -15,12 +15,14 @@ from __future__ import annotations
 import io
 import json
 import re
+import shlex
 import types
 from collections.abc import Callable
 from dataclasses import fields, is_dataclass
 from enum import Enum
 from typing import assert_never, cast, get_args, get_origin, get_type_hints
 
+from vouch_mk2.core.evidence_policy import JUNIT_TOKEN
 from vouch_mk2.core.invariants import (
     valid_command_line,
     valid_unit_identifier,
@@ -44,6 +46,7 @@ from vouch_mk2.core.model import (
     EvidenceKind,
     EvidenceOutcome,
     EvidencePackSummary,
+    EvidencePolicy,
     InventoryEntry,
     LaunchCriteria,
     PackEntry,
@@ -492,6 +495,54 @@ def decode_effects_file(data: bytes) -> tuple[ObservationEffect | ActionEffect, 
     return _decode_effects(obj["effects"])
 
 
+def _decode_evidence_policy(value: object, path: str) -> EvidencePolicy:
+    obj = _fields(
+        value, path, frozenset({"evidence_format"}), frozenset({"command", "reports"}),
+    )
+    if _integer(obj["evidence_format"], _child(path, "evidence_format")) != 1:
+        raise DecodeError(f"{_child(path, 'evidence_format')}: expected 1")
+    reports_required = "reports" in obj
+    if reports_required and obj["reports"] != "required":
+        raise DecodeError(f"{_child(path, 'reports')}: expected 'required'")
+    if "command" not in obj:
+        if not reports_required:
+            raise DecodeError(f"{path or '$'}: expected command, reports or both")
+        return EvidencePolicy(reports_required=True)
+
+    command_path = _child(path, "command")
+    command = _strings(obj["command"], command_path)
+    if not command or not all(command):
+        raise DecodeError(f"{command_path}: expected a non-empty list of non-empty strings")
+    token_count = sum(argument.count(JUNIT_TOKEN) for argument in command)
+    if token_count > 1 or (reports_required and token_count != 1):
+        raise DecodeError(
+            f"{command_path}: expected at most one {JUNIT_TOKEN} token, "
+            "exactly one with required reports"
+        )
+    if not valid_command_line(shlex.join(command)):
+        raise DecodeError(f"{command_path}: stored command must contain 1..4096 printable characters")
+    return EvidencePolicy(command, reports_required)
+
+
+def decode_evidence_policy_file(data: bytes) -> EvidencePolicy:
+    try:
+        value = _decode_json(data, "evidence-policy file")
+    except (ValueError, RecursionError) as error:
+        raise DecodeError(f"$: invalid JSON: {error}") from error
+    return _decode_evidence_policy(value, "")
+
+
+def _evidence_policy_object(policy: EvidencePolicy) -> dict[str, object]:
+    obj: dict[str, object] = {"evidence_format": 1}
+    if policy.command:
+        obj["command"] = list(policy.command)
+    if policy.reports_required:
+        obj["reports"] = "required"
+    if _decode_evidence_policy(obj, "evidence_policy") != policy:
+        raise StoreError("invalid acceptance pack evidence policy")
+    return obj
+
+
 def encode_pack_inventory(inventory: PackInventory) -> bytes:
     """Encode one canonical acceptance-pack inventory (D-14)."""
     if not inventory.entries:
@@ -517,6 +568,13 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
             )
     elif inventory.effects is not None:
         raise StoreError("legacy pack formats cannot carry effects")
+    policy = inventory.evidence_policy
+    if sum(entry.role == "evidence" for entry in inventory.entries) != int(policy is not None):
+        raise StoreError("acceptance pack evidence policy requires exactly one evidence entry")
+    if policy is not None and not any(
+        entry.role in {"", "spec", "test"} for entry in inventory.entries
+    ):
+        raise StoreError("acceptance pack evidence policy requires a spec or test entry")
     previous = ""
     for entry in inventory.entries:
         RelPath.parse(entry.path)
@@ -534,11 +592,11 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
         if type(entry.size) is not int or entry.size < 0:
             raise StoreError(f"pack entry {entry.path!r}: size must be non-negative")
         if inventory.pack_format == 1:
-            if entry.role not in {"", "spec"}:
+            if entry.role not in {"", "spec", "evidence"}:
                 raise StoreError(
                     f"pack entry {entry.path!r}: pack format 1 cannot carry role {entry.role!r}"
                 )
-        elif entry.role not in (
+        elif entry.role != "evidence" and entry.role not in (
             {"test", "spec", "effects"}
             if inventory.pack_format == 3 else {"test", "spec"}
         ):
@@ -552,7 +610,7 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
             "path": entry.path,
             "sha256": entry.sha256,
             "size": entry.size,
-            **({"role": entry.role} if inventory.pack_format >= 2 else {}),
+            **({"role": entry.role} if inventory.pack_format >= 2 or entry.role == "evidence" else {}),
         }
         for entry in inventory.entries
     ]
@@ -561,6 +619,7 @@ def encode_pack_inventory(inventory: PackInventory) -> bytes:
             "pack_format": inventory.pack_format,
             "entries": entries,
             **({"effects": effects_objects(inventory.effects)} if inventory.effects is not None else {}),
+            **({"evidence_policy": _evidence_policy_object(policy)} if policy is not None else {}),
         }
     )
 
@@ -1781,13 +1840,17 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
         _decode_json(data, "acceptance pack inventory"),
         "",
         _PACK_INVENTORY_FIELDS,
-        frozenset({"effects"}),
+        frozenset({"effects", "evidence_policy"}),
     )
     pack_format = _integer(obj["pack_format"], "pack_format")
     if pack_format not in {1, 2, 3}:
         raise DecodeError(f"pack_format: expected 1, 2 or 3, got {pack_format}")
     if ("effects" in obj) != (pack_format == 3):
         raise DecodeError("effects: required only in pack format 3")
+    policy = (
+        _decode_evidence_policy(obj["evidence_policy"], "evidence_policy")
+        if "evidence_policy" in obj else None
+    )
     raw_entries = _array(obj["entries"], "entries")
     if not raw_entries:
         raise DecodeError("entries: acceptance pack inventory must not be empty")
@@ -1800,6 +1863,7 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
             raw,
             path,
             _PACK_ENTRY_V1_FIELDS if pack_format == 1 else _PACK_ENTRY_V2_FIELDS,
+            frozenset({"role"}) if pack_format == 1 and policy is not None else frozenset(),
         )
         text = _string(fields["path"], f"{path}.path")
         try:
@@ -1813,18 +1877,19 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
         size = _integer(fields["size"], f"{path}.size")
         if size < 0:
             raise DecodeError(f"{path}.size: must be non-negative")
+        # A policy entry keeps its role even in the whole-pack format.
+        if policy is not None and fields.get("role") == "evidence":
+            role = "evidence"
+        elif pack_format == 1:
+            role = ""
+        else:
+            role = _pack_role(fields["role"], f"{path}.role", effects_allowed=pack_format == 3)
         entries.append(
             PackEntry(
                 path=text,
                 sha256=_digest(fields["sha256"], f"{path}.sha256"),
                 size=size,
-                role=(
-                    ""
-                    if pack_format == 1
-                    else _pack_role(
-                        fields["role"], f"{path}.role", effects_allowed=pack_format == 3
-                    )
-                ),
+                role=role,
             )
         )
         seen_paths.add(text)
@@ -1832,6 +1897,7 @@ def decode_pack_inventory(data: bytes) -> PackInventory:
     inventory = PackInventory(
         entries=tuple(entries), pack_format=pack_format,
         effects=_decode_effects(obj["effects"]) if pack_format == 3 else None,
+        evidence_policy=policy,
     )
     if pack_format == 2 and not any(entry.role == "test" for entry in entries):
         raise DecodeError(

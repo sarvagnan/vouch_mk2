@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -44,8 +45,9 @@ from vouch_mk2.core import (
     evidence_kind_outcome_coherent,
     fold_evidence_pack_summaries,
 )
+from vouch_mk2.core.evidence_policy import REPORT_REQUIRED, report_policy_violation, requires_report
 from vouch_mk2.core.events import MergeRecorded
-from vouch_mk2.core.model import TestReport
+from vouch_mk2.core.model import EvidencePolicy, TestReport
 from vouch_mk2.formal.certificate import CHECKER_VERSION, FormalCertificate
 from vouch_mk2.formal.explore import Relation, emit_tables
 from vouch_mk2.formal.invariants import INVARIANTS
@@ -65,6 +67,7 @@ from vouch_mk2.projections.evidence import (
 from vouch_mk2.store import (
     CURRENT_STATE_FORMAT,
     ArtifactKind,
+    IntegrityError,
     Store,
     StoreError,
     decode_bundle_inventory,
@@ -283,7 +286,7 @@ def _read_test_report(store: Store, digest: str) -> TestReport:
     return decode_test_report(store.get_object(ArtifactKind.TEST_REPORT, digest))
 
 
-def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
+def _walk_chain(store: Store, head: EvidenceHead, *, verify_reports: bool = True) -> _ChainWalk:
     events: list[tuple[str, EvidenceEvent]] = []
     checked_reports: set[str] = set()
     digest = head.head
@@ -316,7 +319,7 @@ def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
                 tuple(events),
                 f"event sequence {event.sequence}, expected {expected_sequence}",
             )
-        if event.test_report and event.test_report not in checked_reports:
+        if verify_reports and event.test_report and event.test_report not in checked_reports:
             try:
                 _read_test_report(store, event.test_report)
             except (OSError, StoreError) as error:
@@ -334,6 +337,39 @@ def _walk_chain(store: Store, head: EvidenceHead) -> _ChainWalk:
         )
         return _ChainWalk(head, tuple(events), reason)
     return _ChainWalk(head, tuple(events), "")
+
+
+def read_evidence_policy(store: Store, pack_digest: str) -> EvidencePolicy | None:
+    if not pack_digest:
+        return None
+    return decode_pack_inventory(
+        store.get_object(ArtifactKind.ACCEPTANCE_PACK, pack_digest)
+    ).evidence_policy
+
+
+def _report_for_event(store: Store, event: EvidenceEvent | None) -> TestReport | None:
+    if event is None or not event.test_report:
+        return None
+    return _read_test_report(store, event.test_report)
+
+
+def read_comparison_red_report(
+    store: Store, head: EvidenceHead | None, test_set_digest: str,
+) -> TestReport | None:
+    """Read the latest same-set RED's report or fall back to the latest RED."""
+    if head is None:
+        return None
+    walk = _walk_chain(store, head, verify_reports=False)
+    if walk.error:
+        raise StoreError(f"unit {head.ref().label()!r}: {walk.error}")
+    latest_red = None
+    for _, event in walk.events:
+        if event.kind is EvidenceKind.RED:
+            if event.pack_digest == test_set_digest:
+                return _report_for_event(store, event)
+            if latest_red is None:
+                latest_red = event
+    return _report_for_event(store, latest_red)
 
 
 def read_evidence_view(
@@ -467,8 +503,49 @@ def _is_red(kind: EvidenceKind) -> bool:
             assert_never(kind)
 
 
+def _check_bound_evidence_policy(store: Store, unit: Unit, walk: _ChainWalk) -> str:
+    try:
+        policy = read_evidence_policy(store, unit.acceptance_pack_digest)
+    except IntegrityError as error:
+        if isinstance(error.__cause__, FileNotFoundError):
+            # check.effects-declared fails an unavailable inventory for every unit
+            # that is not superseded, and legacy chains of those units keep their
+            # verdict here. It skips superseded units, so this row reports theirs.
+            if unit.status is UnitStatus.SUPERSEDED:
+                return f"pack inventory unavailable: {error}"
+            return ""
+        raise
+    if policy is None:
+        return ""
+    bound_line = shlex.join(policy.command)
+    latest_red = None
+    latest_current_red = None
+    for _, event in reversed(walk.events):
+        is_current = event.pack_digest == unit.acceptance_test_set_digest
+        if is_current:
+            subject = f"evidence sequence {event.sequence}"
+            if bound_line and event.command_line != bound_line:
+                return f"{subject}: evidence.command-not-bound: stored command differs from the bound command"
+            if requires_report(policy, event.kind) and not event.test_report:
+                return f"{subject}: {REPORT_REQUIRED.code}: {REPORT_REQUIRED.detail}"
+            if policy.reports_required and event.kind in {EvidenceKind.RED, EvidenceKind.GREEN}:
+                report = _read_test_report(store, event.test_report)
+                comparison = (
+                    _report_for_event(store, latest_current_red or latest_red)
+                    if event.kind is EvidenceKind.GREEN else None
+                )
+                violation = report_policy_violation(event.kind, report, comparison)
+                if violation is not None:
+                    return f"{subject}: {violation.code}: {violation.detail}"
+        if event.kind is EvidenceKind.RED:
+            latest_red = event
+            if is_current:
+                latest_current_red = event
+    return ""
+
+
 def _check_evidence_chains(
-    snapshot: Snapshot, walks: tuple[_ChainWalk, ...]
+    store: Store, snapshot: Snapshot, walks: tuple[_ChainWalk, ...]
 ) -> CheckResult:
     if not walks:
         return CheckResult(
@@ -502,6 +579,12 @@ def _check_evidence_chains(
         if walk.error:
             failures.append(f"unit {walk.head.unit_name!r}: {walk.error}")
             continue
+        try:
+            policy_error = _check_bound_evidence_policy(store, unit, walk)
+        except StoreError as error:
+            policy_error = str(error)
+        if policy_error:
+            failures.append(f"unit {unit.ref().label()!r}: {policy_error}")
         history_error = _red_before_first_green(
             walk,
             rebound_history=unit.rebound_history,
@@ -887,14 +970,13 @@ def _check_pack_files_match(
             )
             continue
         try:
-            # Include the effects path among raw files. This check compares
-            # hashes and sizes, never reparses or compares the declaration.
+            # Hash effects and policy paths as raw files, just like specs.
             actual = build_pack_inventory(
                 project_root,
                 tuple(
                     entry.path
                     for entry in inventory.entries
-                    if inventory.pack_format == 1 or entry.role in {"spec", "effects"}
+                    if inventory.pack_format == 1 or entry.role in {"spec", "effects", "evidence"}
                 ),
                 tuple(
                     entry.path
@@ -1207,7 +1289,7 @@ def run_artifact_checks(
     return tuple(
         sorted(
             (
-                _check_evidence_chains(snapshot, walks),
+                _check_evidence_chains(store, snapshot, walks),
                 _check_event_log(store, snapshot),
                 _check_evidence_anchors(snapshot, walks),
                 _check_bundle_inventories(store, snapshot),

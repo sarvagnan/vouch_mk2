@@ -158,6 +158,7 @@ class Store:
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
         *,
         read_only: bool = False,
+        sweep_orphans: bool = True,
     ) -> Store:
         """Open an existing store with one root directory capability.
 
@@ -165,11 +166,13 @@ class Store:
         event objects only when they can acquire ``LOCK_EX | LOCK_NB``
         immediately. Actual writers use blocking ``LOCK_EX`` and wait for the
         current writer. ``read_only=True`` handles never create or acquire the
-        lock, skip the sweep, and refuse every store mutation."""
+        lock, skip the sweep, and refuse every store mutation. A writable
+        caller can defer housekeeping until after validation with
+        ``sweep_orphans=False``."""
         store = cls(root, on_step=on_step, max_artifact_bytes=max_artifact_bytes)
         store._read_only = read_only
         try:
-            store._check_layout()
+            store._check_layout(sweep_orphans=sweep_orphans)
         except BaseException:
             store.close()
             raise
@@ -277,7 +280,7 @@ class Store:
             os.close(state_fd)
         os.fsync(self._root_fd)
 
-    def _check_layout(self) -> None:
+    def _check_layout(self, *, sweep_orphans: bool) -> None:
         self._assert_not_symlink("state.json", self._root_fd, "state.json")
         self.read_state_format_high_water()
         if self._read_only:
@@ -287,7 +290,7 @@ class Store:
             self._assert_not_symlink(".lock", self._root_fd, ".lock")
         objects_fd = self._open_objects_directory()
         os.close(objects_fd)
-        if not self._read_only:
+        if not self._read_only and sweep_orphans:
             self._sweep_orphans()
 
     def _sweep_orphans(self) -> None:
@@ -305,26 +308,34 @@ class Store:
             except BlockingIOError:
                 return
             locked = True
-            self._sweep_merge_transactions()
-            for name in os.listdir(self._root_fd):
-                if (
-                    name.startswith(".state-")
-                    or name.startswith(".state-format-")
-                    or name.startswith(".generated-")
-                ) and name.endswith(".tmp"):
-                    self._unlink_if_present(name, self._root_fd)
-            objects_fd = self._open_objects_directory()
-            try:
-                for name in os.listdir(objects_fd):
-                    if name.startswith(".object-") and name.endswith(".tmp"):
-                        self._unlink_if_present(name, objects_fd)
-            finally:
-                os.close(objects_fd)
-            self._sweep_unreachable_event_objects()
+            self._sweep_orphans_under_lock()
         finally:
             if locked:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
+
+    def sweep_locked_orphans(self) -> None:
+        """Run deferred open housekeeping while holding the writer lock."""
+        self._require_write_lock("orphan sweep")
+        self._sweep_orphans_under_lock()
+
+    def _sweep_orphans_under_lock(self) -> None:
+        self._sweep_merge_transactions()
+        for name in os.listdir(self._root_fd):
+            if (
+                name.startswith(".state-")
+                or name.startswith(".state-format-")
+                or name.startswith(".generated-")
+            ) and name.endswith(".tmp"):
+                self._unlink_if_present(name, self._root_fd)
+        objects_fd = self._open_objects_directory()
+        try:
+            for name in os.listdir(objects_fd):
+                if name.startswith(".object-") and name.endswith(".tmp"):
+                    self._unlink_if_present(name, objects_fd)
+        finally:
+            os.close(objects_fd)
+        self._sweep_unreachable_event_objects()
 
     def _sweep_merge_transactions(self) -> None:
         """Recover merge staging directories left before or after publication."""

@@ -387,6 +387,7 @@ options:
 usage: vouch-mk2 freeze [-h] --root ROOT [--json] [--actor ACTOR] --name NAME
                         --pack-version PACK_VERSION [--project PROJECT] [--pack-file PACK_FILE]
                         [--pack-test-file PACK_TEST_FILE] [--pack-effects-file PACK_EFFECTS_FILE]
+                        [--pack-evidence-file PATH]
 
 options:
   -h, --help            show this help message and exit
@@ -402,6 +403,8 @@ options:
                         project-relative executable acceptance test file (repeatable)
   --pack-effects-file PACK_EFFECTS_FILE
                         project-relative effects declaration JSON
+  --pack-evidence-file PATH
+                        project-relative evidence policy JSON (requires a spec or test file)
 ```
 
 ## mark-done
@@ -514,7 +517,7 @@ options:
 usage: vouch-mk2 rebind-pack [-h] --root ROOT [--json] [--actor ACTOR] --name NAME --reason REASON
                              [--project PROJECT] [--pack-file PACK_FILE]
                              [--pack-test-file PACK_TEST_FILE]
-                             [--pack-effects-file PACK_EFFECTS_FILE]
+                             [--pack-effects-file PACK_EFFECTS_FILE] [--pack-evidence-file PATH]
 
 options:
   -h, --help            show this help message and exit
@@ -530,6 +533,8 @@ options:
                         project-relative executable acceptance test file (repeatable)
   --pack-effects-file PACK_EFFECTS_FILE
                         project-relative effects declaration JSON
+  --pack-evidence-file PATH
+                        project-relative evidence policy JSON (requires a spec or test file)
 ```
 
 ## record-evidence
