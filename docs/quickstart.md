@@ -26,9 +26,9 @@ python3 vouch.lock init --project . --lock vouch.lock
 python3 vouch.lock self-check --expect @.vouch/config.json
 ```
 
-From here on, every command has the form `python3 vouch.lock <verb> --root .vouch …`. Run
-`--help` on any verb to see its options, or read [commands.md](commands.md). `record-evidence`
-also takes `-- <argv…>` after its options.
+Store commands in this walkthrough use `python3 vouch.lock <verb> --root .vouch …`.
+`refresh-workflow` takes `--project`. Run `--help` on any verb to see its options, or read
+[commands.md](commands.md). `record-evidence` also takes `-- <argv…>` after its options.
 
 ## 2. Specify a unit and freeze its acceptance pack
 
@@ -423,7 +423,7 @@ that expensive exploration.
 
 ```sh
 python3 vouch.lock generate --root .vouch
-python3 vouch.lock check --ci --root .vouch
+python3 vouch.lock check --ci --root .vouch --project .
 ```
 
 Mechanical rows come first: PASS, FAIL, NOT-CHECKED or NOT-APPLICABLE, with the applicability
@@ -449,6 +449,16 @@ python3 vouch.lock upgrade --root .vouch --dry-run
 ```
 
 `upgrade` reports how many version-1 merge markers a store holds.
+
+### Re-pin the lock
+
+From the project root, replace `vouch.lock` with the version you want to pin and set
+`lock_digest` in `.vouch/config.json` to the digest printed by `python3 vouch.lock self-check`. Run
+`python3 vouch.lock upgrade --root .vouch` to upgrade the store.
+
+After you re-pin `vouch.lock`, run `python3 vouch.lock refresh-workflow --project .`.
+Then run `python3 vouch.lock check --ci --root .vouch --project .` to check the refreshed
+workflow and store. If the check passes, commit the changes.
 
 ## Next
 

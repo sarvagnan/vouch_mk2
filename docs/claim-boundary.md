@@ -31,6 +31,7 @@ that ran, or the run fails. Threat levels come from [threat-model.md](threat-mod
 | Evidence chains | One canonical-JSON hash chain per `NAME@VERSION`. Each new record binds the current pack's test-set digest (or the whole inventory digest for legacy pack format 1). RED precedes the first GREEN, except that a rebind after publication requires only a fresh GREEN. Anchors only move forward. | 1–2 |
 | Tier evidence | The tier recorded in the snapshot selects the IR-bound chain, anchor, and high-attestation checks. No configuration overrides it. | 1–2 |
 | Projection freshness | `check.map-freshness` and `check.context-freshness` regenerate projections and byte-compare them. A stale projection is a `FAIL`, not a broken commit. | 1 |
+| Generated workflow freshness | For a store `init` wrote, checked with `--project`, `check.workflow-current` fails when `.github/workflows/vouch.yml` differs from the workflow the running Vouch generates. | 1 |
 | Registry completeness | Any check declared in the IR without an evaluator fails CI on the mk2 repository. | 1 |
 | Recorded formal certificate | Cheap verification of a recorded certificate; see [Formal certificate](#formal-certificate). | 1 |
 | Formal invariants over the bounded model | `vouch-mk2 formal` exhaustively regenerates the bounded relations, evaluates M1–M12, and runs the private mutation witnesses; see [Formal certificate](#formal-certificate). | 1 |

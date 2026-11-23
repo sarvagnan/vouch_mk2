@@ -84,6 +84,7 @@ ARTIFACT_RESULTS = tuple(
         mk2.CHECK_PACK_BOUND,
         mk2.CHECK_EFFECTS_DECLARED,
         mk2.CHECK_PACK_FILES_MATCH,
+        mk2.CHECK_WORKFLOW_CURRENT,
         mk2.CHECK_EVENT_LOG,
     )
 )

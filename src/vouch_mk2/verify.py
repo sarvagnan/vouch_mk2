@@ -54,6 +54,7 @@ from vouch_mk2.formal.invariants import INVARIANTS
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.formal.universe import UNIVERSES
 from vouch_mk2.formal.witnesses import WITNESSES
+from vouch_mk2.init import WORKFLOW_PATH, workflow_is_current
 from vouch_mk2.io import read_regular_nofollow, write_atomic
 from vouch_mk2.ir import mk2
 from vouch_mk2.ir.schema import Verdict, Violation
@@ -1278,13 +1279,32 @@ def _check_context_freshness(store: Store, snapshot: Snapshot) -> CheckResult:
     )
 
 
+def _check_workflow_current(store: Store, project: str | None) -> CheckResult:
+    check_id = mk2.CHECK_WORKFLOW_CURRENT
+    remedy = "run `refresh-workflow --project PATH` from the pinned lock"
+    try:
+        if not store.has_init_config():
+            return CheckResult(check_id, Verdict.NOT_APPLICABLE, "no config.json in store root")
+        if project is None:
+            return CheckResult(check_id, Verdict.NOT_APPLICABLE, "no project root supplied")
+        if workflow_is_current(project):
+            return CheckResult(check_id, Verdict.PASS, "")
+    except (OSError, StoreError) as error:
+        return CheckResult(check_id, Verdict.FAIL, f"{WORKFLOW_PATH}: {error}; {remedy}")
+    return CheckResult(check_id, Verdict.FAIL, f"{WORKFLOW_PATH} is missing or differs; {remedy}")
+
+
 def run_artifact_checks(
     store: Store,
     snapshot: Snapshot,
     *,
     project: str | None = None,
+    inferred_project: str | None = None,
 ) -> tuple[CheckResult, ...]:
     """Run all IR-declared artifact checks, reusing one parent walk per head."""
+    # Pack checks can use the CLI's inferred root. Workflow freshness requires
+    # the caller to supply one explicitly.
+    pack_project = project if project is not None else inferred_project
     walks = tuple(_walk_chain(store, head) for head in snapshot.evidence_heads)
     return tuple(
         sorted(
@@ -1297,8 +1317,9 @@ def run_artifact_checks(
                 _check_map_freshness(store, snapshot),
                 _check_context_freshness(store, snapshot),
                 _check_pack_bound_objects(store, snapshot, walks),
-                _check_pack_files_match(store, snapshot, project),
-                _check_effects_declared(store, snapshot, project),
+                _check_pack_files_match(store, snapshot, pack_project),
+                _check_workflow_current(store, project),
+                _check_effects_declared(store, snapshot, pack_project),
             ),
             key=_check_id,
         )

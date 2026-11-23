@@ -11,12 +11,13 @@ import shutil
 import stat
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 
 from vouch_mk2.core import AnchorMode, AnchorModeSet, EffectsRequired, Snapshot, Tier, TierSet
-from vouch_mk2.io import read_regular_nofollow, write_atomic
+from vouch_mk2.io import read_regular_nofollow, write_atomic, write_atomic_at
 from vouch_mk2.lock import lock_digest
 from vouch_mk2.store import Store, StoreError
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
@@ -466,6 +467,86 @@ def _preflight_owned_directory(root: str, relative: str) -> None:
             raise InitError(f"{current}: path component is not a directory")
 
 
+WORKFLOW_PATH = ".github/workflows/vouch.yml"
+_WORKFLOW_DIRECTORY, _WORKFLOW_NAME = os.path.split(WORKFLOW_PATH)
+
+
+@contextmanager
+def _open_workflow_directory(root: str, *, create: bool = False) -> Iterator[int]:
+    """Anchor operations in the project and refuse symlinks below it."""
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    directory_fd = os.open(root, flags)
+    try:
+        for component in _WORKFLOW_DIRECTORY.split("/"):
+            try:
+                child_fd = os.open(component, flags | os.O_NOFOLLOW, dir_fd=directory_fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(component, 0o755, dir_fd=directory_fd)
+                except FileExistsError:
+                    pass  # A concurrent refresh may have created it.
+                child_fd = os.open(component, flags | os.O_NOFOLLOW, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = child_fd
+        yield directory_fd
+    finally:
+        os.close(directory_fd)
+
+
+def _workflow_matches(directory_fd: int, expected: bytes) -> bool:
+    try:
+        info = os.stat(_WORKFLOW_NAME, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(info.st_mode):
+        raise StoreError(f"{WORKFLOW_PATH}: symlinked workflow refused")
+    if not stat.S_ISREG(info.st_mode):
+        return False
+    try:
+        fd = os.open(
+            _WORKFLOW_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd
+        )
+    except PermissionError:
+        # An unreadable regular file is not the generated workflow; refresh
+        # replaces its directory entry, which needs only the directory's rights.
+        return False
+    with os.fdopen(fd, "rb") as stream:
+        return (
+            stat.S_ISREG(os.fstat(stream.fileno()).st_mode)
+            and stream.read(len(expected) + 1) == expected
+        )
+
+
+def workflow_is_current(project_root: str) -> bool:
+    """Compare the owned workflow with the exact bytes written by init."""
+    try:
+        with _open_workflow_directory(os.path.abspath(project_root)) as directory_fd:
+            return _workflow_matches(directory_fd, generated_workflow().encode("utf-8"))
+    except FileNotFoundError:
+        return False
+
+
+def refresh_workflow(project_root: str) -> None:
+    """Install the generated workflow in a project with init's config marker."""
+    root = os.path.abspath(project_root)
+    config = os.path.join(root, ".vouch", "config.json")
+    try:
+        os.lstat(config)
+    except (FileNotFoundError, NotADirectoryError) as error:
+        raise StoreError(f"{config}: required to refresh the workflow") from error
+
+    _preflight_owned_directory(root, _WORKFLOW_DIRECTORY)
+    expected = generated_workflow().encode("utf-8")
+    with _open_workflow_directory(root, create=True) as directory_fd:
+        if not _workflow_matches(directory_fd, expected):
+            write_atomic_at(
+                directory_fd, os.path.join(root, WORKFLOW_PATH), expected, 0o644,
+                "generated workflow",
+            )
+
+
 def _has_write_and_search_permission(info: os.stat_result) -> bool:
     """Check the caller's applicable Unix permission bits.
 
@@ -640,7 +721,7 @@ def init_project(
         raise InitError(f"{root}: project root must be a non-symlink directory")
 
     _require_fresh_store(root)
-    _preflight_owned_directory(root, ".github/workflows")
+    _preflight_owned_directory(root, _WORKFLOW_DIRECTORY)
     digest = lock_digest(lock_bytes)
     config = _canonical_json(
         {
@@ -653,7 +734,7 @@ def init_project(
         lock_plan = _plan_file(root, "vouch.lock", lock_bytes, 0o755)
         workflow_plan = _plan_file(
             root,
-            ".github/workflows/vouch.yml",
+            WORKFLOW_PATH,
             generated_workflow().encode("utf-8"),
             0o644,
         )
