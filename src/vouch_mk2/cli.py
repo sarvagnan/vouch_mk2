@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
 from enum import Enum
 from typing import Callable, Protocol, cast, get_args, get_origin, get_type_hints
@@ -88,7 +88,7 @@ from vouch_mk2.store import (
     decode_system_map,
     digest_of,
 )
-from vouch_mk2.store.codec import encode_test_report
+from vouch_mk2.store.codec import decode_raw_document, encode_test_report
 from vouch_mk2.store.junit import read_junit_report
 from vouch_mk2.store.upgrade import UpgradeRefused
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
@@ -1313,8 +1313,39 @@ def _merge_handler(namespace: argparse.Namespace) -> int:
     return 0
 
 
+def _check_merge_state_format(store: Store) -> int:
+    state_format = decode_raw_document(store.read_state_bytes()).get("state_format", 0)
+    if type(state_format) is not int:
+        raise DecodeError("state_format: expected integer")
+    return state_format
+
+
+def _copy_check_merge_store(source: str, destination: str) -> None:
+    shutil.copytree(source, destination, symlinks=True, copy_function=shutil.copyfile)
+    # Permissions that protect the input must not prevent writes to the private copy.
+    os.chmod(destination, 0o700)
+    for directory, subdirs, _ in os.walk(destination):
+        for name in subdirs:
+            copied_dir = os.path.join(directory, name)
+            if not os.path.islink(copied_dir):
+                os.chmod(copied_dir, 0o700)
+
+
+def _present_check_merge(
+    message: str, upgrades: Sequence[str], details: Iterable[str] = (), *, passed: bool = False,
+) -> int:
+    print(f"{'PASS' if passed else 'FAIL'} check-merge: {message}")
+    for line in upgrades:
+        print(line)
+    for detail in details:
+        print(f"  {detail}")
+    return 0 if passed else 1
+
+
 def _check_merge_handler(namespace: _Arguments) -> int:
-    roots = (namespace.base, namespace.head, namespace.merged)
+    inputs = {"BASE": namespace.base, "HEAD": namespace.head}
+    roots = (*inputs.values(), namespace.merged)
+    upgrades: list[str] = []
     try:
         for root in roots:
             try:
@@ -1323,54 +1354,80 @@ def _check_merge_handler(namespace: _Arguments) -> int:
                 print(f"vouch-mk2: {root!r} has no state.json", file=sys.stderr)
                 return 2
 
-        with (
-            Store.open(namespace.base, read_only=True) as base,
-            Store.open(namespace.head, read_only=True) as head,
-            Store.open(namespace.merged, read_only=True) as merged,
-        ):
-            read_verified_snapshot(base, "base")
-            read_verified_snapshot(head, "head")
-            merged_snapshot = read_verified_snapshot(merged, "merged")
+        older_inputs: dict[str, int] = {}
+        for side, root in inputs.items():
+            with Store.open(root, read_only=True) as store:
+                state_format = _check_merge_state_format(store)
+            if state_format < 4:
+                raise StoreError(f"{side} is at format {state_format}, from before the event log")
+            if state_format < CURRENT_STATE_FORMAT:
+                older_inputs[side] = state_format
 
         # Resolve the parent before tempfile can probe an input store for writability.
         configured_temp = (
             tempfile.tempdir or os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP")
         )
         temp_parent = os.path.realpath(os.fsdecode(configured_temp or "/tmp"))
-        for root in map(os.path.realpath, roots):
-            if os.path.commonpath((temp_parent, root)) == root:
-                raise StoreError(f"temporary directory {temp_parent!r} is inside store {root!r}")
+        # Compare filesystem identities, not spellings: on a case-insensitive volume an input
+        # can be reached under another spelling of an ancestor of the temporary directory.
+        root_stats = [(root, os.stat(root)) for root in map(os.path.realpath, roots)]
+        ancestor = temp_parent
+        while True:
+            ancestor_stat = os.stat(ancestor)
+            for root, root_stat in root_stats:
+                if os.path.samestat(ancestor_stat, root_stat):
+                    raise StoreError(
+                        f"temporary directory {temp_parent!r} is inside store {root!r}"
+                    )
+            parent = os.path.dirname(ancestor)
+            if parent == ancestor:
+                break
+            ancestor = parent
 
         with tempfile.TemporaryDirectory(prefix="vouch-check-merge-", dir=temp_parent) as scratch:
-            copy = os.path.join(scratch, "base")
-            shutil.copytree(namespace.base, copy, symlinks=True, copy_function=shutil.copyfile)
-            # Permissions that protect BASE must not prevent writes to the private copy.
-            os.chmod(copy, 0o700)
-            for directory, subdirs, _ in os.walk(copy):
-                for name in subdirs:
-                    copied_dir = os.path.join(directory, name)
-                    if not os.path.islink(copied_dir):
-                        os.chmod(copied_dir, 0o700)
-            result = merge_store_roots(copy, namespace.head, actor="check-merge", run_id="")
+            for side, state_format in older_inputs.items():
+                copy = os.path.join(scratch, side.lower())
+                _copy_check_merge_store(inputs[side], copy)
+                with Store.open(copy) as store:
+                    if _check_merge_state_format(store) != state_format:
+                        raise StoreError(f"{side} state format changed while making a private copy")
+                    upgrade_store(store, dry_run=False, published_once={})
+                upgrades.append(
+                    f"  upgraded a private copy of {side} from format {state_format} "
+                    f"to {CURRENT_STATE_FORMAT}"
+                )
+                inputs[side] = copy
+
+            with (
+                Store.open(inputs["BASE"], read_only=True) as base,
+                Store.open(inputs["HEAD"], read_only=True) as head,
+                Store.open(namespace.merged, read_only=True) as merged,
+            ):
+                read_verified_snapshot(base, "base")
+                read_verified_snapshot(head, "head")
+                merged_format = _check_merge_state_format(merged)
+                if merged_format < CURRENT_STATE_FORMAT:
+                    raise StoreError(f"MERGED is at format {merged_format}. Run `vouch-mk2 upgrade`.")
+                merged_snapshot = read_verified_snapshot(merged, "merged")
+
+            base_copy = os.path.join(scratch, "base")
+            if "BASE" not in older_inputs:
+                _copy_check_merge_store(inputs["BASE"], base_copy)
+            result = merge_store_roots(base_copy, inputs["HEAD"], actor="check-merge", run_id="")
             if isinstance(result, Refused):
-                print("FAIL check-merge: replay refused")
-                for violation in result.violations:
-                    print(f"  {violation.code}: {violation.detail}")
-                return 1
-            with Store.open(copy, read_only=True) as replayed:
+                return _present_check_merge(
+                    "replay refused", upgrades,
+                    (f"{violation.code}: {violation.detail}" for violation in result.violations),
+                )
+            with Store.open(base_copy, read_only=True) as replayed:
                 replayed_snapshot = replayed.read_snapshot()
     except (OSError, StoreError) as error:
-        print(f"FAIL check-merge: {error}")
-        return 1
+        return _present_check_merge(str(error), upgrades)
 
     differences = merge_snapshot_differences(replayed_snapshot, merged_snapshot)
     if differences:
-        print("FAIL check-merge: replay differs from MERGED")
-        for difference in differences:
-            print(f"  {difference}")
-        return 1
-    print(f"PASS check-merge: replay matches MERGED ({result.mode})")
-    return 0
+        return _present_check_merge("replay differs from MERGED", upgrades, differences)
+    return _present_check_merge(f"replay matches MERGED ({result.mode})", upgrades, passed=True)
 
 
 def _merge_git_stages_handler(namespace: argparse.Namespace) -> int:
