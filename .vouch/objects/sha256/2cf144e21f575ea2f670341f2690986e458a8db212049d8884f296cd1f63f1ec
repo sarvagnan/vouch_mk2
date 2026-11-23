@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_evidence_policy.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"5e987bc4ad2522704785bcab83d2245018f33354cb268557129da4b8f7b5a899","parent":"GENESIS","recorded_at":"2026-11-23T14:24:39+00:00","sequence":1,"unit":{"name":"evidence-policy","version":"1"}}
