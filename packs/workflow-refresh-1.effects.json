@@ -1,0 +1,4 @@
+{"effects_format": 1, "effects": [
+  {"kind": "observation", "name": "generated-workflow-read", "source": "the project's .github/workflows/vouch.yml, read by check when a project root is given and the store holds init's config.json", "capture": "its file type and bytes, compared with the workflow the running Vouch generates"},
+  {"kind": "action", "name": "generated-workflow-write", "system": "the project's working tree", "outcome": "confirmed", "detail": "refresh-workflow writes .github/workflows/vouch.yml with the running Vouch's generated workflow (mode 0644, through a temporary file and an atomic rename), creating missing directories; it writes nothing else and refuses symlinked paths and projects without .vouch/config.json"}
+]}
