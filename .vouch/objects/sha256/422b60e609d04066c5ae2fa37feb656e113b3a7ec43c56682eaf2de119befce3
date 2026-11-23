@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"merge-check-upgrade@1","reason":"unit branch: anchored by CI on main after merge"},"prev":"01edd15e0c2506fef8e0badb07c2952be7da9567e8f989da0c6e41e95dd51c67","recorded_at":"2026-11-23T09:47:08+00:00","revision":1432,"run_id":""}

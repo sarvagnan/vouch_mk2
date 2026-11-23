@@ -1,0 +1,1 @@
+{"actor":"claude","event":"UnitSpecified","event_format":2,"pack_digest":"","payload":{"depends_on":[],"name":"merge-check-upgrade","version":"1"},"prev":"b4df0fa9641495b716ba3a15e4585c8915d1fb9ade88189d413e5f528733c4bd","recorded_at":"2026-11-23T09:46:59+00:00","revision":1427,"run_id":""}
