@@ -1,0 +1,3 @@
+{"effects_format": 1, "effects": [
+  {"kind": "action", "name": "private-upgraded-copy", "system": "the local filesystem under Python's tempfile directory", "outcome": "confirmed", "detail": "check-merge copies a BASE or HEAD store at an older state format into its private temporary directory, upgrades the copy as upgrade would (its state and projections), uses it for the replay, and removes the directory; an input at format 3 or older fails before any copy; the input directories are never written"}
+]}

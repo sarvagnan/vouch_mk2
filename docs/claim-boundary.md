@@ -296,15 +296,18 @@ and compares claims when the receiver holds a counterpart. A hand-edited store c
 work as a copy and cause a receiver to skip it.
 
 **Pull-request merge check.** `check-merge` replays HEAD onto a private copy of BASE and passes
-only when the result has the same state as MERGED. The read-only `merge_check` job uses the first
-and second parents of the pull request's merge commit as BASE and HEAD, and the merge commit as
-MERGED. A base commit with no store passes as an adoption pull request, with no replay. Someone
-who can push to the default branch directly is outside this check: the base is trusted. A
-forged claim that changes no state can pass undetected; a later check fails if the claim makes
-its replay refuse or reach a state different from MERGED. An honest pull request also fails when
-its work cannot be replayed onto the base. The check runs code from the pull request, so a pull
-request that edits the workflow, the lock or the source the lock is built from can remove or
-change the check. Requiring the job to pass before a merge is the repository's choice.
+only when the result has the same state as MERGED. When BASE or HEAD is at an older state format
+than the running Vouch, `check-merge` upgrades a private copy of it first, as `upgrade` would, so a
+pull request that upgrades the store is checked too. MERGED is never upgraded, and a store older
+than format 4, from before the event log, fails the check. The read-only `merge_check` job uses
+the first and second parents of the pull request's merge commit as BASE and HEAD, and the merge
+commit as MERGED. A base commit with no store passes as an adoption pull request, with no
+replay. Someone who can push to the default branch directly is outside this check: the base is
+trusted. A forged claim that changes no state can pass undetected; a later check fails if the
+claim makes its replay refuse or reach a state different from MERGED. An honest pull request also
+fails when its work cannot be replayed onto the base. The check runs code from the pull request,
+so a pull request that edits the workflow, the lock or the source the lock is built from can
+remove or change the check. Requiring the job to pass before a merge is the repository's choice.
 
 **What merge success proves:** Success proves only that the merged log replays to the merged
 snapshot. It does not prove that the branches were compatible in any wider sense, that their

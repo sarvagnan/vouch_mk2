@@ -2197,3 +2197,25 @@ see which tests executed: the text is `GREEN's report lacks tests RED's report l
 that failed in RED's report did not pass in GREEN's report`. Format-1 and format-2 evidence and
 the event-log records that carry them keep their exact bytes (the evidence-recorded event carries
 `test_report` only at format 3), and the text form also shows a `tests: <relation>` line.
+
+## D-53 — `check-merge` upgrades private copies of older stores (2026-11-23)
+
+**Status:** decided 2026-11-23 by the user (`vouch_mk2-bd4.4.25`, found by the
+activity_tracker_portal pilot re-pinning to 3e3c1e7; answer: upgrade a private copy of the older
+store rather than pass with a message). One unit, `merge-check-upgrade@1`.
+
+- **The finding.** The `merge_check` job runs the pull request's lock. A pull request that
+  re-pins the lock and upgrades the store has a BASE store at the older format, which
+  `check-merge` refuses before comparing anything ("format 5 is older than supported format 7"),
+  so every format-upgrading pull request fails the check while validation passes. A branch cut
+  before the default branch upgraded has the same problem with its HEAD store.
+- **Decision.** When BASE or HEAD is at an older state format than the running Vouch,
+  `check-merge` copies it into its private temporary directory, upgrades the copy exactly as
+  `upgrade` would (no assertions), says so on its output, and then replays and compares as
+  before. The input directories are never written. MERGED is not upgraded: it is what lands on
+  the default branch, so a MERGED store older than the lock still fails, as validation does.
+- **Before the event log.** An input below format 4 predates the event log; upgrading it writes a
+  new pre-log checkpoint that cannot match the one the pull request wrote, so `check-merge` fails
+  with a message saying so instead of replaying. A store newer than the running Vouch still fails.
+- **Out of scope.** Upgrading MERGED; refreshing an adopter's generated workflow after a re-pin
+  (`vouch_mk2-bd4.4.26`); `merge-git-stages` with an older THEIRS store.
