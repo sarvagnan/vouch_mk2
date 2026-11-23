@@ -1013,6 +1013,35 @@ product change outside Vouch itself).
 
 The GitHub-first scope from D-21 is unchanged; a second delivery adapter remains parked.
 
+**D-24 note (2026-11-23, owner): the GitHub probe passed (`vouch_mk2-b6g.9`).** Run in the
+private scratch repository `sarvagnan/vouch-adoption-probe` from vouch_mk2 `ac30c43` with a lock
+built twice to the same bytes (Vouch digest `ae2b1204…`, file sha256 `a6258b4a…`). The project
+was a small Python package with a `unit-tests` job; `init --test-job unit-tests` wrote
+`vouch.yml` and the caller job, pasted unchanged into the project's `ci.yml`; the store was at
+`standard`, anchor mode `ci`, CI policy `strict`, with `greeter@v1` done, open in CI and at
+GENESIS. Every acceptance case was observed on GitHub Actions: (1) failing project tests skipped
+the caller job, so no candidate and no push (run 45120415470); (2) once they passed, the first
+run anchored GENESIS and pushed exactly one `vouch-anchor-bot` commit whose one parent was the
+planned base and which changed only `.vouch/` paths (run 45120725763, commit `61bfcde`); the bot
+push started no further run; (3) re-running that run after `main` moved made its publisher exit
+1 at the live-head check, and `main` did not change (attempt 2); (4) a README-only push planned
+with nothing to advance and skipped the publisher (run 45123041747); (5) a pull request carrying
+a second unit ran validation and `merge_check` (PASS, fast-forward) with read-only tokens and no
+planning or publishing (run 45124301298); (6) a pull request whose caller dropped its push-only
+condition and passed `anchoring: true` still skipped planning and publishing, on the pull request
+and on its branch push, by the reusable workflow's own guard (runs 45125249129, 45124829470);
+(7) a push to `main` while a merge run was planning made that run's publisher fail closed (run
+45124856777), and the newer commit's run anchored the second unit (run 45125509734, commit
+`eb43d07`). Only `anchor_publish` held `contents: write`; it ran no checkout, only the artifact
+download and the validation-and-push script. `check --ci` on the final store passes. Logs are
+kept on the probe repository's `evidence` branch. Two frictions were filed: the publisher's
+refusals exit 1 without saying which check failed, and the direct `vouch` push run shares a
+concurrency group with the called run, so a newer pending run cancels an older one (here the
+direct validation-only run for the second push; a pending anchoring call can be cancelled the
+same way, and the next passing push anchors instead). Fork pull requests were not exercised:
+the probe had one account. This validates the delivery adapter on the real forge; it is not the
+pilot (`vouch_mk2-bd4.4`).
+
 ## D-25 — Semantic merge replays open-in-CI exceptions by exact unit reference (2026-10-13)
 
 **Status:** decided 2026-10-13 (user: Vouch defects found by the activity_tracker_portal pilot are
