@@ -889,6 +889,11 @@ def _decide_rebind_pack(snapshot: Snapshot, command: RebindPack) -> Decision:
             "rebind.effects-changed",
             "rebind-pack cannot add, remove or change an effect declaration",
         )
+    if command.old_inventory.evidence_policy != command.new_inventory.evidence_policy:
+        return _refuse(
+            "rebind.evidence-policy-changed",
+            "rebind-pack cannot add, remove or change an evidence policy",
+        )
     old_paths = {entry.path for entry in command.old_inventory.entries}
     new_paths = {entry.path for entry in command.new_inventory.entries}
     removed = tuple(sorted(old_paths - new_paths))
@@ -900,12 +905,14 @@ def _decide_rebind_pack(snapshot: Snapshot, command: RebindPack) -> Decision:
     old_tests = {
         entry.path
         for entry in command.old_inventory.entries
-        if command.old_inventory.pack_format == 1 or entry.role == "test"
+        if (command.old_inventory.pack_format == 1 and entry.role != "evidence")
+        or entry.role == "test"
     }
     new_tests = {
         entry.path
         for entry in command.new_inventory.entries
-        if command.new_inventory.pack_format == 1 or entry.role == "test"
+        if (command.new_inventory.pack_format == 1 and entry.role != "evidence")
+        or entry.role == "test"
     }
     demoted = tuple(sorted((old_tests & new_paths) - new_tests))
     if demoted:

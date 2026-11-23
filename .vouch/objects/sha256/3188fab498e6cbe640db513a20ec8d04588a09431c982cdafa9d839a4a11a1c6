@@ -1,0 +1,1 @@
+{"actor":"claude","event":"DeviationOpened","event_format":2,"pack_digest":"","payload":{"deviation_id":"DEV-ep-01","deviation_type":"pack-defect","unit":{"name":"evidence-policy","version":"1"}},"prev":"4a376636ccd5fd3cac459f2a4a0a0cc094722c09d58d85e603ed0a0cf9651167","recorded_at":"2026-11-23T15:07:40+00:00","revision":1446,"run_id":""}

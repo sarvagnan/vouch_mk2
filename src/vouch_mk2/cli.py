@@ -46,8 +46,14 @@ from vouch_mk2.core import (
     valid_command_line,
 )
 from vouch_mk2.core import commands as command_module
+from vouch_mk2.core.evidence_policy import (
+    JUNIT_TOKEN,
+    REPORT_REQUIRED,
+    report_policy_violation,
+    requires_report,
+)
 from vouch_mk2.core.merge_comparison import merge_snapshot_differences
-from vouch_mk2.core.model import TEST_REPORT_EVIDENCE_FORMAT
+from vouch_mk2.core.model import EvidencePolicy, TEST_REPORT_EVIDENCE_FORMAT
 from vouch_mk2.formal.run import FormalRun, passed, run_formal
 from vouch_mk2.git_merge import merge_git_stages
 from vouch_mk2.hook import HookError, edit_target_from_json, hook_message
@@ -88,7 +94,7 @@ from vouch_mk2.store import (
     decode_system_map,
     digest_of,
 )
-from vouch_mk2.store.codec import decode_raw_document, encode_test_report
+from vouch_mk2.store.codec import decode_raw_document, decode_test_report, encode_test_report
 from vouch_mk2.store.junit import read_junit_report
 from vouch_mk2.store.upgrade import UpgradeRefused
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
@@ -100,6 +106,8 @@ from vouch_mk2.verify import (
     emit_context,
     emit_system_map,
     pending_anchor_is_only_unchecked,
+    read_comparison_red_report,
+    read_evidence_policy,
     read_evidence_view,
     record_evidence,
     record_formal_certificate,
@@ -121,6 +129,7 @@ class _Arguments(argparse.Namespace):
     pack_file: list[str]
     pack_test_file: list[str]
     pack_effects_file: str
+    pack_evidence_file: list[str]
     reason: str
     lock_path: str | None
     test_job: list[str]
@@ -650,6 +659,14 @@ def _add_lifecycle_parsers(commands: _Subparsers) -> None:
                 "--pack-effects-file", default="",
                 help="project-relative effects declaration JSON",
             )
+            if command_type is not command_module.BindPack:
+                parser.add_argument(
+                    "--pack-evidence-file",
+                    action="append",
+                    default=[],
+                    metavar="PATH",
+                    help="project-relative evidence policy JSON (requires a spec or test file)",
+                )
             continue
         if command_type is command_module.RecordEvidence:
             parser.usage = (
@@ -885,10 +902,21 @@ def _pack_binding_handler(
     try:
         pack_files = tuple(cast(list[str], namespace.pack_file))
         pack_test_files = tuple(cast(list[str], namespace.pack_test_file))
+        evidence_files: list[str] = (
+            [] if command_type is command_module.BindPack
+            else cast(list[str], namespace.pack_evidence_file)
+        )
+        if len(evidence_files) > 1:
+            raise StoreError("pack.evidence-policy-invalid: --pack-evidence-file may be given only once")
+        if evidence_files and not (pack_files or pack_test_files):
+            raise StoreError(
+                "pack.evidence-policy-invalid: --pack-evidence-file requires --pack-file or --pack-test-file"
+            )
         if pack_files or pack_test_files:
             inventory = build_pack_inventory(
                 namespace.project, pack_files, pack_test_files,
                 namespace.pack_effects_file,
+                evidence_file=evidence_files[0] if evidence_files else None,
             )
             data = encode_pack_inventory(inventory)
             digest = digest_of(ArtifactKind.ACCEPTANCE_PACK, data)
@@ -994,6 +1022,7 @@ class _EvidenceCapture:
     unit: UnitRef
     test_set_digest: str
     enforce_current: bool
+    policy: EvidencePolicy | None
 
 
 def _secret_looking_command(command_argv: Sequence[str]) -> bool:
@@ -1032,9 +1061,6 @@ def _stream_child_stdout(command_argv: Sequence[str]) -> int:
     return process.wait()
 
 
-_JUNIT_TOKEN = "{junit}"
-
-
 def _run_evidence_child(
     command_argv: list[str], *, json_output: bool, junit_report: bool,
 ) -> tuple[int, bytes | None]:
@@ -1051,7 +1077,7 @@ def _run_evidence_child(
                 os.chmod(directory, 0o700)
             report_path = None if directory is None else os.path.join(directory, "report.xml")
             child_argv = command_argv if report_path is None else [
-                argument.replace(_JUNIT_TOKEN, report_path) for argument in command_argv
+                argument.replace(JUNIT_TOKEN, report_path) for argument in command_argv
             ]
             try:
                 returncode = (
@@ -1076,7 +1102,7 @@ def _run_evidence_child(
 def _record_evidence_handler(namespace: argparse.Namespace) -> int:
     command_argv = cast(list[str], namespace.command_argv)
     junit_report = cast(bool, namespace.junit_report)
-    if junit_report and sum(argument.count(_JUNIT_TOKEN) for argument in command_argv) != 1:
+    if junit_report and sum(argument.count(JUNIT_TOKEN) for argument in command_argv) != 1:
         print(
             "vouch-mk2: evidence.test-report-invalid: --junit-report requires "
             "exactly one {junit} token in the child argv",
@@ -1125,9 +1151,15 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                 "stored verbatim in an immutable evidence object",
                 file=sys.stderr,
             )
+    kind = EvidenceKind(namespace.kind)
     try:
-        # Report refusals must leave even the store's housekeeping untouched.
-        with Store.open(namespace.root, read_only=junit_report) as store:
+        # Report runs capture read-only; reportless runs capture under the writer lock,
+        # as before this unit. Housekeeping is deferred so that pre-launch policy
+        # refusals leave every store file but the lock untouched; a policy-free
+        # reportless run sweeps under the lock before launching, as it did at open.
+        with Store.open(
+            namespace.root, read_only=junit_report, sweep_orphans=False,
+        ) as store:
             with (nullcontext() if junit_report else store.write_locked()):
                 snapshot = store.read_snapshot()
                 requested_unit = cast(UnitRef, namespace.unit)
@@ -1143,11 +1175,24 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                         and resolved.status is not UnitStatus.SPECIFIED
                         and bool(resolved.acceptance_pack_version)
                     ),
+                    policy=read_evidence_policy(
+                        store, "" if resolved is None else resolved.acceptance_pack_digest,
+                    ),
                 )
-    except StoreError as error:
-        print(f"vouch-mk2: {error}", file=sys.stderr)
-        return 2
-    try:
+                policy = capture.policy
+                if policy is not None:
+                    if policy.command and tuple(command_argv) != policy.command:
+                        raise StoreError(
+                            "evidence.command-not-bound: child argv differs from the bound command"
+                        )
+                    if policy.command and redacted_positions:
+                        raise StoreError(
+                            "evidence.redaction-refused: a bound command cannot be redacted"
+                        )
+                    if requires_report(policy, kind) and not junit_report:
+                        raise StoreError(f"{REPORT_REQUIRED.code}: {REPORT_REQUIRED.detail}")
+                if not junit_report:
+                    store.sweep_locked_orphans()
         returncode, report_data = _run_evidence_child(
             command_argv, json_output=namespace.json_output, junit_report=junit_report,
         )
@@ -1166,10 +1211,9 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
         if returncode == 0
         else EvidenceOutcome.TESTS_FAILED
     )
-    kind = EvidenceKind(namespace.kind)
     unit = capture.unit
     try:
-        with Store.open(namespace.root) as store:
+        with Store.open(namespace.root, sweep_orphans=policy is None) as store:
             with store.write_locked():
                 snapshot = store.read_snapshot()
                 head = snapshot.evidence_head_ref(unit)
@@ -1191,6 +1235,26 @@ def _record_evidence_handler(namespace: argparse.Namespace) -> int:
                         "" if report_data is None else digest_of(ArtifactKind.TEST_REPORT, report_data)
                     ),
                 )
+                if policy is not None:
+                    current = snapshot.unit_ref(unit)
+                    # If the binding moved, the library writer reports that
+                    # refusal without comparing this run to the replacement pack.
+                    if (
+                        policy.reports_required
+                        and kind in {EvidenceKind.RED, EvidenceKind.GREEN}
+                        and current is not None
+                        and current.status not in {UnitStatus.SUPERSEDED, UnitStatus.SPECIFIED}
+                        and current.acceptance_test_set_digest == capture.test_set_digest
+                    ):
+                        assert report_data is not None
+                        comparison = (
+                            read_comparison_red_report(store, head, capture.test_set_digest)
+                            if kind is EvidenceKind.GREEN else None
+                        )
+                        violation = report_policy_violation(kind, decode_test_report(report_data), comparison)
+                        if violation is not None:
+                            raise StoreError(f"{violation.code}: {violation.detail}")
+                    store.sweep_locked_orphans()
                 report_options = (
                     {} if report_data is None else {"test_report_data": report_data}
                 )

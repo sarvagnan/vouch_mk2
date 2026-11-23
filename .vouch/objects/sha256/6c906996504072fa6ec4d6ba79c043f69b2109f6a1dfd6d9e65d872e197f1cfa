@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"evidence-policy@1","reason":"unit branch: anchored by CI on main after merge"},"prev":"572ae1d69b1417255db835c15914f8a8e0954e7bdc043cb0250e13aeafa8e343","recorded_at":"2026-11-23T15:07:42+00:00","revision":1455,"run_id":""}

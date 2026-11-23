@@ -293,10 +293,17 @@ class ActionEffect:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidencePolicy:
+    command: tuple[str, ...] = ()
+    reports_required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class PackInventory:
     entries: tuple[PackEntry, ...]
     pack_format: int = 1
     effects: tuple[ObservationEffect | ActionEffect, ...] | None = None
+    evidence_policy: EvidencePolicy | None = None
 
 
 @dataclass(frozen=True, slots=True)

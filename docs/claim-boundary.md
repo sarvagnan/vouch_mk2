@@ -133,7 +133,13 @@ bump is not refused.
   RED stays keyed to the test-set digest. Identical-byte re-freezes keep earlier evidence.
 
 The publication gates compare the frozen test set, not the command: a GREEN can run a different
-command from the RED before it.
+command from the RED before it. This example applies to a pack without a bound command.
+A pack may bind an evidence-policy file (D-54) that fixes the command RED and GREEN must run,
+requires JUnit reports, or both.
+With reports required, `record-evidence` refuses a RED whose report lists no failure and a GREEN
+whose report omits a test the RED's report lists or does not list one of RED's failures as passed.
+The policy is part of the test set, so a different policy is a different test set, and `rebind-pack`
+cannot change a published pack's policy.
 
 `show-evidence` lists the stored command line of every RED and GREEN and notes when the GREEN
 that counts has a different stored command line from the RED that counts; the note never blocks

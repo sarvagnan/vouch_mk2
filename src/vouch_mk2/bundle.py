@@ -18,6 +18,7 @@ from vouch_mk2.core import (
     PackInventory,
     decide,
 )
+from vouch_mk2.core.model import EvidencePolicy
 from vouch_mk2.store import (
     DEFAULT_MAX_ARTIFACT_BYTES,
     ArtifactKind,
@@ -28,7 +29,7 @@ from vouch_mk2.store import (
     encode_bundle_inventory,
     encode_pack_inventory,
 )
-from vouch_mk2.store.codec import decode_effects_file
+from vouch_mk2.store.codec import decode_effects_file, decode_evidence_policy_file
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
 
 
@@ -291,6 +292,7 @@ def build_pack_inventory(
     pack_files: tuple[str, ...],
     pack_test_files: tuple[str, ...] = (),
     effects_file: str = "",
+    evidence_file: str | None = None,
 ) -> PackInventory:
     """Hash an explicit, canonical set of project-relative acceptance files."""
     if not pack_files and not pack_test_files:
@@ -301,6 +303,7 @@ def build_pack_inventory(
         (pack_files, "spec"),
         (pack_test_files, "test"),
         ((effects_file,) if effects_file else (), "effects"),
+        ((evidence_file,) if evidence_file is not None else (), "evidence"),
     ):
         for text in files:
             try:
@@ -317,10 +320,18 @@ def build_pack_inventory(
     try:
         entries: list[PackEntry] = []
         effects: tuple[ObservationEffect | ActionEffect, ...] | None = None
+        policy: EvidencePolicy | None = None
         for relative, role in sorted(relative_paths, key=_pack_path):
             data = _read_relative_regular(root_fd, relative)
             if role == "effects":
                 effects = parse_effects_file(data)
+            elif role == "evidence":
+                try:
+                    policy = decode_evidence_policy_file(data)
+                except StoreError as error:
+                    raise InventoryError(
+                        f"pack.evidence-policy-invalid: {path_text(relative)}: {error}"
+                    ) from error
             entries.append(
                 PackEntry(
                     path=path_text(relative),
@@ -333,6 +344,7 @@ def build_pack_inventory(
             entries=tuple(entries),
             pack_format=3 if effects_file else (2 if pack_test_files else 1),
             effects=effects,
+            evidence_policy=policy,
         )
     finally:
         os.close(root_fd)
@@ -345,13 +357,15 @@ def pack_test_set_digest(inventory: PackInventory) -> str:
         entry.role == "test" for entry in inventory.entries
     ):
         test_inventory = PackInventory(
-            entries=tuple(entry for entry in inventory.entries if entry.role == "test"),
+            entries=tuple(entry for entry in inventory.entries if entry.role in {"test", "evidence"}),
             pack_format=2,
+            evidence_policy=inventory.evidence_policy,
         )
     elif inventory.pack_format == 3:
         test_inventory = PackInventory(
             entries=tuple(entry for entry in inventory.entries if entry.role != "effects"),
             pack_format=1,
+            evidence_policy=inventory.evidence_policy,
         )
     return digest_of(
         ArtifactKind.ACCEPTANCE_PACK,

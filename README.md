@@ -28,7 +28,8 @@ The acceptance pack describes the work and holds the tests the unit is expected 
    it needs a GREEN for the current pack, after a RED for the same tests or an owner rebind,
    and after any re-freeze that changed the pack.
    "The same tests" means the same frozen test set; Vouch does not compare the commands that RED
-   and GREEN ran. The [tier guide](docs/concepts.md#assurance-tiers) covers the other gates and
+   and GREEN ran. A pack that binds a command in its evidence-policy file fixes that command.
+   The [tier guide](docs/concepts.md#assurance-tiers) covers the other gates and
    what the report checks.
 
 If a frozen test is wrong, the implementer opens a deviation and the acceptance owner decides
@@ -77,7 +78,7 @@ uv run python scripts/gen_commands_doc.py --check
 uv run python scripts/gen_lifecycle_doc.py --check
 uv run pyrefly check     # strict types (D-1)
 uv run lint-imports      # policy IR purity contract (D-1)
-uv run pytest            # 1571 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest            # 1655 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run python -c "from vouch_mk2.store import Store; store = Store.init('$RUNNER_TEMP/vouch-mk2-ci-check'); store.close()"
 uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
 uv run vouch-mk2 check --ci --json --root "$RUNNER_TEMP/vouch-mk2-ci-check" | python3 -m json.tool > /dev/null

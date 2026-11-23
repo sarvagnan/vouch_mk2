@@ -73,8 +73,9 @@ today. A refusal before starting anything happens before the child process start
 refused for its policy file or option, and a `record-evidence` refusal before starting anything,
 leave every store file other than `.lock` byte-for-byte unchanged, a leftover temporary file
 included. A refusal after the child ran adds no evidence record and no object and changes no other
-store file, except that a leftover temporary file is either kept with its bytes or swept. Units
-whose current pack has no policy behave exactly as before.
+store file, except that a leftover temporary file is either kept with its bytes or swept and the
+store's `.lock` may be created (the writer lock the append takes). Units whose current pack has no
+policy behave exactly as before.
 
 **Rebind.** `decide` refuses `RebindPack` with `rebind.evidence-policy-changed` when the old and
 new inventories' decoded policies differ (one added, one removed, or different content). It is
@@ -93,7 +94,30 @@ command line other than `shlex.join` of the bound command, or a record without a
 bound command contains `{junit}` (any kind); with required reports, a RED or GREEN without a
 report, a RED whose report lists no failure, or a GREEN whose report does not meet the comparison
 above against its own comparison RED. Records for other test sets are not held to the policy, but
-remain candidates for comparison RED. Units without a policy are checked as before.
+remain candidates for comparison RED. Units without a policy are checked as before. When a unit's
+pack inventory object cannot be read, `check` fails either way: for a unit that is not superseded,
+`check.evidence-chains` keeps the verdict it gave before this unit and `check.effects-declared`
+fails naming the unavailable inventory; for a superseded unit, which `check.effects-declared`
+skips, `check.evidence-chains` fails naming it.
+
+## Amended by DEV-ep-01 (pack/2)
+
+Astra's implementation review found two places where the Promise said more than the store allows.
+A refusal after the child ran is decided under the writer lock in the same writable open that
+would append, so on a fresh checkout it creates the store's `.lock`; the Refusals paragraph now
+says so (unlinking a lock another writer may hold would break serialization, and the tests already
+leave `.lock` out of every snapshot). And a lost pack inventory object hides a bound policy from
+`check.evidence-chains`, which keeps its earlier verdict so legacy fixtures without inventory
+objects keep theirs; the missing object already fails `check.effects-declared` for every unit that
+is not superseded, so `check` still fails. The Check paragraph now says so. No test or effects
+change.
+
+## Amended by DEV-ep-02 (pack/3)
+
+Astra's re-check: `check.effects-declared` skips superseded units, so a superseded unit whose
+inventory was lost and whose chain breaks its policy left `check` passing. The chain row now fails
+naming the unavailable inventory for a superseded unit, and the Check paragraph says which row
+fails for which unit. No test or effects change.
 
 ## Requirements
 
