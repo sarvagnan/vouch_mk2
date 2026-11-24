@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import os
 import secrets
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -13,9 +14,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from vouch_mk2.core.decide import Refused
-from vouch_mk2.store.errors import StoreError
-from vouch_mk2.store.event_log import ci_run_id
-from vouch_mk2.store.merge import MergeOutcome, merge_store_roots
+from vouch_mk2.core.events import EventRecord
+from vouch_mk2.store.codec import decode_event_record
+from vouch_mk2.store.digests import ArtifactKind
+from vouch_mk2.store.errors import RootChanged, StoreError
+from vouch_mk2.store.event_log import ci_run_id, index_replay_provenance
+from vouch_mk2.store.merge import MergeOutcome, _read_verified_chain, merge_store_roots
 from vouch_mk2.store.store import DEFAULT_MAX_ARTIFACT_BYTES, Store
 from vouch_mk2.verify import emit_context, emit_system_map
 
@@ -270,7 +274,7 @@ def _materialize_store(
     repository: str,
     destination: str,
     objects: Mapping[bytes, bytes],
-) -> None:
+) -> str:
     os.mkdir(destination, 0o700)
     os.chmod(destination, 0o700, follow_symlinks=False)
     root_fd = _open_absolute_directory(destination)
@@ -281,7 +285,7 @@ def _materialize_store(
     finally:
         os.close(root_fd)
     with Store.open(destination, read_only=True) as store:
-        store.read_snapshot()
+        return store.read_snapshot().event_head
 
 
 def _candidate_files(candidate: str) -> tuple[tuple[bytes, bytes], ...]:
@@ -339,7 +343,56 @@ def _publication_lock(root_fd: int) -> Iterator[None]:
         os.close(lock_fd)
 
 
-def _publish_candidate(root_fd: int, candidate: str) -> None:
+def _working_store_is_recovered(
+    root: str,
+    root_fd: int,
+    stage_heads: tuple[str, str],
+    candidate: str,
+    theirs_root: str,
+) -> bool:
+    try:
+        with Store.open(root, read_only=True, expected_root_fd=root_fd) as working:
+            snapshot = working.read_snapshot()
+            if snapshot.event_head in stage_heads:
+                return False
+            _, history = _read_verified_chain(working, snapshot, "working")
+            with (
+                Store.open(candidate, read_only=True) as ours,
+                Store.open(theirs_root, read_only=True) as theirs,
+            ):
+                def read_parent(digest: str) -> EventRecord | None:
+                    # A merge need not copy original source records into its store.
+                    # The candidate retains the original OURS chain as a prefix.
+                    for store in (working, ours, theirs):
+                        try:
+                            return decode_event_record(store.get_object(ArtifactKind.EVENT, digest))
+                        except (StoreError, OSError, ValueError, RecursionError):
+                            continue
+                    return None
+
+                ancestry = index_replay_provenance(
+                    history, history.records, read_missing=read_parent,
+                ).incorporated
+            return all(head in ancestry for head in stage_heads)
+    except RootChanged as error:
+        raise StoreError("git.concurrent-update: store directory changed during recovery") from error
+    except (StoreError, OSError, ValueError, RecursionError):
+        # Publication writes through root_fd, so an unreadable store is "not recovered" only
+        # while the root name still names that directory; a moved root was not probed.
+        try:
+            bound = os.path.samestat(os.stat(root), os.fstat(root_fd))
+        except OSError:
+            bound = False
+        if not bound:
+            raise StoreError(
+                "git.concurrent-update: store directory changed during recovery"
+            ) from None
+        return False
+
+
+def _publish_candidate(
+    root: str, root_fd: int, candidate: str, theirs_root: str, stage_heads: tuple[str, str],
+) -> None:
     files = _candidate_files(candidate)
     ordered = tuple(item for item in files if item[0] != b"state.json") + tuple(
         item for item in files if item[0] == b"state.json"
@@ -347,6 +400,14 @@ def _publish_candidate(root_fd: int, candidate: str) -> None:
     if not ordered or ordered[-1][0] != b"state.json":
         raise StoreError("git.publish-failed: candidate store has no state.json")
     with _publication_lock(root_fd):
+        if _working_store_is_recovered(root, root_fd, stage_heads, candidate, theirs_root):
+            stage_command = shlex.join(("git", "add", "--", root))
+            restore_command = shlex.join(("git", "checkout", "--conflict=merge", "--", root))
+            raise StoreError(
+                f"git.already-recovered: {root!r} already incorporates both index stages. "
+                f"Review the resolved store, then run: {stage_command}\n"
+                f"To restore the conflict and discard changes made since, run: {restore_command}"
+            )
         for path, payload in ordered:
             _write_relative(root_fd, path, payload)
 
@@ -371,8 +432,8 @@ def merge_git_stages(root: str, *, actor: str) -> MergeOutcome | Refused:
             os.chmod(staging, 0o700, follow_symlinks=False)
             ours_root = os.path.join(staging, "ours")
             theirs_root = os.path.join(staging, "theirs")
-            _materialize_store(repository, ours_root, ours)
-            _materialize_store(repository, theirs_root, theirs)
+            ours_head = _materialize_store(repository, ours_root, ours)
+            theirs_head = _materialize_store(repository, theirs_root, theirs)
             result = merge_store_roots(
                 ours_root,
                 theirs_root,
@@ -394,7 +455,7 @@ def merge_git_stages(root: str, *, actor: str) -> MergeOutcome | Refused:
             )
             if current_index != index_data:
                 raise StoreError("git.concurrent-update: index changed during recovery")
-            _publish_candidate(root_fd, ours_root)
+            _publish_candidate(root, root_fd, ours_root, theirs_root, (ours_head, theirs_head))
             return result
     finally:
         os.close(root_fd)
