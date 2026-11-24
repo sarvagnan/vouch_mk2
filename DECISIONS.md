@@ -2358,3 +2358,29 @@ One unit, `anchor-workflow@1`, so adopters refresh their generated workflow once
   as stale, or skipped because the project's tests failed); a push of several commits can also
   produce it, so the line states only what Vouch can see. A missing or unreadable parent store
   prints nothing and never fails the step. It changes nothing else. Generated workflow only.
+
+## D-58 — Vouch sets the mode of everything it creates, so the umask cannot change it (2026-11-24)
+
+**Status:** decided 2026-11-24 by the user (`vouch_mk2-vz5`, found in Astra's test-sets@1 review;
+answer: set modes explicitly everywhere Vouch creates files, rather than in the store only or
+refusing such a umask). Unit `owner-modes@1`.
+
+- **The defect.** The store creates its directories, objects, temporary files, `state.json`,
+  `.lock` and merge transactions with intended modes (`0700`, `0600`) but never applies them after
+  creation, so the process umask removes bits from them. Under a umask that removes the owner's own
+  bits (for example `0477`), a new object is written at `0200` and the next step cannot read it
+  back, so `init`, every lifecycle verb, `merge`, `merge-git-stages`, `check-merge`'s private copy,
+  `build-lock` into a new directory and `refresh-workflow` into a new directory fail. Under a
+  narrower group or other umask (`077`), directories Vouch creates in the project (`.github`,
+  `.github/workflows`, a new lock directory) and the store files `merge-git-stages` writes into
+  the working tree lose bits that a `022` run gives them.
+- **The rule.** Every file and directory Vouch creates gets its intended mode set explicitly
+  (`fchmod`/`chmod`) right after creation, so a command leaves the same modes under any umask as
+  under `022`, and a umask never removes the owner's access to what Vouch wrote. The intended modes
+  do not change: files Vouch already writes with an explicit mode keep it, and nothing becomes
+  wider than a `022` run makes it.
+- **Not changed.** The process umask itself: commands Vouch runs for the operator (the evidence
+  command) inherit it unchanged, and Vouch never sets it, not even temporarily. A file or directory
+  that already exists keeps its mode unless the command replaces it (an atomic rename publishes a
+  new file with its intended mode, as before); Vouch does not repair a store written under such a
+  umask. Commands the generated workflow later runs in CI are outside this rule.

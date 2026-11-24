@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"owner-modes@1","reason":"unit branch: anchored by CI on main after merge"},"prev":"4297dbb37eba267607cda0cb19cb34f6ee96c35733e0c1a6d110fe8dab020b25","recorded_at":"2026-11-24T12:05:22+00:00","revision":1512,"run_id":""}

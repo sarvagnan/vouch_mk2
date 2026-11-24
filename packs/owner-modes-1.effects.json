@@ -1,0 +1,3 @@
+{"effects_format": 1, "effects": [
+  {"kind": "action", "name": "created-path-modes", "system": "the store, the project's working tree and Vouch's private scratch directories", "outcome": "confirmed", "detail": "each file and directory Vouch creates has its intended mode set explicitly right after creation, so the process umask cannot remove bits; the intended modes are unchanged; an existing file or directory keeps its mode unless the command replaces it, and the process umask itself is never changed"}
+]}
