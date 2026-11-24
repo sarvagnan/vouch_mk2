@@ -1,0 +1,4 @@
+{"effects_format": 1, "effects": [
+  {"kind": "observation", "name": "parent-store-read", "source": "the generated workflow's anchor plan step reading .vouch/state.json at the pushed commit's first parent through git", "capture": "each unit's evidence head and anchor at the parent, compared with the current state to print the late-anchor line"},
+  {"kind": "action", "name": "generated-workflow-text", "system": "adopting projects' generated .github/workflows/vouch.yml and mk2's own ci.yml", "outcome": "confirmed", "detail": "the generated workflow and mk2's ci.yml change: publish refusals print a REFUSED publish: line, the generated concurrency group is keyed on the run kind, and the generated plan step prints a late-anchor line; adopted projects fail check.workflow-current until they run refresh-workflow"}
+]}
