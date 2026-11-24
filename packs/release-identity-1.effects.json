@@ -1,0 +1,3 @@
+{"effects_format": 1, "effects": [
+  {"kind": "observation", "name": "running-lock-read", "source": "the lock file this process was loaded from, when --version runs from a lock", "capture": "its bytes, hashed into the lock digest that --version prints, the same digest self-check prints"}
+]}
