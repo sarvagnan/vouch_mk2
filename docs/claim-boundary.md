@@ -38,6 +38,10 @@ that ran, or the run fails. Threat levels come from [threat-model.md](threat-mod
 
 ## Store writes
 
+Vouch sets the mode of each file and directory it creates, so a command leaves the same modes
+under any umask. A file or directory that already exists keeps its mode, unless the command
+replaces it.
+
 **Locking:**
 - Each lifecycle verb (`vouch-mk2 specify`, `vouch-mk2 record-evidence`, and the rest) opens one
   store and holds the writer lock from `decide` through `apply` to commit.

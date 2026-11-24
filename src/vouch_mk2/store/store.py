@@ -136,6 +136,7 @@ class Store:
         cls._validate_artifact_bound(max_artifact_bytes)
         try:
             os.mkdir(root, 0o700)
+            os.chmod(root, 0o700, follow_symlinks=False)
         except OSError as error:
             raise StoreError(
                 f"root: cannot create store directory: {error}"
@@ -235,9 +236,11 @@ class Store:
             state_format_mark, "state format high-water mark"
         )
         os.mkdir("objects", 0o700, dir_fd=self._root_fd)
+        os.chmod("objects", 0o700, dir_fd=self._root_fd, follow_symlinks=False)
         objects_fd = self._open_directory("objects", self._root_fd)
         try:
             os.mkdir("sha256", 0o700, dir_fd=objects_fd)
+            os.chmod("sha256", 0o700, dir_fd=objects_fd, follow_symlinks=False)
             # Make the sha256 entry durable now: no later code path fsyncs
             # objects/ again, and a lost entry would orphan every object.
             os.fsync(objects_fd)
@@ -251,6 +254,7 @@ class Store:
             dir_fd=self._root_fd,
         )
         try:
+            os.fchmod(lock_fd, 0o600)
             os.fsync(lock_fd)
         finally:
             os.close(lock_fd)
@@ -262,6 +266,7 @@ class Store:
             dir_fd=self._root_fd,
         )
         try:
+            os.fchmod(mark_fd, 0o600)
             self._write_all(mark_fd, state_format_mark)
             os.fsync(mark_fd)
         finally:
@@ -274,6 +279,7 @@ class Store:
             dir_fd=self._root_fd,
         )
         try:
+            os.fchmod(state_fd, 0o600)
             self._write_all(state_fd, state)
             os.fsync(state_fd)
         finally:
@@ -531,6 +537,7 @@ class Store:
         except OSError as error:
             raise IntegrityError(f".lock: missing and cannot be created: {error}") from error
         try:
+            os.fchmod(fd, 0o600)
             os.fsync(fd)
         finally:
             os.close(fd)
@@ -703,6 +710,7 @@ class Store:
             )
             temp_exists = True
             try:
+                os.fchmod(fd, 0o600)
                 self._write_all(fd, payload)
                 os.fsync(fd)
             finally:
@@ -775,6 +783,7 @@ class Store:
             )
             temp_exists = True
             try:
+                os.fchmod(temp_fd, 0o600)
                 self._write_all(temp_fd, data)
                 os.fsync(temp_fd)
             finally:
@@ -895,6 +904,7 @@ class Store:
                 ) from error
             temp_exists = True
             try:
+                os.fchmod(temp_fd, 0o600)
                 self._write_all(temp_fd, payload)
                 self._step("object-temp-written")
                 os.fsync(temp_fd)
@@ -989,6 +999,7 @@ class Store:
                 ) from error
             temp_exists = True
             try:
+                os.fchmod(state_fd, 0o600)
                 self._write_all(state_fd, data)
                 self._step("state-temp-written")
                 os.fsync(state_fd)
@@ -1032,7 +1043,12 @@ class Store:
     ) -> str:
         name = f"{_MERGE_TXN_PREFIX}{secrets.token_hex(16)}{_MERGE_TXN_SUFFIX}"
         os.mkdir(name, 0o700, dir_fd=self._root_fd)
-        transaction_fd = self._open_directory(name, self._root_fd)
+        try:
+            os.chmod(name, 0o700, dir_fd=self._root_fd, follow_symlinks=False)
+            transaction_fd = self._open_directory(name, self._root_fd)
+        except BaseException:
+            os.rmdir(name, dir_fd=self._root_fd)
+            raise
         try:
             staged = ((_MERGE_BASE_STATE, before_state),) + tuple(
                 (digest_of(kind, payload), payload)
@@ -1054,6 +1070,7 @@ class Store:
                     dir_fd=transaction_fd,
                 )
                 try:
+                    os.fchmod(fd, 0o600)
                     self._write_all(fd, payload)
                     os.fsync(fd)
                 finally:

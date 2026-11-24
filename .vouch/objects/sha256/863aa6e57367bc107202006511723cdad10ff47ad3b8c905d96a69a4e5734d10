@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_owner_modes.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"5dd8935801298f803d088a642ff231c547ed5db165fe12d24c242af9dd63cf7f","parent":"GENESIS","recorded_at":"2026-11-24T12:05:18+00:00","sequence":1,"unit":{"name":"owner-modes","version":"1"}}

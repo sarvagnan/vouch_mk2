@@ -219,6 +219,7 @@ def _open_relative_parent(root_fd: int, path: bytes, *, create: bool) -> tuple[i
                     raise
                 try:
                     os.mkdir(component, 0o700, dir_fd=directory_fd)
+                    os.chmod(component, 0o700, dir_fd=directory_fd, follow_symlinks=False)
                     child_fd = os.open(component, _DIRECTORY_FLAGS, dir_fd=directory_fd)
                 except OSError as error:
                     raise StoreError(
@@ -245,6 +246,7 @@ def _write_relative(root_fd: int, path: bytes, payload: bytes) -> None:
             fd = os.open(temp_name, _FILE_WRITE_FLAGS, 0o644, dir_fd=parent_fd)
             temp_exists = True
             with os.fdopen(fd, "wb", closefd=True) as stream:
+                os.fchmod(fd, 0o644)
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -270,6 +272,7 @@ def _materialize_store(
     objects: Mapping[bytes, bytes],
 ) -> None:
     os.mkdir(destination, 0o700)
+    os.chmod(destination, 0o700, follow_symlinks=False)
     root_fd = _open_absolute_directory(destination)
     try:
         for path, object_id in sorted(objects.items()):
@@ -314,8 +317,18 @@ def _candidate_files(candidate: str) -> tuple[tuple[bytes, bytes], ...]:
 
 @contextmanager
 def _publication_lock(root_fd: int) -> Iterator[None]:
+    flags = os.O_RDWR | os.O_NOFOLLOW
     try:
-        lock_fd = os.open(b".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=root_fd)
+        try:
+            lock_fd = os.open(b".lock", flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=root_fd)
+        except FileExistsError:
+            lock_fd = os.open(b".lock", flags, dir_fd=root_fd)
+        else:
+            try:
+                os.fchmod(lock_fd, 0o600)
+            except BaseException:
+                os.close(lock_fd)
+                raise
     except OSError as error:
         raise StoreError(f"git.path-unsafe: cannot open store publication lock: {error}") from error
     try:
@@ -355,6 +368,7 @@ def merge_git_stages(root: str, *, actor: str) -> MergeOutcome | Refused:
         with tempfile.TemporaryDirectory(
             prefix=".vouch-git-merge-", dir=repository
         ) as staging:
+            os.chmod(staging, 0o700, follow_symlinks=False)
             ours_root = os.path.join(staging, "ours")
             theirs_root = os.path.join(staging, "theirs")
             _materialize_store(repository, ours_root, ours)

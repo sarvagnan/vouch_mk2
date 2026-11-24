@@ -12,7 +12,7 @@ import stat
 import sys
 import tempfile
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import Enum
 
@@ -458,6 +458,12 @@ def _plan_file(
     )
 
 
+# Open a directory for walking with search permission only (O_SEARCH on macOS,
+# O_PATH on Linux), so an existing directory the user may traverse but not list
+# still works, as it did when the walk was path-based.
+_SEARCH_ONLY = getattr(os, "O_SEARCH", 0) or getattr(os, "O_PATH", 0) or os.O_RDONLY
+
+
 def _ensure_owned_directory(root: str, relative: str) -> tuple[str, ...]:
     """Create ``root/relative`` component by component, refusing to traverse or
     create through anything that is not a real directory INSIDE the root.
@@ -465,29 +471,48 @@ def _ensure_owned_directory(root: str, relative: str) -> tuple[str, ...]:
     ``os.makedirs`` follows symlinked components, so a repo shipping
     ``.github -> /elsewhere`` would make init write outside the project root
     while reporting an in-root write (Phase 8 review). Every component is
-    lstat'd: a symlink or non-directory is refused before any write."""
+    lstat'd: a symlink or non-directory is refused before any write. The walk
+    holds each verified directory open, so creating a component and setting its
+    mode both happen inside that directory, whatever happens to its ancestors."""
     current = root
     created: list[str] = []
+    flags = _SEARCH_ONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
-        for component in relative.split("/"):
-            current = os.path.join(current, component)
-            try:
-                info = os.lstat(current)
-            except FileNotFoundError:
+        try:
+            directory_fd = os.open(root, _SEARCH_ONLY | os.O_DIRECTORY)
+        except OSError as error:
+            raise InitError(f"{root}: cannot inspect: {error}") from error
+        try:
+            for component in relative.split("/"):
+                current = os.path.join(current, component)
                 try:
-                    os.mkdir(current, 0o755)
-                    created.append(current)
+                    info = os.stat(component, dir_fd=directory_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    try:
+                        os.mkdir(component, 0o755, dir_fd=directory_fd)
+                        created.append(current)
+                        os.chmod(
+                            component, 0o755, dir_fd=directory_fd, follow_symlinks=False
+                        )
+                    except OSError as error:
+                        raise InitError(
+                            f"{current}: cannot create directory: {error}"
+                        ) from error
                 except OSError as error:
-                    raise InitError(
-                        f"{current}: cannot create directory: {error}"
-                    ) from error
-                continue
-            except OSError as error:
-                raise InitError(f"{current}: cannot inspect: {error}") from error
-            if stat.S_ISLNK(info.st_mode):
-                raise InitError(f"{current}: symlinked path component refused")
-            if not stat.S_ISDIR(info.st_mode):
-                raise InitError(f"{current}: path component is not a directory")
+                    raise InitError(f"{current}: cannot inspect: {error}") from error
+                else:
+                    if stat.S_ISLNK(info.st_mode):
+                        raise InitError(f"{current}: symlinked path component refused")
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise InitError(f"{current}: path component is not a directory")
+                try:
+                    child_fd = os.open(component, flags, dir_fd=directory_fd)
+                except OSError as error:
+                    raise InitError(f"{current}: cannot inspect: {error}") from error
+                os.close(directory_fd)
+                directory_fd = child_fd
+        finally:
+            os.close(directory_fd)
     except BaseException:
         for path in reversed(created):
             try:
@@ -536,6 +561,8 @@ def _open_workflow_directory(root: str, *, create: bool = False) -> Iterator[int
                     os.mkdir(component, 0o755, dir_fd=directory_fd)
                 except FileExistsError:
                     pass  # A concurrent refresh may have created it.
+                else:
+                    os.chmod(component, 0o755, dir_fd=directory_fd, follow_symlinks=False)
                 child_fd = os.open(component, flags | os.O_NOFOLLOW, dir_fd=directory_fd)
             os.close(directory_fd)
             directory_fd = child_fd
@@ -809,6 +836,13 @@ def init_project(
     try:
         stage_root = tempfile.mkdtemp(prefix=".vouch-init-", dir=stage_parent)
     except OSError as error:
+        raise InitError(f"init staging failed: {error}") from error
+    try:
+        os.chmod(stage_root, 0o700, follow_symlinks=False)
+    except OSError as error:
+        # Still empty; rmdir needs no access to it, unlike the rmtree cleanup below.
+        with suppress(OSError):
+            os.rmdir(stage_root)
         raise InitError(f"init staging failed: {error}") from error
 
     staged_files: dict[str, str] = {}

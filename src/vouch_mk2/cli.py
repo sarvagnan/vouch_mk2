@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1413,15 +1414,44 @@ def _check_merge_state_format(store: Store) -> int:
     return state_format
 
 
+def _copy_check_merge_file(entry: os.DirEntry[str], destination: str) -> None:
+    if stat.S_ISFIFO(entry.stat().st_mode):
+        raise shutil.SpecialFileError(f"`{entry.path}` is a named pipe")
+    with open(entry.path, "rb") as source:
+        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        with os.fdopen(fd, "wb") as target:
+            os.fchmod(fd, 0o644)
+            shutil.copyfileobj(source, target)
+
+
 def _copy_check_merge_store(source: str, destination: str) -> None:
-    shutil.copytree(source, destination, symlinks=True, copy_function=shutil.copyfile)
-    # Permissions that protect the input must not prevent writes to the private copy.
-    os.chmod(destination, 0o700)
-    for directory, subdirs, _ in os.walk(destination):
-        for name in subdirs:
-            copied_dir = os.path.join(directory, name)
-            if not os.path.islink(copied_dir):
-                os.chmod(copied_dir, 0o700)
+    with os.scandir(source) as scan:
+        entries = list(scan)
+    os.mkdir(destination, 0o700)
+    os.chmod(destination, 0o700, follow_symlinks=False)
+    errors: list[tuple[str, str, str]] = []
+    for entry in entries:
+        target = os.path.join(destination, entry.name)
+        try:
+            if entry.is_symlink():
+                os.symlink(os.readlink(entry.path), target)
+                shutil.copystat(entry.path, target, follow_symlinks=False)
+            elif entry.is_dir():
+                _copy_check_merge_store(entry.path, target)
+            else:
+                _copy_check_merge_file(entry, target)
+        except shutil.Error as error:
+            errors.extend(error.args[0])
+        except OSError as error:
+            errors.append((entry.path, target, str(error)))
+    try:
+        info = os.stat(source)
+        # Writable opens use the objects directory's mtime to decide whether to sweep.
+        os.utime(destination, ns=(info.st_atime_ns, info.st_mtime_ns))
+    except OSError as error:
+        errors.append((source, destination, str(error)))
+    if errors:
+        raise shutil.Error(errors)
 
 
 def _present_check_merge(
@@ -1478,6 +1508,7 @@ def _check_merge_handler(namespace: _Arguments) -> int:
             ancestor = parent
 
         with tempfile.TemporaryDirectory(prefix="vouch-check-merge-", dir=temp_parent) as scratch:
+            os.chmod(scratch, 0o700, follow_symlinks=False)
             for side, state_format in older_inputs.items():
                 copy = os.path.join(scratch, side.lower())
                 _copy_check_merge_store(inputs[side], copy)
