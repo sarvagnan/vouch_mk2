@@ -458,6 +458,12 @@ def _plan_file(
     )
 
 
+# Open a directory for walking with search permission only (O_SEARCH on macOS,
+# O_PATH on Linux), so an existing directory the user may traverse but not list
+# still works, as it did when the walk was path-based.
+_SEARCH_ONLY = getattr(os, "O_SEARCH", 0) or getattr(os, "O_PATH", 0) or os.O_RDONLY
+
+
 def _ensure_owned_directory(root: str, relative: str) -> tuple[str, ...]:
     """Create ``root/relative`` component by component, refusing to traverse or
     create through anything that is not a real directory INSIDE the root.
@@ -470,10 +476,10 @@ def _ensure_owned_directory(root: str, relative: str) -> tuple[str, ...]:
     mode both happen inside that directory, whatever happens to its ancestors."""
     current = root
     created: list[str] = []
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    flags = _SEARCH_ONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
         try:
-            directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            directory_fd = os.open(root, _SEARCH_ONLY | os.O_DIRECTORY)
         except OSError as error:
             raise InitError(f"{root}: cannot inspect: {error}") from error
         try:
