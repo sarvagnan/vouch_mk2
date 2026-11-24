@@ -9,6 +9,8 @@ It cannot prove that the tests were frozen before the code was written.
 Browse the [documentation](docs/index.md), run the [quickstart](docs/quickstart.md), or look up
 a flag in the [command reference](docs/commands.md).
 
+Vouch is released under the MIT License (see `LICENSE`).
+
 ## How a unit works
 
 Decide what to build and give each piece of work a name and version, such as `greeter@v1`.
@@ -53,6 +55,8 @@ The lock is a reproducible zipapp. From the Vouch source checkout, build it with
 `uv run vouch-mk2 build-lock --output vouch.lock`. The [quickstart](docs/quickstart.md)
 walks through a scratch project from initialization to release.
 
+`python3 vouch.lock --version` prints the version and the lock's digest.
+
 ## Where mk2 came from
 
 mk2 rebuilds Vouch 0.6 based on two independent reviews of its development history. Changes
@@ -78,7 +82,7 @@ uv run python scripts/gen_commands_doc.py --check
 uv run python scripts/gen_lifecycle_doc.py --check
 uv run pyrefly check     # strict types (D-1)
 uv run lint-imports      # policy IR purity contract (D-1)
-uv run pytest            # 1691 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest            # 1698 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run python -c "from vouch_mk2.store import Store; store = Store.init('$RUNNER_TEMP/vouch-mk2-ci-check'); store.close()"
 uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
 uv run vouch-mk2 check --ci --json --root "$RUNNER_TEMP/vouch-mk2-ci-check" | python3 -m json.tool > /dev/null

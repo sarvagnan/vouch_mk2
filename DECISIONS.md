@@ -2303,3 +2303,29 @@ One unit, `workflow-refresh@1`.
 - **Out of scope.** Updating the lock and `config.json` together, and rollback (release-upgrade@1,
   `vouch_mk2-b6g.14.3`, which will reuse this refresh). The caller job in the project's own
   workflow, which the project owns.
+
+## D-56 — Release decisions: semantic versions from 0.1.0, GitHub Releases, JSON provenance, upgrade from a local lock (2026-11-24)
+
+**Status:** decided 2026-11-23 and 2026-11-24 by the user on the owner's recommendations
+(`vouch_mk2-b6g.14`, release@1, D-19 B4). Splits release@1 into three units:
+`release-identity@1` (`vouch_mk2-b6g.14.1`), `release-build@1` (`b6g.14.2`) and
+`release-upgrade@1` (`b6g.14.3`).
+
+- **Gate.** D-24 stands for distribution and upgrade: release-build@1 and release-upgrade@1 wait
+  for the pilot's (`vouch_mk2-bd4.4`) recorded go decision. The licence and the version may start
+  now, since they do not depend on the pilot.
+- **Version.** Semantic versioning. The first release is `0.1.0` (pre-1.0: formats and commands may
+  still change between minor versions). The CLI and the lock both report the version; the lock also
+  reports its own digest.
+- **Where releases live.** GitHub Releases on the public `sarvagnan/vouch_mk2` repository, tagged
+  `v<version>`, carrying `vouch.lock`, its digest and a provenance record.
+- **Provenance.** A plain JSON record (source commit, tag, lock digest, build command) that
+  `self-check` can verify; no forge attestation service.
+- **Upgrade.** From a lock file the operator has already downloaded; Vouch makes no network calls.
+  It moves the lock, `.vouch/config.json` and the generated `vouch.yml` together, reusing D-55's
+  refresh. Rollback is reverting the upgrade commit, documented and verified by `check`.
+- **Licence (release-identity@1).** MIT, as D-19 chose: a `LICENSE` at the repository root, the same
+  bytes at `src/vouch_mk2/LICENSE` so every lock (which binds every package file) carries the notice,
+  and `pyproject.toml` declaring `license = "MIT"` with the root file. `--version` prints
+  `vouch-mk2 <version>`, and from a lock `vouch-mk2 <version> lock <digest>`, where the digest is
+  the one `self-check` prints.

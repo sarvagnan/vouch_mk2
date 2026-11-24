@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_release_identity.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"16513b5a237f64941855b15402a65c6235e584ad43bf576ef58b68b6f2536614","parent":"GENESIS","recorded_at":"2026-11-24T01:28:33+00:00","sequence":1,"unit":{"name":"release-identity","version":"1"}}

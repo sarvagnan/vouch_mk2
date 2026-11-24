@@ -18,6 +18,7 @@ from contextlib import nullcontext
 from enum import Enum
 from typing import Callable, Protocol, cast, get_args, get_origin, get_type_hints
 
+from vouch_mk2 import __version__
 from vouch_mk2.checks import CheckReport, CheckResult, run_checks
 from vouch_mk2.bundle import (
     build_inventory,
@@ -157,8 +158,30 @@ class _Arguments(argparse.Namespace):
     evidence_unit: UnitRef | None
 
 
+class _VersionAction(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        try:
+            payload = running_lock_bytes()
+        except StoreError as error:
+            parser.exit(2, f"vouch-mk2: {error}\n")
+        version = f"vouch-mk2 {__version__}"
+        if payload is not None:
+            version += f" lock {lock_digest(payload)}"
+        print(version)
+        parser.exit()
+
+
 def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=program_name)
+    parser.add_argument(
+        "--version", action=_VersionAction, nargs=0, help="show version and lock identity"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="run structured snapshot checks")
     check.add_argument(
