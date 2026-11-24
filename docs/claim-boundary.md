@@ -236,6 +236,11 @@ that can write):
   whose parent is that revision, whose changes are all under `.vouch/` with regular-file modes,
   and whose base is still the live default-branch head.
 
+When a publisher validation fails, its `REFUSED publish:` line names the failed check.
+The generated planner's `vouch: anchoring … late:` line means the same evidence head was already
+pending at the first parent, which can happen within a single push of several commits. The line
+cannot establish whether an earlier push or anchoring run took place.
+
 The candidate bundle is transport, not evidence, and not a second trust root. No Vouch command
 imports it, and it cannot advance an anchor without passing the publisher's checks.
 

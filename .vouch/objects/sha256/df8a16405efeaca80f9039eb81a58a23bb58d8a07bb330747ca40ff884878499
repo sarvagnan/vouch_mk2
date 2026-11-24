@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"anchor-workflow@1","reason":"unit branch: anchored by CI on main after merge"},"prev":"48ca86835d27a87ade738460b8e68bda597fe6e6da6a60c9242e8c317e37423b","recorded_at":"2026-11-24T04:54:51+00:00","revision":1500,"run_id":""}

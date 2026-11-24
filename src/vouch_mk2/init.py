@@ -78,7 +78,7 @@ on:
         default: false
 
 concurrency:
-  group: vouch-anchor-${{ github.repository_id }}-${{ github.ref }}
+  group: vouch-anchor-${{ github.repository_id }}-${{ github.ref }}-${{ inputs.anchoring && 'anchoring' || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -215,6 +215,48 @@ jobs:
               if not head["anchor_run_id"] or head["anchored"] != head["head"]:
                   print(f"{head['unit_name']}@{head['unit_version']}")
           PY
+          if git show 'HEAD^1:.vouch/state.json' 2>/dev/null > "$RUNNER_TEMP/vouch-parent-state"; then
+            python - "$RUNNER_TEMP/vouch-parent-state" "$RUNNER_TEMP/vouch-evidence-heads" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          def previous_pending(path):
+              try:
+                  heads = json.loads(path.read_bytes())["evidence_heads"]
+                  if not isinstance(heads, list):
+                      return {}
+                  previous = {}
+                  for head in heads:
+                      fields = tuple(
+                          head[key]
+                          for key in ("unit_name", "unit_version", "head", "anchored", "anchor_run_id")
+                      )
+                      if not all(isinstance(value, str) for value in fields):
+                          return {}
+                      name, version, digest, anchored, run_id = fields
+                      label = f"{name}@{version}"
+                      if label in previous:
+                          return {}
+                      previous[label] = digest if not run_id or anchored != digest else None
+                  return previous
+              except (OSError, ValueError, KeyError, TypeError, RecursionError):
+                  return {}
+
+          previous = previous_pending(Path(sys.argv[1]))
+          if previous:
+              state = json.loads(Path(".vouch/state.json").read_text())
+              current = {
+                  f"{head['unit_name']}@{head['unit_version']}": head["head"]
+                  for head in state["evidence_heads"]
+              }
+              for label in Path(sys.argv[2]).read_text().splitlines():
+                  digest = current[label]
+                  if previous.get(label) == digest:
+                      print(f"vouch: anchoring {label} late: its head {digest[:16]} "
+                            "was already pending at the previous commit")
+          PY
+          fi
           while IFS= read -r label; do
             unit_name="${label%@*}"
             unit_version="${label##*@}"
@@ -270,9 +312,12 @@ jobs:
         run: |
           set -euo pipefail
           transport="$RUNNER_TEMP/vouch-candidate"
-          (cd "$transport" && sha256sum -c vouch-candidate.bundle.sha256) || exit 1
-          [[ "$PLANNED_BASE" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          (cd "$transport" && sha256sum -c vouch-candidate.bundle.sha256) ||
+            { echo 'REFUSED publish: the candidate bundle does not match its checksum' >&2; exit 1; }
+          [[ "$PLANNED_BASE" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo 'REFUSED publish: the planned base is not a full commit id' >&2; exit 1; }
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] ||
+            { echo 'REFUSED publish: the candidate is not a full commit id' >&2; exit 1; }
 
           publish="$RUNNER_TEMP/vouch-publish"
           git init -q "$publish"
@@ -280,12 +325,15 @@ jobs:
           git remote add origin "https://x-access-token:${VOUCH_PUSH_TOKEN}@github.com/${{ github.repository }}.git"
           git fetch -q --no-tags origin "$PLANNED_BASE"
           git fetch -q "$transport/vouch-candidate.bundle" refs/heads/vouch-candidate
-          test "$(git rev-parse FETCH_HEAD)" = "$CANDIDATE" || exit 1
+          test "$(git rev-parse FETCH_HEAD)" = "$CANDIDATE" ||
+            { echo 'REFUSED publish: the bundle does not hold the planned candidate' >&2; exit 1; }
 
           # The candidate has exactly one parent and it is the plan job's exact base.
           parents="$(git rev-list --parents -n 1 "$CANDIDATE")"
-          test "$(printf '%s\\n' "$parents" | awk '{print NF - 1}')" -eq 1 || exit 1
-          test "$(git rev-parse "$CANDIDATE^")" = "$PLANNED_BASE" || exit 1
+          test "$(printf '%s\\n' "$parents" | awk '{print NF - 1}')" -eq 1 ||
+            { echo 'REFUSED publish: the candidate does not have exactly one parent' >&2; exit 1; }
+          test "$(git rev-parse "$CANDIDATE^")" = "$PLANNED_BASE" ||
+            { echo "REFUSED publish: the candidate's parent is not the planned base" >&2; exit 1; }
 
           git diff-tree --no-commit-id --name-only -r -z "$PLANNED_BASE" "$CANDIDATE" > "$RUNNER_TEMP/vouch-paths"
           git ls-tree -r -z "$CANDIDATE" -- .vouch > "$RUNNER_TEMP/vouch-tree"
@@ -297,17 +345,18 @@ jobs:
 
           paths = tuple(item for item in Path(sys.argv[1]).read_bytes().split(b"\\0") if item)
           if not paths or any(not item.startswith(b".vouch/") for item in paths):
-              raise SystemExit("candidate changes a path outside .vouch/")
+              raise SystemExit("REFUSED publish: the candidate changes a path outside .vouch/")
           records = tuple(item for item in Path(sys.argv[2]).read_bytes().split(b"\\0") if item)
           for record in records:
               metadata, _path = record.split(b"\\t", 1)
               mode = metadata.split(b" ", 1)[0]
               if mode not in {b"100644", b"100755"}:
-                  raise SystemExit(f"candidate introduces non-regular mode {mode!r}")
+                  raise SystemExit("REFUSED publish: the candidate introduces a non-regular file under .vouch/")
           PY
 
           live="$(git ls-remote origin "refs/heads/$DEFAULT_BRANCH" | awk 'NR == 1 {print $1}')"
-          test "$live" = "$PLANNED_BASE" || exit 1
+          test "$live" = "$PLANNED_BASE" ||
+            { echo "REFUSED publish: $DEFAULT_BRANCH moved since this run planned its anchor; a later run will anchor it" >&2; exit 1; }
           git config core.hooksPath /dev/null
           git push origin "$CANDIDATE:refs/heads/$DEFAULT_BRANCH"
 """

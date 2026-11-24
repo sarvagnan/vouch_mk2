@@ -2329,3 +2329,32 @@ One unit, `workflow-refresh@1`.
   and `pyproject.toml` declaring `license = "MIT"` with the root file. `--version` prints
   `vouch-mk2 <version>`, and from a lock `vouch-mk2 <version> lock <digest>`, where the digest is
   the one `self-check` prints.
+
+## D-57 — Anchor publish refusals name their reason; only anchoring calls share a concurrency group, and a late anchor says so (2026-11-24)
+
+**Status:** decided 2026-11-24 by the user (`vouch_mk2-b6g.20`, `vouch_mk2-b6g.21`, both found by
+the GitHub adoption probe, D-24 note; answers: only anchoring serializes, by keying the
+workflow-level group on the run kind rather than moving it onto jobs, which would have meant
+rebinding five frozen packs; a cancelled anchoring call is signalled by the next anchoring run).
+One unit, `anchor-workflow@1`, so adopters refresh their generated workflow once (D-55).
+
+- **Refusal reasons.** Each validation in the anchor publish step (the bundle checksum, the shape of
+  the planned base and candidate, the bundle holding the candidate, a single parent, that parent
+  being the planned base, paths only under `.vouch/`, regular file modes, and the live branch head
+  still being the planned base) prints one stable line starting `REFUSED publish:` that names the
+  reason before it exits 1. Behaviour is otherwise unchanged. This applies to the generated
+  workflow and to mk2's own `ci.yml`, whose publisher is the same script.
+- **Concurrency.** The generated workflow keeps D-21's workflow-level group in the Vouch namespace,
+  but keys it on the run kind: anchoring calls share
+  `vouch-anchor-<repository id>-<ref>-anchoring`, and every other run (plain validation on push
+  and pull request) gets a group of its own run id, so it never waits for or cancels another run.
+  Anchoring calls still run one at a time; a newer pending anchoring call can still cancel an
+  older pending one, which stays fail-closed (D-21: remote-head comparison is the correctness
+  mechanism). mk2's own `ci.yml` has a single trigger per ref and keeps its group.
+- **Late anchor signal.** When the anchor plan step anchors a unit whose current evidence head was
+  already present, with the same value and not anchored, in `.vouch/state.json` at the commit's
+  first parent, it prints one stable line saying the head was already pending at the previous
+  commit. The usual cause is an earlier anchoring run that did not publish it (cancelled, refused
+  as stale, or skipped because the project's tests failed); a push of several commits can also
+  produce it, so the line states only what Vouch can see. A missing or unreadable parent store
+  prints nothing and never fails the step. It changes nothing else. Generated workflow only.

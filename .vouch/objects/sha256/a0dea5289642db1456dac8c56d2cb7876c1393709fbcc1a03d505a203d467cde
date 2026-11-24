@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_anchor_workflow.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"796c4ef250147cfde9586364a6beff0b76a14c7dab831def8d53c02f09a4fa66","parent":"GENESIS","recorded_at":"2026-11-24T04:54:50+00:00","sequence":1,"unit":{"name":"anchor-workflow","version":"1"}}
