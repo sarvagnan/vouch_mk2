@@ -127,6 +127,7 @@ def write_atomic_with_parents(
                     )
                 try:
                     os.mkdir(component, 0o755, dir_fd=directory_fd)
+                    os.chmod(component, 0o755, dir_fd=directory_fd, follow_symlinks=False)
                     child_fd = os.open(
                         component, nofollow_flags, dir_fd=directory_fd
                     )

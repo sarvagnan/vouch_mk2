@@ -82,7 +82,7 @@ uv run python scripts/gen_commands_doc.py --check
 uv run python scripts/gen_lifecycle_doc.py --check
 uv run pyrefly check     # strict types (D-1)
 uv run lint-imports      # policy IR purity contract (D-1)
-uv run pytest            # 1727 tests: matrices, property BFS, fault rig, formal, transports, migration
+uv run pytest            # 1744 tests: matrices, property BFS, fault rig, formal, transports, migration
 uv run python -c "from vouch_mk2.store import Store; store = Store.init('$RUNNER_TEMP/vouch-mk2-ci-check'); store.close()"
 uv run vouch-mk2 check --ci --root "$RUNNER_TEMP/vouch-mk2-ci-check"
 uv run vouch-mk2 check --ci --json --root "$RUNNER_TEMP/vouch-mk2-ci-check" | python3 -m json.tool > /dev/null
