@@ -2384,3 +2384,27 @@ refusing such a umask). Unit `owner-modes@1`.
   that already exists keeps its mode unless the command replaces it (an atomic rename publishes a
   new file with its intended mode, as before); Vouch does not repair a store written under such a
   umask. Commands the generated workflow later runs in CI are outside this rule.
+
+## D-59 — `merge-git-stages` refuses to replace a merge it already wrote (2026-11-24)
+
+**Status:** decided 2026-11-24 by the user (`vouch_mk2-d7k`, found in Astra's second
+rebind-generations@1 re-check; answer: refuse, rather than a silent no-op or a documented
+replacement). Unit `merge-rerun@1`.
+
+- **The defect.** `merge-git-stages` writes its merged store into the working tree and leaves the
+  index unmerged for the operator to review and stage. Run again before staging, it merges the same
+  index stages afresh and writes the new candidate over the working store without looking at it. A
+  divergent merge records the actor and time, so the second run replaces the first merged result
+  with a different merge record at the same revision, and anything the operator recorded on top of
+  the first result is lost with it. Nothing reaches Git, so no committed history is lost.
+- **The rule.** Before publishing, recovery reads the working store. If it opens as a valid store
+  whose history incorporates both stage heads (OURS and THEIRS), reachable from its head through
+  predecessors and merge parents, and whose head is neither of them, the working tree already holds
+  a merge of these stages, and recovery refuses with `git.already-recovered`, writing nothing. The message tells the operator to review and stage the
+  result, or to restore the conflict (`git checkout --conflict=merge -- <root>`) to merge again.
+- **Not changed.** A working store that does not open as a valid store (Git's conflict markers),
+  or whose head is one of the stage heads (the operator took one side), is replaced as before. A
+  fast-forward or no-op recovery leaves a stage head in place, so it can run again. The rule sees
+  only the store, not who wrote it: a working store that incorporates both heads by other means is
+  refused too. The check reads the working store under the publication lock, just before writing.
+  The index is never touched, and `merge` between two directories is outside the rule.

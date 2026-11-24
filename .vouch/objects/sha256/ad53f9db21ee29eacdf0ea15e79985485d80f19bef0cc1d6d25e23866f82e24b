@@ -1,0 +1,1 @@
+{"actor":"claude","event":"OpenInCiMarked","event_format":2,"pack_digest":"","payload":{"name":"merge-rerun@1","reason":"unit branch: anchored by CI on main after merge"},"prev":"6b598a0c564e1b243539e9469ba365b4f528f46980a977f82ed6c76b7145f3c6","recorded_at":"2026-11-24T19:21:48+00:00","revision":1526,"run_id":""}
