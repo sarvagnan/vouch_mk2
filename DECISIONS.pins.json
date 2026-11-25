@@ -303,8 +303,13 @@
     },
     {
       "key": "D-60",
-      "bytes": 1945,
-      "sha256": "245a3178d39a2f9dd066fb45c8b0515382b5b4283d113ceba6c332001c5c0204"
+      "bytes": 1946,
+      "sha256": "d23efcdce976a08d9c16d88d4f3392c23c76093edf99c9b1b43dfa94e0277af4"
+    },
+    {
+      "key": "D-61",
+      "bytes": 1459,
+      "sha256": "8f227bbeae5d41f0998030eebf270e3c60cf155853551fa6e3587592bf36c11c"
     }
   ]
 }

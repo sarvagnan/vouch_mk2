@@ -2432,3 +2432,22 @@ rebind, rather than closing the bead for want of a CI recurrence or watching lon
   instead of about 125 s. The spec file is unchanged.
 - **How.** The owner edits the test, rebinds the pack with `rebind-pack --reason` (D-14), and
   records a fresh GREEN (D-51); CI anchors it on `main` after the merge. The unit stays published.
+
+## D-61 — `check` prints the tier controls as one summary line; `--verbose` lists them (2026-11-25)
+
+**Status:** decided 2026-11-25 by the user (`vouch_mk2-k76`; answer: one summary line with counts
+and a `--verbose` flag that lists each control, rather than a summary that names the controls or
+one line per control without the residual line). Unit `tier-summary@1`.
+
+- **The defect.** At `standard` and `high`, `check`'s text output prints 26 `org.tier-controls`
+  lines for its 13 controls (at `lightweight`, 13 controls including 3 waived, rendered in 23
+  lines), two for each control not waived: its coverage and its residual. They follow the six other organizational rows on every run and bury the mechanical
+  rows above them; the user asked why most rows are NOT-CHECKED or NOT-APPLICABLE (2026-11-21).
+- **The rule.** In text output, `check` prints `org.tier-controls` as one line: the verdict, the
+  check id, the tier, the number of controls and the count of each coverage kind present, then
+  `(run check --verbose to list them)`. `check --verbose` prints the per-control lines as before.
+  `--json` is unchanged, with or without `--verbose`: its `org.tier-controls` detail still lists
+  every control. The row's verdict, every other row, the composed verdict and the exit status are
+  unchanged.
+- **Not changed.** `run_checks()` and the row's `detail`; the agent context's tier-control text;
+  what any control requires or how it is covered.

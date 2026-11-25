@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_tier_summary.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"be42c8f8cfa9482bfd139edbdf211fa5b7ccdf7c2e836973a845a99010aaa7ef","parent":"GENESIS","recorded_at":"2026-11-25T12:54:54+00:00","sequence":1,"unit":{"name":"tier-summary","version":"1"}}
