@@ -435,8 +435,7 @@ def test_store_checked_out_without_runtime_lock_file_opens_and_checks(
 def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[str]) -> None:
     # D-10: mk2's own committed store must be clean, or clean except for the one
     # pending CI anchor, and every organizational row must be visibly NOT_CHECKED.
-    # Tier controls deliberately render one row per control so none is hidden in
-    # a long detail.
+    # Tier controls appear as one summary row in default text output.
     root = Path(__file__).resolve().parents[1] / ".vouch"
     assert (root / "state.json").exists(), "the dogfood store must be committed"
     exit_code = main(["check", "--ci", "--root", str(root)])
@@ -444,8 +443,8 @@ def test_dogfood_store_is_committed_checkable_and_honest(capsys: CaptureFixture[
     _assert_clean_or_pending_ci_anchor(exit_code, out)
     org_rows = [line for line in out.splitlines() if line.startswith("NOT-CHECKED") and "org." in line]
     tier_rows = [line for line in org_rows if "org.tier-controls" in line]
-    assert len(org_rows) == 6 + len(tier_rows)
-    assert len(tier_rows) > 1
+    assert len(org_rows) == 7
+    assert len(tier_rows) == 1
 
 
 def _effects_run(*args: str) -> tuple[int, str]:

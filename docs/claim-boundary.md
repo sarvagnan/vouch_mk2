@@ -383,7 +383,7 @@ Some of the items below appear in reports as organizational `NOT_CHECKED` rows; 
 | Independence between people | Comparing identities is a format heuristic (the 0.6 commit-author lesson), never proof of distinct people. |
 | Causal red history | An anchored chain proves ordering and anchor timing, not why the RED happened. |
 | Protective-closure truthfulness | A closure record proves a trigger and roster snapshot were recorded, not that the trigger was real or the response appropriate. |
-| Residual tier controls | `org.tier-controls` lists active cells without full coverage, separates partial from unchecked residuals, and reports waived or no-obligation cells separately. |
+| Residual tier controls | `org.tier-controls` lists active cells without full coverage, separates partial from unchecked residuals, and reports waived or no-obligation cells separately. In `check`'s text output the row is one summary line with a count of each kind present; `check --verbose` and `check --json` list every control. |
 | Semantic test quality | Mutation testing and statistical oracles are ecosystem-specific and need judgment Vouch cannot supply. |
 | Model matches reality | The formal certificate covers the model under a finite abstraction, not the implementation's full behavior. |
 | Forge enforcement | Required checks and branch protection live in the forge. A pull request can change the workflow file. Hooks only warn. |
