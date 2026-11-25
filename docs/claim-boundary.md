@@ -336,6 +336,10 @@ branch names nor organizational intent: stages 2 and 3 are Git's mechanical OURS
 Success proves only what the semantic merge proves. It does not prove that the merge or rebase
 was authorized, that either side's intent was represented correctly, or that the operator reviewed
 and staged the result.
+Recovery refuses with `git.already-recovered` and writes nothing when the working store is a
+valid store whose history incorporates both stage heads and whose head is neither, so a second
+run cannot replace an earlier divergent recovery. It cannot tell who wrote that store. A
+fast-forward or no-op recovery leaves a stage head in place and can run again.
 
 ## Formal certificate
 

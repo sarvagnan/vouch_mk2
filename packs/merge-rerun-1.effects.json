@@ -1,0 +1,4 @@
+{"effects_format": 1, "effects": [
+  {"kind": "observation", "name": "working-store-recovery-state", "source": "the working-tree Vouch store merge-git-stages is about to replace, read under the publication lock", "capture": "whether it opens as a valid store whose verified history incorporates both index-stage heads (OURS and THEIRS), through predecessors and merge parents, and whose head is neither; captured only in the refusal"},
+  {"kind": "action", "name": "working-store-rerun-refusal", "system": "the working-tree Vouch store and the Git index", "outcome": "confirmed", "detail": "merge-git-stages refuses with git.already-recovered, writing nothing to the working store or the Git index, when the working store already holds a merge of the same index stages; otherwise it writes as before"}
+]}

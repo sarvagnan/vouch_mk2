@@ -373,6 +373,10 @@ Recovery refuses if any of the following hold:
 - An index entry's mode is not `100644`
 - A path escapes the root
 - The repository, root, or a publication ancestor is a symlink
+- The working store already incorporates both stages, as after an earlier divergent recovery
+  (`git.already-recovered`): review and stage it, or run `git checkout --conflict=merge -- .vouch`
+  to merge again, which discards any changes made since. A working store whose head is a stage head,
+  as after a fast-forward or no-op recovery, is replaced as before
 
 A semantic `merge.conflict` also leaves the working store and the index unchanged. For conflicting
 settings or exceptions, abort the Git merge or rebase, record the alignment, and retry the Git

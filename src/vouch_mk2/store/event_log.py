@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 import getpass
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
 from vouch_mk2.core import events
@@ -327,8 +327,17 @@ def _origin_claims(record: EventRecord, units: tuple[UnitRef, ...]) -> tuple[obj
     )
 
 
-def index_replay_provenance(history: ReplayHistory, records: _ReplayRecords) -> ReplayProvenance:
-    """Extend each prefix's coverage through exact predecessors and merge parents."""
+def index_replay_provenance(
+    history: ReplayHistory,
+    records: _ReplayRecords,
+    *,
+    read_missing: Callable[[str], EventRecord | None] | None = None,
+) -> ReplayProvenance:
+    """Extend each prefix's coverage through exact predecessors and merge parents.
+
+    If supplied, read_missing resolves reachable digests absent from records.
+    Its results extend ancestry without adding records to the physical chain.
+    """
     incorporated: dict[str, int] = {}
     carried: dict[str, int] = {}
     complete_heads: dict[str, int] = {}
@@ -342,11 +351,13 @@ def index_replay_provenance(history: ReplayHistory, records: _ReplayRecords) -> 
                 continue
             incorporated[ancestor] = position
             entry = records.get(ancestor)
-            if entry is None:
+            record = entry[0] if entry is not None else None
+            if record is None and read_missing is not None:
+                record = read_missing(ancestor)
+            if record is None:
                 # Subsequent prefixes still depend on this unavailable parent.
                 complete = False
                 continue
-            record, _ = entry
             if record.origin:
                 carried.setdefault(record.origin, position)
             for satisfied in record.satisfied:

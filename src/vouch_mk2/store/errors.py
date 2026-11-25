@@ -19,3 +19,7 @@ class IntegrityError(StoreError):
 
 class CasConflict(StoreError):
     """A commit's expected predecessor revision was not current."""
+
+
+class RootChanged(StoreError):
+    """The directory opened for a store differs from the expected root."""

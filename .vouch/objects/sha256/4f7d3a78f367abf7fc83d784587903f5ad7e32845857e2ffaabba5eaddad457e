@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -q -p no:cacheprovider tests/test_merge_rerun.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"5572cb816c3d9ce82023e5adb8f868db07d39d08ebdc1b71d25c311b50405b20","parent":"GENESIS","recorded_at":"2026-11-24T19:21:43+00:00","sequence":1,"unit":{"name":"merge-rerun","version":"1"}}

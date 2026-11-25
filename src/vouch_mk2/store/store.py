@@ -25,7 +25,7 @@ from vouch_mk2.store.codec import (
     encode_snapshot,
 )
 from vouch_mk2.store.digests import ArtifactKind, digest_of
-from vouch_mk2.store.errors import CasConflict, IntegrityError, StoreError
+from vouch_mk2.store.errors import CasConflict, IntegrityError, RootChanged, StoreError
 
 
 COMMIT_STEPS: tuple[str, ...] = (
@@ -160,6 +160,7 @@ class Store:
         *,
         read_only: bool = False,
         sweep_orphans: bool = True,
+        expected_root_fd: int | None = None,
     ) -> Store:
         """Open an existing store with one root directory capability.
 
@@ -169,10 +170,15 @@ class Store:
         current writer. ``read_only=True`` handles never create or acquire the
         lock, skip the sweep, and refuse every store mutation. A writable
         caller can defer housekeeping until after validation with
-        ``sweep_orphans=False``."""
+        ``sweep_orphans=False``. If supplied, ``expected_root_fd`` identifies
+        the directory the new handle must hold before it checks the layout."""
         store = cls(root, on_step=on_step, max_artifact_bytes=max_artifact_bytes)
         store._read_only = read_only
         try:
+            if expected_root_fd is not None and not os.path.samestat(
+                os.fstat(store._root_fd), os.fstat(expected_root_fd)
+            ):
+                raise RootChanged("root: store directory changed")
             store._check_layout(sweep_orphans=sweep_orphans)
         except BaseException:
             store.close()
