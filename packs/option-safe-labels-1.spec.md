@@ -56,6 +56,19 @@ a raw `Store.commit`, is not re-judged (D-33, D-35).
   Matching ignores runs of whitespace. `docs/quickstart.md` contains `A deviation id, release id,
   pack version or amendment version may not begin with` followed by `` `-` either``.
 
+- **R10 — History written before D-40 is not re-judged.** Added by an owner rebind
+  (`vouch_mk2-0jc`, from Astra's review). A store holds `u@1` frozen with pack version `-p`,
+  planted as pre-D-40 `decide()` produced it: the events `decide()` returns for a plain label, with
+  the `AcceptanceFrozen` label replaced and committed through `commit_events` (D-40 added only the
+  refusal, so the record is otherwise the same). A copy taken before the freeze is the prefix.
+  - `test_a_legacy_dash_led_pack_version_is_read_and_fast_forwarded` (`# guard:`): the store reads
+    back `-p`, `check` exits 0 with `check.event-log` passing, and `merge` into a copy of the prefix
+    fast-forwards with no replayed record and adopts `-p`, and `check` on the merged copy exits 0
+    with `check.event-log` passing (so the freeze record came with it).
+  - `test_a_divergent_merge_refuses_to_replay_a_legacy_dash_led_pack_version`: `merge` into a copy
+    of the prefix that specified `w@1` exits 2 with `merge.conflict` naming `AcceptanceFrozen` and
+    `identifier.leading-dash`, and leaves that store's files unchanged.
+
 ## Ground rules
 
 - Each refusal lives in `decide()`'s handling of the command that introduces the label. Every
