@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
 from enum import Enum
@@ -68,7 +69,7 @@ from vouch_mk2.init import (
     refresh_workflow,
 )
 from vouch_mk2.ir import mk2
-from vouch_mk2.ir.schema import Verdict
+from vouch_mk2.ir.schema import Coverage, RequirementLevel, Verdict
 from vouch_mk2.io import (
     read_regular_nofollow,
     write_atomic,
@@ -205,6 +206,11 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
         dest="json_output",
         action="store_true",
         help="emit one JSON report instead of text",
+    )
+    check.add_argument(
+        "--verbose",
+        action="store_true",
+        help="list every tier control (org.tier-controls) in text output",
     )
     check.add_argument(
         "--root",
@@ -486,8 +492,8 @@ def _parser(program_name: str = "vouch-mk2") -> argparse.ArgumentParser:
     return parser
 
 
-def _format_result(result: CheckResult) -> str:
-    details = result.detail.splitlines() or [""]
+def _format_result(result: CheckResult, *, detail: str | None = None) -> str:
+    details = (result.detail if detail is None else detail).splitlines() or [""]
     return "\n".join(
         f"{result.verdict.value.upper():<14} {result.check_id}"
         + (f"  {detail}" if detail else "")
@@ -495,14 +501,40 @@ def _format_result(result: CheckResult) -> str:
     )
 
 
-def _present_text(report: CheckReport) -> None:
+def _tier_control_summary(tier: Tier) -> str:
+    requirements = mk2.MK2.tier_requirements
+    coverage: Counter[Coverage] = Counter()
+    waived = 0
+    for requirement in requirements:
+        cell = requirement.cell(tier)
+        if cell.level is RequirementLevel.WAIVED:
+            waived += 1
+        else:
+            coverage[cell.coverage] += 1
+    counts = (
+        (coverage[Coverage.FULL], "fully checked"),
+        (coverage[Coverage.PARTIAL], "partially checked"),
+        (coverage[Coverage.NONE], "not checked"),
+        (waived, "waived"),
+    )
+    breakdown = ", ".join(f"{count} {label}" for count, label in counts if count)
+    return (
+        f"{tier.value}: {len(requirements)} controls — {breakdown} "
+        "(run check --verbose to list them)"
+    )
+
+
+def _present_text(report: CheckReport, *, tier: Tier, verbose: bool) -> None:
     print(f"revision: {report.revision}")
     print("mechanical")
     for result in report.mechanical:
         print(_format_result(result))
     print("organizational (never mechanically provable)")
     for result in report.organizational:
-        print(_format_result(result))
+        detail = None
+        if result.check_id == mk2.ORG_TIER_CONTROLS and not verbose:
+            detail = _tier_control_summary(tier)
+        print(_format_result(result, detail=detail))
     print(f"composed: {report.composed().value.upper()}")
 
 
@@ -2369,7 +2401,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if parsed.json_output:
         _present_json(report)
     else:
-        _present_text(report)
+        _present_text(report, tier=snapshot.tier, verbose=parsed.verbose)
     if report.composed() is Verdict.PASS:
         return 0
     if parsed.pending_anchor_ok and pending_anchor_is_only_unchecked(report):
