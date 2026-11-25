@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -p no:cacheprovider -rA tests/test_formal_marker.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"0ca5d20da3d7af16b7a18af75680887e0559d73a6e6d1fb7c65ebec1857e617d","parent":"GENESIS","recorded_at":"2026-11-25T16:59:20+00:00","sequence":1,"unit":{"name":"formal-marker","version":"1"}}
