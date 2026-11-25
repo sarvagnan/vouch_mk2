@@ -14,6 +14,8 @@ from __future__ import annotations
 import io
 import json
 import re
+import dataclasses
+import shutil
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -34,7 +36,9 @@ from vouch_mk2.core.model import (
     UnitRef,
     UnitStatus,
 )
+from vouch_mk2.core.events import AcceptanceFrozen
 from vouch_mk2.store import Store
+from vouch_mk2.store.event_log import commit_events
 
 ROOT = Path(__file__).resolve().parents[1]
 CODE = "identifier.leading-dash"
@@ -249,3 +253,83 @@ def test_quickstart_states_the_rule_for_all_four_labels() -> None:
         "A deviation id, release id, pack version or amendment version may not begin with `-` "
         "either" in text
     )
+
+
+# ---- R10: history written before D-40 is not re-judged (owner rebind, vouch_mk2-0jc) ----
+
+
+def _legacy_store(tmp_path: Path) -> tuple[Path, Path]:
+    """A store holding u@1 frozen as ``-p``, as pre-D-40 ``decide()`` wrote it, and its prefix."""
+    legacy = tmp_path / "legacy"
+    Store.init(str(legacy)).close()
+    code, output = _run("specify", "--root", str(legacy), "--name", "u", "--version", "1")
+    assert code == 0, output
+    prefix = tmp_path / "prefix"
+    shutil.copytree(legacy, prefix)
+    with Store.open(str(legacy)) as store:
+        with store.write_locked():
+            snapshot = store.read_snapshot()
+            decision = decide(snapshot, FreezeAcceptance("u", "p"))
+            assert isinstance(decision, Accepted), decision
+            events = tuple(
+                dataclasses.replace(event, pack_version="-p")
+                if isinstance(event, AcceptanceFrozen)
+                else event
+                for event in decision.events
+            )
+            assert [type(event) for event in events] == [AcceptanceFrozen]
+            commit_events(store, snapshot, events, actor="legacy", run_id="")
+    return legacy, prefix
+
+
+def _pack_versions(root: Path) -> dict[str, str]:
+    with Store.open(str(root), read_only=True) as store:
+        return {unit.name: unit.acceptance_pack_version for unit in store.read_snapshot().units}
+
+
+def _files(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != ".lock"
+    }
+
+
+def test_a_legacy_dash_led_pack_version_is_read_and_fast_forwarded(tmp_path: Path) -> None:
+    """R10. # guard: a stored dash-led label reads back, checks, and fast-forwards unchanged."""
+    legacy, prefix = _legacy_store(tmp_path)
+    assert _pack_versions(legacy) == {"u": "-p"}
+    code, output = _run("check", "--root", str(legacy))
+    assert code == 0, output
+    assert re.search(r"^PASS +check\.event-log\b", output, re.MULTILINE), output
+
+    target = tmp_path / "target"
+    shutil.copytree(prefix, target)
+    code, output = _run("merge", "--root", str(target), "--other", str(legacy), "--actor", "m")
+
+    assert code == 0, output
+    assert "fast-forward" in output and "replayed 0 source record(s)" in output, output
+    assert _pack_versions(target) == {"u": "-p"}
+    code, output = _run("check", "--root", str(target))
+    assert code == 0, output
+    assert re.search(r"^PASS +check\.event-log\b", output, re.MULTILINE), output
+
+
+def test_a_divergent_merge_refuses_to_replay_a_legacy_dash_led_pack_version(
+    tmp_path: Path,
+) -> None:
+    """R10: replay re-decides the freeze, so D-40 refuses it and the receiving store is unchanged."""
+    legacy, prefix = _legacy_store(tmp_path)
+    target = tmp_path / "target"
+    shutil.copytree(prefix, target)
+    code, output = _run("specify", "--root", str(target), "--name", "w", "--version", "1")
+    assert code == 0, output
+    before = _files(target)
+
+    code, output = _run("merge", "--root", str(target), "--other", str(legacy), "--actor", "m")
+
+    assert code == 2, output
+    assert "merge.conflict" in output and "AcceptanceFrozen" in output, output
+    assert CODE in output, output
+    assert _files(target) == before
+    assert _pack_versions(target) == {"u": "", "w": ""}
