@@ -2408,3 +2408,27 @@ replacement). Unit `merge-rerun@1`.
   only the store, not who wrote it: a working store that incorporates both heads by other means is
   refused too. The check reads the working store under the publication lock, just before writing.
   The index is never touched, and `merge` between two directories is outside the rule.
+
+## D-60 — ci-adoption-closure@1's forwarding test gets a wider timing window (2026-11-25)
+
+**Status:** decided 2026-11-25 by the user (`vouch_mk2-7vf`; answer: widen the window by an owner
+rebind, rather than closing the bead for want of a CI recurrence or watching longer).
+
+- **The defect.** `test_small_child_output_reaches_stderr_before_the_child_exits` (R5 of the
+  frozen ci-adoption-closure@1 pack) gives `record-evidence --json` 5 s, polling every 50 ms, to
+  forward a child's first line to stderr. The 5 s cover the whole interval from launching the lock
+  to the bytes appearing: starting the lock, opening the store, launching the child and forwarding.
+  That interval took about 0.8 s on an idle machine and about 2.5 s with the CPU three times
+  oversubscribed, and the test failed once in a full local run on 2026-11-13 while a lock build and
+  a dogfood check ran beside it. No CI run has failed on it.
+- **The rule.** Only the test's timing changes: the probe polls for up to 60 s and the child waits
+  up to 120 s for the release file, instead of 5 s and 20 s. R5 and every assertion stay as they
+  were. The child writes six bytes and then waits for a release file that the test writes only
+  after the probe ends, so a recorder that forwards only on a full buffer or at the child's exit
+  still shows nothing within the 60 s and fails. The handshake keeps the limit it had before: the
+  probe watches the recorder process, not the child, so a test stalled for longer than the child's
+  wait could let such a recorder write the bytes and exit before the probe looks; the longer child
+  wait makes that need a longer stall than before. A failing run now takes up to about 180 s
+  instead of about 125 s. The spec file is unchanged.
+- **How.** The owner edits the test, rebinds the pack with `rebind-pack --reason` (D-14), and
+  records a fresh GREEN (D-51); CI anchors it on `main` after the merge. The unit stays published.

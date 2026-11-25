@@ -172,7 +172,7 @@ def test_small_child_output_reaches_stderr_before_the_child_exits(tmp_path: Path
         "sys.stdout.write('SMALL\\n')\n"
         "sys.stdout.flush()\n"
         f"target = pathlib.Path({str(release)!r})\n"
-        "for _ in range(400):\n"
+        "for _ in range(2400):\n"
         "    if target.exists():\n"
         "        break\n"
         "    time.sleep(0.05)\n"
@@ -188,7 +188,7 @@ def test_small_child_output_reaches_stderr_before_the_child_exits(tmp_path: Path
         )
         try:
             seen = False
-            for _ in range(100):
+            for _ in range(1200):
                 if err_path.stat().st_size > 0:
                     seen = True
                     break
