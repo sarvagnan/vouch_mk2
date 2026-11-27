@@ -56,7 +56,10 @@ forbidden_modules = ["vouch_mk2.store"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-markers = ["slow: longer-running end-to-end acceptance probes"]
+markers = [
+    "slow: longer-running end-to-end acceptance probes",
+    "formal: tests that run the formal model",
+]
 
 [dependency-groups]
 dev = [
