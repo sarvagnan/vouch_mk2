@@ -12,6 +12,10 @@ import stat
 from vouch_mk2.store.errors import StoreError
 
 
+# Open directories for traversal even when the caller cannot list them.
+_SEARCH_ONLY = getattr(os, "O_SEARCH", 0) or getattr(os, "O_PATH", 0) or os.O_RDONLY
+
+
 def read_regular_nofollow(path: str, purpose: str) -> bytes | None:
     """Read an optional regular file without following its final symlink."""
     try:
@@ -103,17 +107,20 @@ def write_atomic_with_parents(
     if not filename:
         raise StoreError(f"{path}: {purpose} target has no filename")
     components = tuple(component for component in parent.split(os.sep) if component)
-    directory_flags = os.O_RDONLY | os.O_DIRECTORY
-    nofollow_flags = directory_flags | os.O_NOFOLLOW
+    # The final parent needs a readable descriptor for write_atomic_at's fsync.
+    root_access = _SEARCH_ONLY if components else os.O_RDONLY
     try:
-        directory_fd = os.open(os.sep, nofollow_flags)
+        directory_fd = os.open(os.sep, root_access | os.O_DIRECTORY | os.O_NOFOLLOW)
     except OSError as error:
         raise StoreError(f"{path}: cannot open filesystem root: {error}") from error
     apparent = os.sep
     symlinked_ancestor: str | None = None
     try:
-        for component in components:
+        for index, component in enumerate(components, start=1):
             apparent = os.path.join(apparent, component)
+            access = os.O_RDONLY if index == len(components) else _SEARCH_ONLY
+            directory_flags = access | os.O_DIRECTORY
+            nofollow_flags = directory_flags | os.O_NOFOLLOW
             try:
                 child_fd = os.open(
                     component, nofollow_flags, dir_fd=directory_fd

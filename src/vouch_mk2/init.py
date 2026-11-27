@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from vouch_mk2.core import AnchorMode, AnchorModeSet, EffectsRequired, Snapshot, Tier, TierSet
-from vouch_mk2.io import read_regular_nofollow, write_atomic, write_atomic_at
+from vouch_mk2.io import _SEARCH_ONLY, read_regular_nofollow, write_atomic, write_atomic_at
 from vouch_mk2.lock import lock_digest
 from vouch_mk2.store import Store, StoreError
 from vouch_mk2.store.event_log import ci_run_id, commit_events, default_actor
@@ -458,12 +458,6 @@ def _plan_file(
     )
 
 
-# Open a directory for walking with search permission only (O_SEARCH on macOS,
-# O_PATH on Linux), so an existing directory the user may traverse but not list
-# still works, as it did when the walk was path-based.
-_SEARCH_ONLY = getattr(os, "O_SEARCH", 0) or getattr(os, "O_PATH", 0) or os.O_RDONLY
-
-
 def _ensure_owned_directory(root: str, relative: str) -> tuple[str, ...]:
     """Create ``root/relative`` component by component, refusing to traverse or
     create through anything that is not a real directory INSIDE the root.
@@ -548,12 +542,15 @@ _WORKFLOW_DIRECTORY, _WORKFLOW_NAME = os.path.split(WORKFLOW_PATH)
 @contextmanager
 def _open_workflow_directory(root: str, *, create: bool = False) -> Iterator[int]:
     """Anchor operations in the project and refuse symlinks below it."""
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    directory_fd = os.open(root, flags)
+    components = _WORKFLOW_DIRECTORY.split("/")
+    directory_fd = os.open(root, _SEARCH_ONLY | os.O_DIRECTORY)
     try:
-        for component in _WORKFLOW_DIRECTORY.split("/"):
+        for index, component in enumerate(components, start=1):
+            # Refresh syncs the final directory after replacing the workflow.
+            access = os.O_RDONLY if create and index == len(components) else _SEARCH_ONLY
+            flags = access | os.O_DIRECTORY | os.O_NOFOLLOW
             try:
-                child_fd = os.open(component, flags | os.O_NOFOLLOW, dir_fd=directory_fd)
+                child_fd = os.open(component, flags, dir_fd=directory_fd)
             except FileNotFoundError:
                 if not create:
                     raise
@@ -563,7 +560,7 @@ def _open_workflow_directory(root: str, *, create: bool = False) -> Iterator[int
                     pass  # A concurrent refresh may have created it.
                 else:
                     os.chmod(component, 0o755, dir_fd=directory_fd, follow_symlinks=False)
-                child_fd = os.open(component, flags | os.O_NOFOLLOW, dir_fd=directory_fd)
+                child_fd = os.open(component, flags, dir_fd=directory_fd)
             os.close(directory_fd)
             directory_fd = child_fd
         yield directory_fd
