@@ -2451,3 +2451,31 @@ one line per control without the residual line). Unit `tier-summary@1`.
   unchanged.
 - **Not changed.** `run_checks()` and the row's `detail`; the agent context's tier-control text;
   what any control requires or how it is covered.
+
+## D-62 — Tests that run the formal model carry a `formal` marker, so the rest can run alone (2026-11-25)
+
+**Status:** decided 2026-11-25 by the user (`vouch_mk2-o5h`; answer: a `formal` pytest marker
+first, rather than a cheaper walkthrough, faster exploration, or closing the bead; and the pack may
+run pytest itself as a subprocess, a seam added for this unit). Unit `formal-marker@1`. The bead's
+other candidates stay open on it.
+
+- **The finding.** On 2026-11-25 the full suite ran 1,773 tests in 14.6 min locally (peak memory
+  1.1 GB). Two tests took 559 s of it: the lock walkthrough (391 s), which records a formal
+  certificate twice in subprocesses, and adoption-seam's test that `check` does not re-explore
+  (168 s), which records one in process. `run_formal()` is cached once per process, so whichever
+  test calls it first pays for the exploration. A probe found 23 tests that call it: twelve
+  directly or through a command, in process or in a subprocess, and eleven in
+  `tests/test_formal.py` through its module-scoped fixture.
+- **The rule.** Every test that runs the formal model carries the `formal` marker, so
+  `pytest -m "not formal"` runs everything else as a quicker local loop. In a test without the
+  marker, a call of `run_formal()` that would explore fails, naming the marker, by whatever route
+  it came. CI and the README gates still run every test; nothing that is verified changes. Tests
+  that explore a universe directly without `run_formal()` (such as the memory tests' history
+  universe) stay in the quick loop.
+- **Not changed.** What any test asserts, the frozen packs (the marker is applied by the test
+  configuration, so no frozen test file changes), the exploration, the certificate and CI.
+- **Limits.** A call answered from the per-process cache explores nothing and is not refused.
+  Running the unmarked tests on their own starts with a cold cache, so it catches every in-process
+  call the guard can see. A subprocess that explores, or a module-scoped fixture, is outside the
+  guard and is caught only by being on the marker list, which review checks by reading those
+  paths.
