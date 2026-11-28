@@ -2479,3 +2479,32 @@ other candidates stay open on it.
   call the guard can see. A subprocess that explores, or a module-scoped fixture, is outside the
   guard and is caught only by being on the marker list, which review checks by reading those
   paths.
+
+## D-63 — Directory walks pass through directories with search permission only (2026-11-28)
+
+**Status:** decided 2026-11-28 by the user (`vouch_mk2-867`, found while fixing Codex's review of
+owner-modes@1; answer: only the directories a walk passes through need search permission, and the
+directory a file is written into must still be readable, rather than also writing into a
+search-only directory without syncing it, or closing the bead). Unit `search-walks@1`.
+
+- **The defect.** Three commands walk to their target one directory descriptor at a time and open
+  every directory on the way for reading (`O_RDONLY`), which needs read permission, although the
+  walk only looks up names in it, which needs search permission. So an existing ancestor the user
+  may traverse but not list (mode `0111` or `0311`) makes them fail with `Permission denied`:
+  `refresh-workflow` (through the project root or `.github`), `check.workflow-current` (through
+  the project root, `.github` or `.github/workflows`), which then FAILs and tells the operator to
+  run `refresh-workflow`, and `build-lock --output` (through any ancestor of the lock's parent,
+  including one reached through a symlink). `init` already walks with search permission only
+  (owner-modes@1, D-58). Not a regression: these walks have always opened for reading.
+- **The rule.** A directory the walk only passes through, to reach a deeper directory or a file it
+  reads, is opened with search permission only (`O_SEARCH` where the platform has it, else
+  `O_PATH`, else reading), as `init` does. The directory a file is written into (`.github/workflows`
+  for `refresh-workflow`, the lock's parent for `build-lock`) is still opened for reading, because
+  the atomic write syncs that directory after the rename, and the sync needs a readable descriptor;
+  a target directory without read permission still fails as before. `check.workflow-current` only
+  reads, so none of its directories needs read permission; the workflow file itself still does.
+- **Not changed.** What the commands write, the modes they set, their refusals of symlinked or
+  non-directory components and of creating directories through a symlinked ancestor, and the
+  failure for a directory without search permission or a target directory without read
+  permission. A directory the walk creates is created as before; creating one still needs write
+  and search permission on its parent.

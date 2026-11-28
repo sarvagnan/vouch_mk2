@@ -1,0 +1,1 @@
+{"command_line":"uv run pytest -p no:cacheprovider -rA tests/test_search_walks.py","evidence_format":2,"kind":"red","outcome":"tests-failed","pack_digest":"df5a34e6070c3ecd29dd4d1d2480b2f8b4d478da2c06d189923aef82a5a7ad1f","parent":"GENESIS","recorded_at":"2026-11-27T19:43:17+00:00","sequence":1,"unit":{"name":"search-walks","version":"1"}}
